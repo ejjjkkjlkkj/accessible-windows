@@ -13,6 +13,9 @@ version = "0.1.0"
 [[package]]
 name = "aw-app-compat"
 version = "0.1.0"
+dependencies = [
+ "aw-runtime-sources",
+]
 
 [[package]]
 name = "aw-bootstate"
