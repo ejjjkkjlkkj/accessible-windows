@@ -97,25 +97,28 @@ pub struct Mcfg<'a> {
 
 impl<'a> Mcfg<'a> {
     pub fn allocations(self) -> McfgAllocations<'a> {
+        let (allocations, remainder) =
+            self.table[MCFG_HEADER_LEN..].as_chunks::<MCFG_ALLOCATION_LEN>();
+        debug_assert!(remainder.is_empty());
         McfgAllocations {
-            chunks: self.table[MCFG_HEADER_LEN..].chunks_exact(MCFG_ALLOCATION_LEN),
+            allocations: allocations.iter(),
         }
     }
 }
 
 pub struct McfgAllocations<'a> {
-    chunks: core::slice::ChunksExact<'a, u8>,
+    allocations: core::slice::Iter<'a, [u8; MCFG_ALLOCATION_LEN]>,
 }
 
 impl Iterator for McfgAllocations<'_> {
     type Item = McfgAllocation;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.chunks.next().map(parse_mcfg_allocation)
+        self.allocations.next().map(|entry| parse_mcfg_allocation(entry))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.chunks.size_hint()
+        self.allocations.size_hint()
     }
 }
 
@@ -212,13 +215,17 @@ pub fn validate_mcfg(bytes: &[u8]) -> Result<Mcfg<'_>, McfgError> {
         return Err(McfgError::InvalidSignature);
     }
     if header.length < MCFG_HEADER_LEN
-        || (header.length - MCFG_HEADER_LEN) % MCFG_ALLOCATION_LEN != 0
+        || !(header.length - MCFG_HEADER_LEN).is_multiple_of(MCFG_ALLOCATION_LEN)
     {
         return Err(McfgError::InvalidAllocationLength);
     }
 
     let table = &bytes[..header.length];
-    for chunk in table[MCFG_HEADER_LEN..].chunks_exact(MCFG_ALLOCATION_LEN) {
+    let (allocations, remainder) = table[MCFG_HEADER_LEN..].as_chunks::<MCFG_ALLOCATION_LEN>();
+    if !remainder.is_empty() {
+        return Err(McfgError::InvalidAllocationLength);
+    }
+    for chunk in allocations {
         let allocation = parse_mcfg_allocation(chunk);
         if allocation.start_bus > allocation.end_bus {
             return Err(McfgError::InvalidBusRange);
