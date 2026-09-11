@@ -11,6 +11,10 @@ name = "aw-acpi"
 version = "0.1.0"
 
 [[package]]
+name = "aw-generation"
+version = "0.1.0"
+
+[[package]]
 name = "aw-kernel-contract"
 version = "0.1.0"
 
