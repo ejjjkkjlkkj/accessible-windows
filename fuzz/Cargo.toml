@@ -9,11 +9,19 @@ cargo-fuzz = true
 
 [dependencies]
 aw-acpi = { path = "../crates/aw-acpi" }
+aw-fs-core = { path = "../crates/aw-fs-core" }
 libfuzzer-sys = "0.4"
 
 [[bin]]
 name = "rsdp"
 path = "fuzz_targets/rsdp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "awfs_checkpoint"
+path = "fuzz_targets/awfs_checkpoint.rs"
 test = false
 doc = false
 bench = false
