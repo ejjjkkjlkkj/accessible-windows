@@ -2,8 +2,10 @@
 #![forbid(unsafe_code)]
 
 pub const KERNEL_HANDOFF_MAGIC: u64 = 0x4157_4b48_4f46_4631;
-pub const KERNEL_HANDOFF_ABI_VERSION: u32 = 1;
+pub const KERNEL_HANDOFF_ABI_VERSION: u32 = 2;
 pub const HANDOFF_FLAG_FRAMEBUFFER_PRESENT: u64 = 1 << 0;
+pub const HANDOFF_FLAG_PCIE_ECAM_PRESENT: u64 = 1 << 1;
+pub const MAX_PCIE_ECAM_REGIONS: usize = 4;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,6 +49,34 @@ impl FramebufferHandoff {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PciEcamHandoff {
+    pub base_address: u64,
+    pub segment_group: u16,
+    pub start_bus: u8,
+    pub end_bus: u8,
+    pub reserved: u32,
+}
+
+impl PciEcamHandoff {
+    pub const NONE: Self = Self {
+        base_address: 0,
+        segment_group: 0,
+        start_bus: 0,
+        end_bus: 0,
+        reserved: 0,
+    };
+
+    #[must_use]
+    pub const fn is_valid(self) -> bool {
+        self.base_address != 0
+            && self.base_address & 0x000f_ffff == 0
+            && self.start_bus <= self.end_bus
+            && self.reserved == 0
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct KernelHandoff {
     pub magic: u64,
     pub abi_version: u32,
@@ -55,6 +85,9 @@ pub struct KernelHandoff {
     pub acpi_rsdp: u64,
     pub memory_map_entries: u64,
     pub framebuffer: FramebufferHandoff,
+    pub pcie_ecam_count: u32,
+    pub reserved: u32,
+    pub pcie_ecam: [PciEcamHandoff; MAX_PCIE_ECAM_REGIONS],
 }
 
 impl KernelHandoff {
@@ -63,26 +96,33 @@ impl KernelHandoff {
         acpi_rsdp: u64,
         memory_map_entries: u64,
         framebuffer: Option<FramebufferHandoff>,
+        pcie_ecam: [PciEcamHandoff; MAX_PCIE_ECAM_REGIONS],
+        pcie_ecam_count: u32,
     ) -> Self {
-        match framebuffer {
-            Some(framebuffer) => Self {
-                magic: KERNEL_HANDOFF_MAGIC,
-                abi_version: KERNEL_HANDOFF_ABI_VERSION,
-                struct_size: core::mem::size_of::<Self>() as u32,
-                flags: HANDOFF_FLAG_FRAMEBUFFER_PRESENT,
-                acpi_rsdp,
-                memory_map_entries,
-                framebuffer,
+        let framebuffer_present = framebuffer.is_some();
+        let ecam_present = pcie_ecam_count != 0;
+        let mut flags = 0;
+        if framebuffer_present {
+            flags |= HANDOFF_FLAG_FRAMEBUFFER_PRESENT;
+        }
+        if ecam_present {
+            flags |= HANDOFF_FLAG_PCIE_ECAM_PRESENT;
+        }
+
+        Self {
+            magic: KERNEL_HANDOFF_MAGIC,
+            abi_version: KERNEL_HANDOFF_ABI_VERSION,
+            struct_size: core::mem::size_of::<Self>() as u32,
+            flags,
+            acpi_rsdp,
+            memory_map_entries,
+            framebuffer: match framebuffer {
+                Some(framebuffer) => framebuffer,
+                None => FramebufferHandoff::NONE,
             },
-            None => Self {
-                magic: KERNEL_HANDOFF_MAGIC,
-                abi_version: KERNEL_HANDOFF_ABI_VERSION,
-                struct_size: core::mem::size_of::<Self>() as u32,
-                flags: 0,
-                acpi_rsdp,
-                memory_map_entries,
-                framebuffer: FramebufferHandoff::NONE,
-            },
+            pcie_ecam_count,
+            reserved: 0,
+            pcie_ecam,
         }
     }
 
@@ -95,6 +135,9 @@ impl KernelHandoff {
         }
         if self.struct_size < core::mem::size_of::<Self>() as u32 {
             return Err(HandoffError::InvalidStructSize);
+        }
+        if self.reserved != 0 {
+            return Err(HandoffError::InvalidReservedField);
         }
         if self.acpi_rsdp == 0 {
             return Err(HandoffError::MissingAcpiRsdp);
@@ -111,6 +154,28 @@ impl KernelHandoff {
             return Err(HandoffError::UnexpectedFramebuffer);
         }
 
+        let ecam_present = self.flags & HANDOFF_FLAG_PCIE_ECAM_PRESENT != 0;
+        let ecam_count = self.pcie_ecam_count as usize;
+        if ecam_count > MAX_PCIE_ECAM_REGIONS {
+            return Err(HandoffError::TooManyPcieEcamRegions);
+        }
+        if ecam_present != (ecam_count != 0) {
+            return Err(HandoffError::InconsistentPcieEcamFlag);
+        }
+
+        let mut index = 0;
+        while index < MAX_PCIE_ECAM_REGIONS {
+            let region = self.pcie_ecam[index];
+            if index < ecam_count {
+                if !region.is_valid() {
+                    return Err(HandoffError::InvalidPcieEcamRegion);
+                }
+            } else if region != PciEcamHandoff::NONE {
+                return Err(HandoffError::UnexpectedPcieEcamRegion);
+            }
+            index += 1;
+        }
+
         Ok(())
     }
 }
@@ -125,6 +190,11 @@ pub enum HandoffError {
     EmptyMemoryMap = 5,
     InvalidFramebuffer = 6,
     UnexpectedFramebuffer = 7,
+    InvalidReservedField = 8,
+    TooManyPcieEcamRegions = 9,
+    InconsistentPcieEcamFlag = 10,
+    InvalidPcieEcamRegion = 11,
+    UnexpectedPcieEcamRegion = 12,
 }
 
 pub fn enter(handoff: &KernelHandoff) -> Result<(), HandoffError> {
@@ -144,28 +214,45 @@ mod tests {
         pixel_format: HandoffPixelFormat::Bgr,
     };
 
-    #[test]
-    fn accepts_valid_handoff() {
-        let handoff = KernelHandoff::new(0xf000_0000, 127, Some(VALID_FRAMEBUFFER));
-        assert_eq!(enter(&handoff), Ok(()));
+    const VALID_ECAM: PciEcamHandoff = PciEcamHandoff {
+        base_address: 0xe000_0000,
+        segment_group: 0,
+        start_bus: 0,
+        end_bus: 0xff,
+        reserved: 0,
+    };
+
+    const fn empty_ecam() -> [PciEcamHandoff; MAX_PCIE_ECAM_REGIONS] {
+        [PciEcamHandoff::NONE; MAX_PCIE_ECAM_REGIONS]
+    }
+
+    fn valid_handoff() -> KernelHandoff {
+        let mut ecam = empty_ecam();
+        ecam[0] = VALID_ECAM;
+        KernelHandoff::new(0xf000_0000, 127, Some(VALID_FRAMEBUFFER), ecam, 1)
     }
 
     #[test]
-    fn accepts_handoff_without_framebuffer() {
-        let handoff = KernelHandoff::new(0xf000_0000, 127, None);
+    fn accepts_valid_handoff() {
+        assert_eq!(enter(&valid_handoff()), Ok(()));
+    }
+
+    #[test]
+    fn accepts_handoff_without_optional_devices() {
+        let handoff = KernelHandoff::new(0xf000_0000, 127, None, empty_ecam(), 0);
         assert_eq!(enter(&handoff), Ok(()));
     }
 
     #[test]
     fn rejects_wrong_magic() {
-        let mut handoff = KernelHandoff::new(0xf000_0000, 127, None);
+        let mut handoff = valid_handoff();
         handoff.magic ^= 1;
         assert_eq!(enter(&handoff), Err(HandoffError::InvalidMagic));
     }
 
     #[test]
     fn rejects_empty_memory_map() {
-        let handoff = KernelHandoff::new(0xf000_0000, 0, None);
+        let handoff = KernelHandoff::new(0xf000_0000, 0, None, empty_ecam(), 0);
         assert_eq!(enter(&handoff), Err(HandoffError::EmptyMemoryMap));
     }
 
@@ -173,7 +260,33 @@ mod tests {
     fn rejects_invalid_framebuffer() {
         let mut framebuffer = VALID_FRAMEBUFFER;
         framebuffer.stride_pixels = framebuffer.width - 1;
-        let handoff = KernelHandoff::new(0xf000_0000, 127, Some(framebuffer));
+        let handoff = KernelHandoff::new(
+            0xf000_0000,
+            127,
+            Some(framebuffer),
+            empty_ecam(),
+            0,
+        );
         assert_eq!(enter(&handoff), Err(HandoffError::InvalidFramebuffer));
+    }
+
+    #[test]
+    fn rejects_inconsistent_ecam_flag() {
+        let mut handoff = valid_handoff();
+        handoff.flags &= !HANDOFF_FLAG_PCIE_ECAM_PRESENT;
+        assert_eq!(
+            enter(&handoff),
+            Err(HandoffError::InconsistentPcieEcamFlag)
+        );
+    }
+
+    #[test]
+    fn rejects_nonzero_unused_ecam_slot() {
+        let mut handoff = valid_handoff();
+        handoff.pcie_ecam[1] = VALID_ECAM;
+        assert_eq!(
+            enter(&handoff),
+            Err(HandoffError::UnexpectedPcieEcamRegion)
+        );
     }
 }
