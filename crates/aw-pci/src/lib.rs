@@ -176,12 +176,7 @@ mod tests {
             Some(0x8000_0000 | (2 << 16) | (5 << 11) | (3 << 8) | 0x08)
         );
         assert_eq!(address.mechanism1_address(0x09), None);
-        assert_eq!(
-            PciAddress::new(1, 0, 0, 0)
-                .unwrap()
-                .mechanism1_address(0),
-            None
-        );
+        assert_eq!(PciAddress::new(1, 0, 0, 0).unwrap().mechanism1_address(0), None);
     }
 
     #[test]
