@@ -69,11 +69,18 @@ jobs:
           mkdir -p esp/EFI/BOOT
           cp boot/uefi/target/x86_64-unknown-uefi/release/aw-uefi-boot.efi esp/EFI/BOOT/BOOTX64.EFI
 
-          OVMF_CODE="$(find /usr/share/OVMF -maxdepth 1 -type f -name 'OVMF_CODE*.fd' | sort | head -n 1)"
-          if [ -z "$OVMF_CODE" ]; then
-            echo "No OVMF firmware found" >&2
+          OVMF_CODE="/usr/share/OVMF/OVMF_CODE_4M.fd"
+          OVMF_VARS="/usr/share/OVMF/OVMF_VARS_4M.fd"
+          if [ ! -f "$OVMF_CODE" ] || [ ! -f "$OVMF_VARS" ]; then
+            OVMF_CODE="/usr/share/OVMF/OVMF_CODE.fd"
+            OVMF_VARS="/usr/share/OVMF/OVMF_VARS.fd"
+          fi
+          if [ ! -f "$OVMF_CODE" ] || [ ! -f "$OVMF_VARS" ]; then
+            echo "No usable OVMF CODE/VARS pair found" >&2
+            find /usr/share/OVMF -maxdepth 1 -type f -print || true
             exit 1
           fi
+          cp "$OVMF_VARS" ovmf-vars.fd
 
           set +e
           timeout 20s qemu-system-x86_64 \
@@ -84,7 +91,8 @@ jobs:
             -monitor none \
             -no-reboot \
             -debugcon file:uefi-debug.log \
-            -bios "$OVMF_CODE" \
+            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,file=ovmf-vars.fd \
             -drive format=raw,file=fat:rw:esp
           QEMU_STATUS=$?
           set -e
