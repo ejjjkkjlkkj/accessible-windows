@@ -147,6 +147,70 @@ impl PciDeviceIdentity {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PciBar {
+    Io {
+        base_address: u32,
+    },
+    Memory32 {
+        base_address: u32,
+        prefetchable: bool,
+    },
+    Memory64 {
+        base_address: u64,
+        prefetchable: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PciBarError {
+    MissingUpperDword,
+    UnsupportedMemoryType,
+}
+
+impl PciBar {
+    pub const fn decode(low: u32, high: Option<u32>) -> Result<Option<Self>, PciBarError> {
+        if low == 0 {
+            return Ok(None);
+        }
+
+        if low & 1 != 0 {
+            return Ok(Some(Self::Io {
+                base_address: low & 0xffff_fffc,
+            }));
+        }
+
+        let prefetchable = low & 0x08 != 0;
+        match (low >> 1) & 0x03 {
+            0x00 => Ok(Some(Self::Memory32 {
+                base_address: low & 0xffff_fff0,
+                prefetchable,
+            })),
+            0x02 => {
+                let Some(high) = high else {
+                    return Err(PciBarError::MissingUpperDword);
+                };
+                Ok(Some(Self::Memory64 {
+                    base_address: (u64::from(high) << 32) | u64::from(low & 0xffff_fff0),
+                    prefetchable,
+                }))
+            }
+            _ => Err(PciBarError::UnsupportedMemoryType),
+        }
+    }
+
+    pub const fn is_mmio(self) -> bool {
+        matches!(self, Self::Memory32 { .. } | Self::Memory64 { .. })
+    }
+
+    pub const fn base_address(self) -> u64 {
+        match self {
+            Self::Io { base_address } | Self::Memory32 { base_address, .. } => base_address as u64,
+            Self::Memory64 { base_address, .. } => base_address,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,6 +265,43 @@ mod tests {
         assert!(PciClassCode::new(0x01, 0x06, 0x01).is_ahci());
         assert!(PciClassCode::new(0x0c, 0x03, 0x30).is_xhci());
         assert!(PciClassCode::new(0x04, 0x03, 0x00).is_hda());
+    }
+
+    #[test]
+    fn decodes_standard_pci_bars() {
+        assert_eq!(
+            PciBar::decode(0x0000_c001, None),
+            Ok(Some(PciBar::Io {
+                base_address: 0x0000_c000
+            }))
+        );
+        assert_eq!(
+            PciBar::decode(0xfebf_0008, None),
+            Ok(Some(PciBar::Memory32 {
+                base_address: 0xfebf_0000,
+                prefetchable: true,
+            }))
+        );
+        assert_eq!(
+            PciBar::decode(0x3456_7004, Some(0x0000_0012)),
+            Ok(Some(PciBar::Memory64 {
+                base_address: 0x0000_0012_3456_7000,
+                prefetchable: false,
+            }))
+        );
+        assert_eq!(PciBar::decode(0, None), Ok(None));
+    }
+
+    #[test]
+    fn rejects_incomplete_or_unsupported_memory_bars() {
+        assert_eq!(
+            PciBar::decode(0x0000_1004, None),
+            Err(PciBarError::MissingUpperDword)
+        );
+        assert_eq!(
+            PciBar::decode(0x0000_1002, None),
+            Err(PciBarError::UnsupportedMemoryType)
+        );
     }
 
     #[test]
