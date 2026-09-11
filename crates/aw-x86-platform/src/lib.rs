@@ -84,6 +84,29 @@ impl CpuSignature {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CpuAddressWidths {
+    pub physical: u8,
+    pub linear: u8,
+}
+
+impl CpuAddressWidths {
+    pub const fn from_extended_leaf8(leaf: Option<CpuidRegisters>) -> Self {
+        let registers = match leaf {
+            Some(value) => value,
+            None => CpuidRegisters::ZERO,
+        };
+        Self {
+            physical: (registers.eax & 0xff) as u8,
+            linear: ((registers.eax >> 8) & 0xff) as u8,
+        }
+    }
+
+    pub const fn meets_four_level_paging_baseline(self) -> bool {
+        self.physical >= 36 && self.physical <= 52 && self.linear >= 48
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CpuFeatures {
     pub tsc: bool,
     pub apic: bool,
@@ -93,6 +116,7 @@ pub struct CpuFeatures {
     pub x2apic: bool,
     pub hypervisor_present: bool,
     pub long_mode: bool,
+    pub nx: bool,
     pub rdtscp: bool,
     pub invariant_tsc: bool,
     pub smep: bool,
@@ -128,6 +152,7 @@ impl CpuFeatures {
             x2apic: leaf1.ecx & (1 << 21) != 0,
             hypervisor_present: leaf1.ecx & (1 << 31) != 0,
             long_mode: ext1.edx & (1 << 29) != 0,
+            nx: ext1.edx & (1 << 20) != 0,
             rdtscp: ext1.edx & (1 << 27) != 0,
             invariant_tsc: ext7.edx & (1 << 8) != 0,
             smep: leaf7.ebx & (1 << 7) != 0,
@@ -138,6 +163,10 @@ impl CpuFeatures {
     pub const fn meets_boot_baseline(self) -> bool {
         self.apic && self.sse2 && self.long_mode
     }
+
+    pub const fn meets_paging_security_baseline(self) -> bool {
+        self.long_mode && self.nx
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -146,12 +175,18 @@ pub struct CpuIdentity {
     pub signature: CpuSignature,
     pub max_basic_leaf: u32,
     pub max_extended_leaf: u32,
+    pub address_widths: CpuAddressWidths,
     pub features: CpuFeatures,
 }
 
 impl CpuIdentity {
     pub const fn is_supported_vendor(self) -> bool {
         matches!(self.vendor, CpuVendor::Amd | CpuVendor::Intel)
+    }
+
+    pub const fn meets_paging_baseline(self) -> bool {
+        self.features.meets_paging_security_baseline()
+            && self.address_widths.meets_four_level_paging_baseline()
     }
 }
 
@@ -199,6 +234,20 @@ mod tests {
     }
 
     #[test]
+    fn decodes_x86_64_address_widths() {
+        let widths = CpuAddressWidths::from_extended_leaf8(Some(CpuidRegisters {
+            eax: 48 | (48 << 8),
+            ebx: 0,
+            ecx: 0,
+            edx: 0,
+        }));
+        assert_eq!(widths.physical, 48);
+        assert_eq!(widths.linear, 48);
+        assert!(widths.meets_four_level_paging_baseline());
+        assert!(!CpuAddressWidths::default().meets_four_level_paging_baseline());
+    }
+
+    #[test]
     fn detects_generic_boot_features() {
         let features = CpuFeatures::from_leaves(
             CpuidRegisters {
@@ -217,7 +266,7 @@ mod tests {
                 eax: 0,
                 ebx: 0,
                 ecx: 0,
-                edx: (1 << 27) | (1 << 29),
+                edx: (1 << 20) | (1 << 27) | (1 << 29),
             }),
             Some(CpuidRegisters {
                 eax: 0,
@@ -228,6 +277,8 @@ mod tests {
         );
 
         assert!(features.meets_boot_baseline());
+        assert!(features.meets_paging_security_baseline());
+        assert!(features.nx);
         assert!(features.x2apic);
         assert!(features.xsave);
         assert!(features.avx);
@@ -235,5 +286,37 @@ mod tests {
         assert!(features.smap);
         assert!(features.rdtscp);
         assert!(features.invariant_tsc);
+    }
+
+    #[test]
+    fn paging_baseline_requires_nx_and_sufficient_address_widths() {
+        let identity = CpuIdentity {
+            vendor: CpuVendor::Intel,
+            signature: CpuSignature {
+                family: 6,
+                model: 0,
+                stepping: 0,
+            },
+            max_basic_leaf: 7,
+            max_extended_leaf: 0x8000_0008,
+            address_widths: CpuAddressWidths {
+                physical: 48,
+                linear: 48,
+            },
+            features: CpuFeatures {
+                long_mode: true,
+                nx: true,
+                ..CpuFeatures::default()
+            },
+        };
+        assert!(identity.meets_paging_baseline());
+
+        let mut without_nx = identity;
+        without_nx.features.nx = false;
+        assert!(!without_nx.meets_paging_baseline());
+
+        let mut narrow = identity;
+        narrow.address_widths.physical = 32;
+        assert!(!narrow.meets_paging_baseline());
     }
 }
