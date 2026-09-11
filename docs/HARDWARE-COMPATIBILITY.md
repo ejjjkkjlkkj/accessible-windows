@@ -16,6 +16,8 @@ The generic PC baseline is:
 - UEFI firmware;
 - ACPI platform description;
 - PCI/PCIe configuration and enumeration;
+- ACPI MCFG / PCIe ECAM as the preferred modern PCIe configuration path;
+- PCI configuration mechanism #1 (CF8/CFC) as a legacy segment-zero fallback;
 - APIC/x2APIC interrupt architecture where available;
 - invariant/constant TSC detection with safe timer fallbacks;
 - UEFI GOP framebuffer as the universal early-display fallback;
@@ -30,7 +32,7 @@ These interfaces are intentionally CPU-vendor neutral. CPU-specific code is sele
 
 ## AMD and Intel CPU handling
 
-The kernel must query CPUID rather than assume one vendor.
+The kernel queries CPUID rather than assuming one vendor.
 
 Common x86-64 code handles:
 
@@ -50,7 +52,7 @@ Vendor-specific modules may then enable optional behavior:
 - IOMMU support (AMD-Vi / Intel VT-d);
 - virtualization extensions (AMD-V / Intel VT-x) when useful later.
 
-Unknown x86-64 CPUs must fall back to the common feature-detected path instead of failing because the vendor is unfamiliar.
+Unknown x86-64 CPUs fall back to the common feature-detected path instead of failing because the vendor is unfamiliar.
 
 ## Driver matching model
 
@@ -63,6 +65,8 @@ Match in this order where appropriate:
 1. class/subclass/programming-interface for standards-compliant controllers;
 2. vendor/device ID for hardware that requires vendor-specific behavior;
 3. subsystem vendor/device ID only for machine-specific quirks.
+
+The kernel currently receives validated MCFG ECAM regions from the UEFI loader, scans PCIe through ECAM first, and retains CF8/CFC only as a compatibility fallback. Standard PCI BAR decoding supports I/O BARs plus 32-bit and 64-bit MMIO BARs; this is the prerequisite for mapping NVMe, xHCI, HDA and other controller register windows.
 
 ### USB
 
@@ -118,54 +122,6 @@ Native accelerated graphics is added separately:
 - AMD GPU driver family;
 - Intel GPU driver family.
 
-A GPU driver failure must fall back to a safe framebuffer/recovery display mode instead of making the system inaccessible.
+## Validation policy
 
-## Audio strategy
-
-The first native baseline is the PCI High Definition Audio controller model. Modern laptops may additionally require AMD ACP, Intel DSP/SST/SOF-style paths, SoundWire or codec-specific routing. Those are separate modules.
-
-Accessibility requires an audio-independent fallback for diagnostics until native audio is available. Boot and kernel test markers therefore remain observable through debug/serial/test transports in addition to eventual speech output.
-
-## Networking strategy
-
-Ethernet support comes before broad Wi-Fi support because Wi-Fi frequently requires vendor-specific firmware and radio stacks.
-
-Planned families include common Intel, Realtek and other widely deployed PCIe Ethernet adapters. Wi-Fi support is modular by chipset family and firmware redistribution terms must be reviewed before firmware blobs are shipped in an image.
-
-## Installation image
-
-The project will produce both:
-
-- a raw GPT/ESP disk image for deterministic firmware and USB testing;
-- a generic x86-64 UEFI bootable installation ISO once the installer payload exists.
-
-Both artifacts boot the same x86-64 kernel and use runtime hardware discovery. There will not be separate AMD and Intel ISOs.
-
-## Hardware validation matrix
-
-CI validates multiple virtual machines and hardware profiles, but virtual machines do not count as physical compatibility proof.
-
-Physical validation should eventually cover at minimum:
-
-- AMD laptop;
-- AMD desktop;
-- Intel laptop;
-- Intel desktop;
-- NVMe and AHCI storage variants;
-- multiple xHCI implementations;
-- machines with Secure Boot off first, then Secure Boot support as a separate milestone.
-
-Every physical result records firmware version, CPU, PCI IDs, USB IDs, ACPI tables relevant to failures, storage controller and boot outcome.
-
-## Reference specifications
-
-Implementation should follow public specifications rather than copying proprietary drivers:
-
-- UEFI Specification 2.11: https://uefi.org/specifications
-- ACPI Specification 6.6: https://uefi.org/specifications
-- NVMe specifications: https://nvmexpress.org/specifications/
-- AHCI: https://www.intel.com/content/www/us/en/io/serial-ata/ahci.html
-- USB specifications: https://www.usb.org/documents
-- Intel High Definition Audio specification: https://www.intel.com/content/www/us/en/documents/product-specifications/high-definition-audio-specification.pdf
-
-Open-source operating-system drivers may be studied or reused only when their licenses are compatible with the way they are incorporated and distributed.
+Automated GitHub validation must exercise at least one Intel CPU model, one AMD CPU model and a generic/unknown-compatible path where practical. Every profile boots the same raw GPT/ESP image. VM validation does not replace physical boot testing: release-quality hardware support requires separate real-PC validation on both AMD and Intel x64 systems.
