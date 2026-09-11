@@ -2,7 +2,8 @@
 set -euo pipefail
 
 EFI_BINARY="${1:-boot/uefi/target/x86_64-unknown-uefi/release/aw-uefi-boot.efi}"
-OUTPUT_IMAGE="${2:-build/accessible-windows-uefi-x86_64.img}"
+KERNEL_BINARY="${2:-kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64.bin}"
+OUTPUT_IMAGE="${3:-build/accessible-windows-uefi-x86_64.img}"
 IMAGE_SIZE_MIB="${IMAGE_SIZE_MIB:-64}"
 MOUNT_DIR="$(mktemp -d)"
 LOOP_DEVICE=""
@@ -22,6 +23,11 @@ trap cleanup EXIT
 
 if [ ! -f "$EFI_BINARY" ]; then
   echo "EFI binary not found: $EFI_BINARY" >&2
+  exit 1
+fi
+
+if [ ! -f "$KERNEL_BINARY" ]; then
+  echo "Native kernel binary not found: $KERNEL_BINARY" >&2
   exit 1
 fi
 
@@ -74,8 +80,9 @@ fi
 sudo mkfs.vfat -F 32 -n AWBOOT "$PARTITION"
 sudo mount "$PARTITION" "$MOUNT_DIR"
 MOUNTED=1
-sudo mkdir -p "$MOUNT_DIR/EFI/BOOT"
+sudo mkdir -p "$MOUNT_DIR/EFI/BOOT" "$MOUNT_DIR/EFI/ACCESSIBLE"
 sudo cp "$EFI_BINARY" "$MOUNT_DIR/EFI/BOOT/BOOTX64.EFI"
+sudo cp "$KERNEL_BINARY" "$MOUNT_DIR/EFI/ACCESSIBLE/KERNEL.BIN"
 sync
 sudo umount "$MOUNT_DIR"
 MOUNTED=0
@@ -84,4 +91,4 @@ LOOP_DEVICE=""
 
 sgdisk --verify "$OUTPUT_IMAGE"
 
-echo "AW_DISK_IMAGE_OK path=$OUTPUT_IMAGE size_mib=$IMAGE_SIZE_MIB partition_end=$PARTITION_END"
+echo "AW_DISK_IMAGE_OK path=$OUTPUT_IMAGE size_mib=$IMAGE_SIZE_MIB partition_end=$PARTITION_END kernel=$KERNEL_BINARY"
