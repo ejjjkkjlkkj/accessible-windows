@@ -125,10 +125,7 @@ pub enum ParseError {
     FatSlicesOverlap { first: u32, second: u32 },
     RequestedArchitectureMissing(CpuType),
     AmbiguousArchitecture(CpuType),
-    FatArchitectureMismatch {
-        expected: CpuType,
-        actual: CpuType,
-    },
+    FatArchitectureMismatch { expected: CpuType, actual: CpuType },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
