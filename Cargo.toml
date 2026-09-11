@@ -6,7 +6,7 @@ members = [
     "crates/aw-kernel-contract",
     "crates/aw-kernel-core",
 ]
-exclude = ["boot/uefi"]
+exclude = ["boot/uefi", "kernel/x86_64"]
 
 [workspace.package]
 edition = "2024"
