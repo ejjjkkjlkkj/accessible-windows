@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub const KERNEL_HANDOFF_MAGIC: u64 = 0x4157_4b48_4f46_4631;
-pub const KERNEL_HANDOFF_ABI_VERSION: u32 = 3;
+pub const KERNEL_HANDOFF_ABI_VERSION: u32 = 4;
 pub const HANDOFF_FLAG_FRAMEBUFFER_PRESENT: u64 = 1 << 0;
 pub const HANDOFF_FLAG_PCIE_ECAM_PRESENT: u64 = 1 << 1;
 pub const HANDOFF_FLAG_MEMORY_MAP_PRESENT: u64 = 1 << 2;
@@ -47,6 +47,43 @@ impl FramebufferHandoff {
             && self.width != 0
             && self.height != 0
             && self.stride_pixels >= self.width
+    }
+}
+
+/// Physical allocation containing the position-independent native kernel.
+///
+/// `image_byte_len` is the exact flat image length. `allocation_byte_len` is
+/// the page-rounded UEFI allocation that must remain owned by the kernel and
+/// mapped before any future CR3 switch.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KernelImageHandoff {
+    pub physical_address: u64,
+    pub image_byte_len: u64,
+    pub allocation_byte_len: u64,
+}
+
+impl KernelImageHandoff {
+    pub const NONE: Self = Self {
+        physical_address: 0,
+        image_byte_len: 0,
+        allocation_byte_len: 0,
+    };
+
+    #[must_use]
+    pub fn allocation_end_exclusive(self) -> Option<u64> {
+        self.physical_address.checked_add(self.allocation_byte_len)
+    }
+
+    #[must_use]
+    pub fn is_valid(self) -> bool {
+        self.physical_address != 0
+            && self.physical_address.is_multiple_of(UEFI_PAGE_SIZE)
+            && self.image_byte_len != 0
+            && self.allocation_byte_len != 0
+            && self.allocation_byte_len.is_multiple_of(UEFI_PAGE_SIZE)
+            && self.image_byte_len <= self.allocation_byte_len
+            && self.allocation_end_exclusive().is_some()
     }
 }
 
@@ -168,6 +205,7 @@ pub struct KernelHandoff {
     pub struct_size: u32,
     pub flags: u64,
     pub acpi_rsdp: u64,
+    pub kernel_image: KernelImageHandoff,
     pub memory_map: MemoryMapHandoff,
     pub framebuffer: FramebufferHandoff,
     pub pcie_ecam_count: u32,
@@ -179,6 +217,7 @@ impl KernelHandoff {
     #[must_use]
     pub const fn new(
         acpi_rsdp: u64,
+        kernel_image: KernelImageHandoff,
         memory_map: MemoryMapHandoff,
         framebuffer: Option<FramebufferHandoff>,
         pcie_ecam: [PciEcamHandoff; MAX_PCIE_ECAM_REGIONS],
@@ -204,6 +243,7 @@ impl KernelHandoff {
             struct_size: core::mem::size_of::<Self>() as u32,
             flags,
             acpi_rsdp,
+            kernel_image,
             memory_map,
             framebuffer: match framebuffer {
                 Some(framebuffer) => framebuffer,
@@ -230,6 +270,9 @@ impl KernelHandoff {
         }
         if self.acpi_rsdp == 0 {
             return Err(HandoffError::MissingAcpiRsdp);
+        }
+        if !self.kernel_image.is_valid() {
+            return Err(HandoffError::InvalidKernelImage);
         }
 
         let memory_map_present = self.flags & HANDOFF_FLAG_MEMORY_MAP_PRESENT != 0;
@@ -290,6 +333,7 @@ pub enum HandoffError {
     InvalidPcieEcamRegion = 11,
     UnexpectedPcieEcamRegion = 12,
     InvalidMemoryMap = 13,
+    InvalidKernelImage = 14,
 }
 
 pub fn enter(handoff: &KernelHandoff) -> Result<(), HandoffError> {
@@ -307,6 +351,12 @@ mod tests {
         height: 800,
         stride_pixels: 1280,
         pixel_format: HandoffPixelFormat::Bgr,
+    };
+
+    const VALID_KERNEL_IMAGE: KernelImageHandoff = KernelImageHandoff {
+        physical_address: 0x40_0000,
+        image_byte_len: 7000,
+        allocation_byte_len: 8192,
     };
 
     const VALID_ECAM: PciEcamHandoff = PciEcamHandoff {
@@ -344,6 +394,7 @@ mod tests {
         ecam[0] = VALID_ECAM;
         KernelHandoff::new(
             0xf000_0000,
+            VALID_KERNEL_IMAGE,
             valid_memory_map(),
             Some(VALID_FRAMEBUFFER),
             ecam,
@@ -358,8 +409,44 @@ mod tests {
 
     #[test]
     fn accepts_handoff_without_optional_devices() {
-        let handoff = KernelHandoff::new(0xf000_0000, valid_memory_map(), None, empty_ecam(), 0);
+        let handoff = KernelHandoff::new(
+            0xf000_0000,
+            VALID_KERNEL_IMAGE,
+            valid_memory_map(),
+            None,
+            empty_ecam(),
+            0,
+        );
         assert_eq!(enter(&handoff), Ok(()));
+    }
+
+    #[test]
+    fn validates_kernel_image_allocation() {
+        assert!(VALID_KERNEL_IMAGE.is_valid());
+        assert_eq!(
+            VALID_KERNEL_IMAGE.allocation_end_exclusive(),
+            Some(0x40_2000)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_kernel_image_allocation() {
+        let mut image = VALID_KERNEL_IMAGE;
+        image.physical_address += 1;
+        assert!(!image.is_valid());
+
+        image = VALID_KERNEL_IMAGE;
+        image.image_byte_len = image.allocation_byte_len + 1;
+        assert!(!image.is_valid());
+
+        image = VALID_KERNEL_IMAGE;
+        image.allocation_byte_len = 7000;
+        assert!(!image.is_valid());
+
+        image = VALID_KERNEL_IMAGE;
+        image.physical_address = u64::MAX & !(UEFI_PAGE_SIZE - 1);
+        image.allocation_byte_len = 8192;
+        assert!(!image.is_valid());
     }
 
     #[test]
@@ -435,8 +522,14 @@ mod tests {
 
     #[test]
     fn rejects_empty_memory_map() {
-        let handoff =
-            KernelHandoff::new(0xf000_0000, MemoryMapHandoff::NONE, None, empty_ecam(), 0);
+        let handoff = KernelHandoff::new(
+            0xf000_0000,
+            VALID_KERNEL_IMAGE,
+            MemoryMapHandoff::NONE,
+            None,
+            empty_ecam(),
+            0,
+        );
         assert_eq!(enter(&handoff), Err(HandoffError::EmptyMemoryMap));
     }
 
@@ -444,8 +537,30 @@ mod tests {
     fn rejects_invalid_memory_map() {
         let mut memory_map = valid_memory_map();
         memory_map.byte_len -= 1;
-        let handoff = KernelHandoff::new(0xf000_0000, memory_map, None, empty_ecam(), 0);
+        let handoff = KernelHandoff::new(
+            0xf000_0000,
+            VALID_KERNEL_IMAGE,
+            memory_map,
+            None,
+            empty_ecam(),
+            0,
+        );
         assert_eq!(enter(&handoff), Err(HandoffError::InvalidMemoryMap));
+    }
+
+    #[test]
+    fn rejects_invalid_kernel_image() {
+        let mut image = VALID_KERNEL_IMAGE;
+        image.image_byte_len = 0;
+        let handoff = KernelHandoff::new(
+            0xf000_0000,
+            image,
+            valid_memory_map(),
+            None,
+            empty_ecam(),
+            0,
+        );
+        assert_eq!(enter(&handoff), Err(HandoffError::InvalidKernelImage));
     }
 
     #[test]
@@ -454,6 +569,7 @@ mod tests {
         framebuffer.stride_pixels = framebuffer.width - 1;
         let handoff = KernelHandoff::new(
             0xf000_0000,
+            VALID_KERNEL_IMAGE,
             valid_memory_map(),
             Some(framebuffer),
             empty_ecam(),
