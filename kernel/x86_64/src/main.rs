@@ -5,7 +5,7 @@ use aw_kernel_core::{
     HANDOFF_FLAG_FRAMEBUFFER_PRESENT, HANDOFF_FLAG_PCIE_ECAM_PRESENT, HandoffPixelFormat,
     KernelHandoff, MemoryDescriptorHandoff, PciEcamHandoff, UEFI_MEMORY_TYPE_CONVENTIONAL,
 };
-use aw_memory::BootstrapPageAllocator;
+use aw_memory::{BootstrapPageAllocator, PhysicalRange};
 use aw_pci::{PciAddress, PciDeviceIdentity};
 use aw_x86_platform::{
     CpuAddressWidths, CpuFeatures, CpuIdentity, CpuSignature, CpuVendor, CpuidRegisters,
@@ -204,7 +204,7 @@ fn memory_map_descriptors(handoff: &KernelHandoff) -> Option<&[MemoryDescriptorH
         return None;
     }
 
-    // SAFETY: The ABI v3 loader reserves the normalized descriptor buffer as
+    // SAFETY: The ABI v4 loader reserves the normalized descriptor buffer as
     // LOADER_DATA before ExitBootServices and transfers control without freeing
     // it. `MemoryMapHandoff::is_valid` verifies alignment, descriptor size and
     // byte length before this slice is constructed.
@@ -253,7 +253,21 @@ fn probe_bootstrap_page_allocator(handoff: &KernelHandoff) -> bool {
         return false;
     };
 
-    let mut allocator = match BootstrapPageAllocator::new(descriptors) {
+    let kernel_image = handoff.kernel_image;
+    let Some(kernel_end) = kernel_image.allocation_end_exclusive() else {
+        debug_write("AW_KERNEL_RANGE_PROTECTED_FAIL reason=overflow\n");
+        return false;
+    };
+    let Some(kernel_range) = PhysicalRange::new(kernel_image.physical_address, kernel_end) else {
+        debug_write("AW_KERNEL_RANGE_PROTECTED_FAIL reason=shape\n");
+        return false;
+    };
+    let protected_ranges = [kernel_range];
+
+    let mut allocator = match BootstrapPageAllocator::with_protected_ranges(
+        descriptors,
+        &protected_ranges,
+    ) {
         Ok(allocator) => allocator,
         Err(_) => {
             debug_write("AW_BOOTSTRAP_PAGE_ALLOC_FAIL reason=allocator_init\n");
@@ -261,11 +275,16 @@ fn probe_bootstrap_page_allocator(handoff: &KernelHandoff) -> bool {
         }
     };
 
-    if allocator.allocate_page().is_none() {
+    let Some(page) = allocator.allocate_page() else {
         debug_write("AW_BOOTSTRAP_PAGE_ALLOC_FAIL reason=no_page\n");
+        return false;
+    };
+    if kernel_range.contains_address(page.start_address()) {
+        debug_write("AW_KERNEL_RANGE_PROTECTED_FAIL reason=allocated_kernel_page\n");
         return false;
     }
 
+    debug_write("AW_KERNEL_RANGE_PROTECTED_OK\n");
     debug_write("AW_BOOTSTRAP_PAGE_ALLOC_OK\n");
     true
 }
