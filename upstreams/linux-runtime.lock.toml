@@ -15,7 +15,11 @@ suite = "trixie"
 version = "13.6"
 architecture = "amd64"
 components = ["main"]
-snapshot = "UNPINNED"
+snapshot = "20260911T000000Z"
+main_snapshot = "https://snapshot.debian.org/archive/debian/20260911T000000Z/"
+security_snapshot = "https://snapshot.debian.org/archive/debian-security/20260911T000000Z/"
+suites = ["trixie", "trixie-updates", "trixie-security"]
+check_valid_until = false
 
 [closure]
 record_every_installed_binary_package = true
@@ -39,8 +43,8 @@ xdg_desktop_portal = "required"
 at_spi2 = "required"
 
 [release_gate]
-status = "planned"
+status = "inventory-pinned"
 build_verified = false
 runtime_boot_verified = false
 accessibility_verified = false
-reason = "Kernel baseline and Debian release are selected, but the Debian snapshot and full binary-to-source closure are not yet immutably locked."
+reason = "Kernel and Debian archive snapshots are pinned; the full installed-package-to-source closure and reproducible guest build remain unexecuted."
