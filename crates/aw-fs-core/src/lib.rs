@@ -103,7 +103,7 @@ pub struct CheckpointRecord {
 
 impl CheckpointRecord {
     #[must_use]
-    pub const fn new(
+    pub fn new(
         sequence: u64,
         volume_id: VolumeId,
         mode: VolumeMode,
@@ -302,7 +302,10 @@ impl MetadataBlockHeader {
         self.payload_len
     }
 
-    pub const fn validate_at(self, actual_physical_block: u64) -> Result<(), MetadataValidationError> {
+    pub const fn validate_at(
+        self,
+        actual_physical_block: u64,
+    ) -> Result<(), MetadataValidationError> {
         if actual_physical_block != self.expected_physical_block {
             return Err(MetadataValidationError::WrongPhysicalLocation {
                 expected: self.expected_physical_block,
