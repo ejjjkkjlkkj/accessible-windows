@@ -114,8 +114,13 @@ impl<const RANGES: usize> PreservationPlan<RANGES> {
         }
 
         if handoff.flags & HANDOFF_FLAG_PCIE_ECAM_PRESENT != 0 {
-            for index in 0..handoff.pcie_ecam_count as usize {
-                let region = handoff.pcie_ecam[index];
+            for (index, region) in handoff
+                .pcie_ecam
+                .iter()
+                .copied()
+                .enumerate()
+                .take(handoff.pcie_ecam_count as usize)
+            {
                 let bus_count = u64::from(region.end_bus) - u64::from(region.start_bus) + 1;
                 let byte_len = bus_count
                     .checked_mul(PCIE_ECAM_BYTES_PER_BUS)
