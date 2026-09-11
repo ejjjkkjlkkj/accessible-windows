@@ -11,12 +11,32 @@ A QEMU/OVMF pass is an integration test, not a substitute for a physical PC boot
 | Disk structure | Raw GPT image with FAT32 EFI System Partition and verified boot files | PASS |
 | Firmware integration | Raw GPT image boot through UEFI/OVMF | PASS |
 | Native kernel build | Separate `x86_64-unknown-none` kernel, static flat image, no runtime relocations | PASS |
-| Native kernel execution | Bootloader loads kernel into firmware-selected RAM and transfers execution after `ExitBootServices` | IN PROGRESS |
-| Native framebuffer access | Kernel writes a visible early-boot marker without UEFI Boot Services | IN PROGRESS |
+| Native kernel execution | Bootloader loads kernel into firmware-selected RAM and transfers execution after `ExitBootServices` | PASS |
+| Native framebuffer access | Kernel writes a visible early-boot marker without UEFI Boot Services | PASS |
 | USB physical boot | The exact CI-produced raw image boots from a dedicated USB device | PENDING |
 | Physical PC boot | Kernel executes on real x86-64 UEFI hardware | PENDING |
 | Accessible physical proof | Independent non-visual boot feedback usable without sighted assistance | PENDING |
 | Internal-disk installation | Installer writes only to an explicitly selected target disk and reboots from it | NOT IMPLEMENTED |
+
+Validated automated boot evidence for commit `9d072749cc21f8b8ea907f23897947807aab3fd9`, CI run `34574731585`:
+
+```text
+AW_NATIVE_KERNEL_BUILD_OK bytes=963 start_vma=0x0000000000000000 relocations=none
+AW_ESP_KERNEL_VERIFY_OK path=\KERNEL.BIN bytes=963
+AW_NATIVE_KERNEL_LOAD_OK address=0xe664000 bytes=963 pages=1 mode=dynamic_pic
+AW_MEMORY_MAP_OK entries=131
+AW_ACPI_VALIDATE_OK revision=2 length=36
+AW_GOP_OK width=1280 height=800 stride=1280 format=Bgr
+AW_FRAMEBUFFER_OK address=0x80000000 size=4096000
+AW_EXIT_BOOT_SERVICES_OK entries=131
+AW_KERNEL_HANDOFF_OK magic=0x41574b484f464631 abi=1 size=72 memory_entries=131 flags=0x1
+AW_NATIVE_KERNEL_TRANSFER address=0xe664000 bytes=963
+AW_NATIVE_KERNEL_ENTRY_OK
+AW_NATIVE_FRAMEBUFFER_WRITE_OK
+AW_NATIVE_KERNEL_IDLE
+```
+
+This evidence validates the raw GPT/OVMF integration path only. It does **not** count as USB or physical-PC validation.
 
 ## Safety rules for the first physical test
 
