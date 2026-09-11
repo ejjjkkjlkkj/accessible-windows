@@ -76,7 +76,7 @@ jobs:
           test "$ACTUAL" = "$EXPECTED"
           echo "AW_HARDWARE_IMAGE_IDENTITY_OK sha256=$ACTUAL"
 
-      - name: Flash dedicated USB and execute physical boot test
+      - name: Flash dedicated USB and execute physical accessible boot test
         shell: bash
         run: |
           set -euo pipefail
@@ -88,8 +88,15 @@ jobs:
             --result "$GITHUB_WORKSPACE/physical-hardware-result.txt"
           test -s physical-hardware-result.txt
           cat physical-hardware-result.txt
-          grep -F "AW_PHYSICAL_BOOT_RESULT=PASS" physical-hardware-result.txt
-          grep -F "AW_INTERNAL_DISK_UNCHANGED=PASS" physical-hardware-result.txt
+          grep -Fqx "AW_PHYSICAL_BOOT_RESULT=PASS" physical-hardware-result.txt
+          grep -Fqx "AW_INTERNAL_DISK_UNCHANGED=PASS" physical-hardware-result.txt
+          grep -Fqx "AW_NATIVE_KERNEL_ENTRY=PASS" physical-hardware-result.txt
+          grep -Fqx "AW_ACCESSIBILITY_HARDWARE_GATE=PASS" physical-hardware-result.txt
+          grep -Fqx "AW_KEYBOARD_RECOVERY=PASS" physical-hardware-result.txt
+          grep -Fqx "AW_STRUCTURED_DIAGNOSTICS=PASS" physical-hardware-result.txt
+          grep -Fqx "AW_ACCESSIBLE_RECOVERY_FLOW=PASS" physical-hardware-result.txt
+          grep -Fqx "AW_NONVISUAL_ROLLBACK_FLOW=PASS" physical-hardware-result.txt
+          grep -Eq '^AW_NONVISUAL_CHANNEL=(SPEECH|BRAILLE|SPEECH\+BRAILLE)$' physical-hardware-result.txt
 
       - name: Upload physical test evidence
         if: always()
@@ -111,6 +118,7 @@ jobs:
             echo "- Source CI run: \`${{ inputs.source_run_id }}\`"
             echo "- Expected image SHA-256: \`${{ inputs.expected_image_sha256 }}\`"
             echo "- Runner: \`${RUNNER_NAME}\` (\`${RUNNER_OS}/${RUNNER_ARCH}\`)"
+            echo "- Accessibility gate: keyboard recovery + structured diagnostics + speech/braille + nonvisual rollback required"
             if [ -f physical-hardware-result.txt ]; then
               echo
               echo '```text'
