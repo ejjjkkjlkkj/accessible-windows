@@ -5,6 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
+aw-guest-vm = { path = "../aw-guest-vm" }
 aw-runtime-sources = { path = "../aw-runtime-sources" }
 
 [lints]
