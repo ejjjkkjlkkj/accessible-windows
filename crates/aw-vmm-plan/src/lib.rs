@@ -260,10 +260,7 @@ mod tests {
 
         let copy = plan.memory_map_copy();
         assert_eq!(copy.linear_address(), 0x1000_0000);
-        assert_eq!(
-            copy.byte_len(),
-            size_of::<MemoryDescriptorHandoff>() as u64
-        );
+        assert_eq!(copy.byte_len(), size_of::<MemoryDescriptorHandoff>() as u64);
     }
 
     #[test]
