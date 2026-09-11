@@ -10,6 +10,7 @@ members = [
     "crates/aw-kernel-core",
     "crates/aw-memory",
     "crates/aw-pci",
+    "crates/aw-storefs",
     "crates/aw-vmm-plan",
     "crates/aw-x86-paging",
     "crates/aw-x86-platform",
