@@ -66,10 +66,7 @@ pub enum GenerationPlanError {
     Capacity,
     DuplicateComponent(CoreComponentKind),
     MissingRequiredComponent(CoreComponentKind),
-    RollbackRejected {
-        declared: u64,
-        minimum_allowed: u64,
-    },
+    RollbackRejected { declared: u64, minimum_allowed: u64 },
 }
 
 /// In-memory semantic plan for one immutable OS generation.
