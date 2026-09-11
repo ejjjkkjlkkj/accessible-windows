@@ -1,7 +1,10 @@
 #![no_main]
 #![no_std]
 
-use aw_kernel_core::{HANDOFF_FLAG_FRAMEBUFFER_PRESENT, HandoffPixelFormat, KernelHandoff};
+use aw_kernel_core::{
+    HANDOFF_FLAG_FRAMEBUFFER_PRESENT, HANDOFF_FLAG_PCIE_ECAM_PRESENT, HandoffPixelFormat,
+    KernelHandoff, PciEcamHandoff,
+};
 use aw_pci::{PciAddress, PciDeviceIdentity};
 use aw_x86_platform::{CpuFeatures, CpuIdentity, CpuSignature, CpuVendor, CpuidRegisters};
 use core::arch::asm;
@@ -119,9 +122,6 @@ fn debug_cpu_vendor(vendor: CpuVendor) {
 fn validate_cpu_baseline() {
     let cpu = detect_cpu();
 
-    // Keep the emitted strings in this flat kernel image rather than returning
-    // &'static str pointers from a dependency. The latter can become an absolute
-    // address and is unsafe for a kernel loaded at an arbitrary physical address.
     debug_cpu_vendor(cpu.vendor);
 
     if cpu.features.meets_boot_baseline() {
@@ -134,8 +134,6 @@ fn validate_cpu_baseline() {
     if cpu.is_supported_vendor() {
         debug_write("AW_CPU_VENDOR_SUPPORTED\n");
     } else {
-        // Unknown x86-64 vendors are allowed to continue on the generic path
-        // when the required architectural features are present.
         debug_write("AW_CPU_VENDOR_GENERIC_FALLBACK\n");
     }
 
@@ -155,22 +153,143 @@ fn validate_cpu_baseline() {
 fn pci_read_u32(address: PciAddress, register_offset: u8) -> Option<u32> {
     let config_address = address.mechanism1_address(register_offset)?;
     // SAFETY: PCI configuration mechanism #1 uses the architected CF8/CFC
-    // dword I/O ports. This path is a bootstrap fallback until ACPI MCFG/ECAM
-    // is parsed and preferred on PCI Express systems.
+    // dword I/O ports. This is retained as a compatibility fallback.
     unsafe {
         outl(PCI_CONFIG_ADDRESS_PORT, config_address);
         Some(inl(PCI_CONFIG_DATA_PORT))
     }
 }
 
+fn pcie_ecam_read_u32(
+    region: PciEcamHandoff,
+    bus: u8,
+    device: u8,
+    function: u8,
+    register_offset: u16,
+) -> Option<u32> {
+    if !region.is_valid()
+        || bus < region.start_bus
+        || bus > region.end_bus
+        || device > 31
+        || function > 7
+        || register_offset > 0x0ffc
+        || register_offset & 3 != 0
+    {
+        return None;
+    }
+
+    let relative_bus = u64::from(bus - region.start_bus);
+    let offset = (relative_bus << 20)
+        | (u64::from(device) << 15)
+        | (u64::from(function) << 12)
+        | u64::from(register_offset);
+    let address = region.base_address.checked_add(offset)?;
+    if address > usize::MAX as u64 {
+        return None;
+    }
+
+    // SAFETY: The region was validated from ACPI MCFG before ExitBootServices.
+    // ECAM configuration registers are MMIO and are read using volatile access.
+    // The bootstrap kernel is still executing with the firmware-established
+    // physical-address mappings; the future VMM must explicitly preserve/map
+    // these regions before replacing those page tables.
+    Some(unsafe { core::ptr::read_volatile(address as usize as *const u32) })
+}
+
+fn classify_pci_device(identity: PciDeviceIdentity, found: &mut [bool; 4]) {
+    if identity.class.is_nvme() {
+        found[0] = true;
+    }
+    if identity.class.is_ahci() {
+        found[1] = true;
+    }
+    if identity.class.is_xhci() {
+        found[2] = true;
+    }
+    if identity.class.is_hda() {
+        found[3] = true;
+    }
+}
+
+fn emit_pci_classes(found: [bool; 4]) {
+    if found[0] {
+        debug_write("AW_PCI_NVME_FOUND\n");
+    }
+    if found[1] {
+        debug_write("AW_PCI_AHCI_FOUND\n");
+    }
+    if found[2] {
+        debug_write("AW_PCI_XHCI_FOUND\n");
+    }
+    if found[3] {
+        debug_write("AW_PCI_HDA_FOUND\n");
+    }
+}
+
+fn scan_pcie_ecam(handoff: &KernelHandoff) -> bool {
+    if handoff.flags & HANDOFF_FLAG_PCIE_ECAM_PRESENT == 0 || handoff.pcie_ecam_count == 0 {
+        return false;
+    }
+
+    debug_write("AW_PCIE_ECAM_SCAN_BEGIN\n");
+    let mut any_device = false;
+    let mut found = [false; 4];
+
+    for region in handoff
+        .pcie_ecam
+        .iter()
+        .take(handoff.pcie_ecam_count as usize)
+        .copied()
+    {
+        for bus in region.start_bus..=region.end_bus {
+            for device in 0_u8..32 {
+                let vendor_device0 =
+                    pcie_ecam_read_u32(region, bus, device, 0, 0x00).unwrap_or(u32::MAX);
+                if vendor_device0 as u16 == 0xffff {
+                    continue;
+                }
+
+                let header_register =
+                    pcie_ecam_read_u32(region, bus, device, 0, 0x0c).unwrap_or(0);
+                let header_type = ((header_register >> 16) & 0xff) as u8;
+                let function_count = if header_type & 0x80 != 0 { 8 } else { 1 };
+
+                for function in 0_u8..function_count {
+                    let vendor_device = pcie_ecam_read_u32(region, bus, device, function, 0x00)
+                        .unwrap_or(u32::MAX);
+                    if vendor_device as u16 == 0xffff {
+                        continue;
+                    }
+
+                    let class_revision =
+                        pcie_ecam_read_u32(region, bus, device, function, 0x08).unwrap_or(0);
+                    let subsystem = pcie_ecam_read_u32(region, bus, device, function, 0x2c);
+                    let identity = PciDeviceIdentity::from_config_registers(
+                        vendor_device,
+                        class_revision,
+                        subsystem,
+                    );
+                    any_device = true;
+                    classify_pci_device(identity, &mut found);
+                }
+            }
+        }
+    }
+
+    if any_device {
+        debug_write("AW_PCIE_ECAM_SCAN_OK\n");
+        emit_pci_classes(found);
+    } else {
+        debug_write("AW_PCIE_ECAM_SCAN_EMPTY\n");
+    }
+    any_device
+}
+
 fn scan_pci_mechanism1() {
     debug_write("AW_PCI_SCAN_BEGIN mechanism=cf8_cfc\n");
 
     let mut any_device = false;
-    let mut found_nvme = false;
-    let mut found_ahci = false;
-    let mut found_xhci = false;
-    let mut found_hda = false;
+    let mut found = [false; 4];
 
     for bus in 0_u16..=255 {
         for device in 0_u8..32 {
@@ -198,43 +317,30 @@ fn scan_pci_mechanism1() {
                 }
 
                 let class_revision = pci_read_u32(address, 0x08).unwrap_or(0);
+                let subsystem = pci_read_u32(address, 0x2c);
                 let identity =
-                    PciDeviceIdentity::from_config_registers(vendor_device, class_revision, None);
+                    PciDeviceIdentity::from_config_registers(vendor_device, class_revision, subsystem);
                 any_device = true;
-
-                if identity.class.is_nvme() {
-                    found_nvme = true;
-                }
-                if identity.class.is_ahci() {
-                    found_ahci = true;
-                }
-                if identity.class.is_xhci() {
-                    found_xhci = true;
-                }
-                if identity.class.is_hda() {
-                    found_hda = true;
-                }
+                classify_pci_device(identity, &mut found);
             }
         }
     }
 
     if !any_device {
-        debug_write("AW_PCI_SCAN_FALLBACK_ECAM_REQUIRED\n");
+        debug_write("AW_PCI_SCAN_FAIL reason=no_devices\n");
         return;
     }
 
     debug_write("AW_PCI_SCAN_OK\n");
-    if found_nvme {
-        debug_write("AW_PCI_NVME_FOUND\n");
-    }
-    if found_ahci {
-        debug_write("AW_PCI_AHCI_FOUND\n");
-    }
-    if found_xhci {
-        debug_write("AW_PCI_XHCI_FOUND\n");
-    }
-    if found_hda {
-        debug_write("AW_PCI_HDA_FOUND\n");
+    emit_pci_classes(found);
+}
+
+fn scan_pci(handoff: &KernelHandoff) {
+    if scan_pcie_ecam(handoff) {
+        debug_write("AW_PCI_TRANSPORT_OK transport=ecam\n");
+    } else {
+        debug_write("AW_PCI_TRANSPORT_FALLBACK transport=cf8_cfc\n");
+        scan_pci_mechanism1();
     }
 }
 
@@ -272,8 +378,6 @@ fn paint_boot_marker(handoff: &KernelHandoff) -> bool {
                 return false;
             }
 
-            // Magenta is symmetric under RGB/BGR channel swapping and provides
-            // a visible physical-hardware marker without needing a GPU driver.
             // SAFETY: The handoff was validated, bounds are checked above, and
             // this range is the UEFI-provided linear framebuffer.
             unsafe {
@@ -307,7 +411,7 @@ pub extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
 
     debug_write("AW_NATIVE_KERNEL_ENTRY_OK\n");
     validate_cpu_baseline();
-    scan_pci_mechanism1();
+    scan_pci(handoff);
 
     if paint_boot_marker(handoff) {
         debug_write("AW_NATIVE_FRAMEBUFFER_WRITE_OK\n");
