@@ -6,12 +6,14 @@ on:
     paths:
       - "crates/**"
       - "Cargo.toml"
+      - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".github/workflows/future-toolchains.yml"
   pull_request:
     paths:
       - "crates/**"
       - "Cargo.toml"
+      - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".github/workflows/future-toolchains.yml"
   schedule:
@@ -55,7 +57,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: future-${{ matrix.toolchain }}-${{ hashFiles('**/Cargo.toml') }}
+          key: future-${{ matrix.toolchain }}-${{ hashFiles('**/Cargo.toml', 'Cargo.lock') }}
 
       - name: Install toolchain
         shell: bash
@@ -66,13 +68,13 @@ jobs:
           cargo -V
 
       - name: Check
-        run: cargo check --workspace --all-targets
+        run: cargo check --locked --workspace --all-targets
 
       - name: Test
-        run: cargo test --workspace --all-targets
+        run: cargo test --locked --workspace --all-targets
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
   miri:
     name: Miri UB checks
@@ -94,4 +96,4 @@ jobs:
       - name: Run Miri
         env:
           MIRIFLAGS: "-Zmiri-strict-provenance"
-        run: cargo miri test --workspace
+        run: cargo miri test --locked --workspace
