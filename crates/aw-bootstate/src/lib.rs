@@ -37,11 +37,15 @@ impl GenerationLocator {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BootSelectionState {
     /// A trial generation is eligible for another boot attempt.
-    Trial { tries_remaining: u8 },
+    Trial {
+        tries_remaining: u8,
+    },
     /// One attempt has already been consumed and this exact state must be persisted before control
     /// is transferred to the trial generation. `tries_remaining` is the number of future attempts
     /// that remain if the current attempt does not become healthy.
-    TrialAttempt { tries_remaining: u8 },
+    TrialAttempt {
+        tries_remaining: u8,
+    },
     Successful,
 }
 

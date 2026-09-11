@@ -404,7 +404,10 @@ mod tests {
         );
 
         let mut menu = RecoveryMenuState::new();
-        assert_eq!(menu.selected_action(), RecoveryAction::RetryCurrentGeneration);
+        assert_eq!(
+            menu.selected_action(),
+            RecoveryAction::RetryCurrentGeneration
+        );
         assert_eq!(
             menu.apply(RecoveryKeyboardCommand::Previous),
             RecoveryInteractionOutcome::NoAction

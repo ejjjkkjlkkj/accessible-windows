@@ -217,7 +217,11 @@ mod tests {
 
     #[test]
     fn every_family_can_prove_complete_source_coverage() {
-        for family in [RuntimeFamily::Linux, RuntimeFamily::Android, RuntimeFamily::Darwin] {
+        for family in [
+            RuntimeFamily::Linux,
+            RuntimeFamily::Android,
+            RuntimeFamily::Darwin,
+        ] {
             let proof = validate_complete_source_set(complete_set(family)).unwrap();
             assert_eq!(proof.family(), family);
         }

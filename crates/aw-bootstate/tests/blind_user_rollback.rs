@@ -7,9 +7,7 @@ use aw_recovery_contract::{
     AccessibleRecoveryReady, RecoveryAction, RecoveryCapability, RecoveryDiagnosticCode,
     RecoveryEvent, RecoveryProbeReport, RecoveryReadinessError, RecoverySeverity,
 };
-use aw_recovery_io::{
-    BrailleSink, SpeechSink, StructuredDiagnosticSink, deliver_recovery_event,
-};
+use aw_recovery_io::{BrailleSink, SpeechSink, StructuredDiagnosticSink, deliver_recovery_event};
 
 fn object(seed: u8) -> ObjectId {
     ObjectId::new([seed; 32]).unwrap()
@@ -168,13 +166,8 @@ fn delivered_braille_failure_event_precedes_known_good_rollback() {
     let mut speech = RecoveryRecorder::default();
     let mut braille = RecoveryRecorder::accepting();
 
-    let evidence = deliver_recovery_event(
-        failure,
-        &mut diagnostics,
-        &mut speech,
-        &mut braille,
-    )
-    .unwrap();
+    let evidence =
+        deliver_recovery_event(failure, &mut diagnostics, &mut speech, &mut braille).unwrap();
     assert_eq!(evidence.event(), failure);
     assert!(!evidence.speech_delivered());
     assert!(evidence.braille_delivered());
@@ -202,7 +195,10 @@ fn power_loss_after_attempt_consumption_cannot_loop_broken_generation_forever() 
 
     let recovered_after_power_loss = persisted_before_transfer.after_interrupted_trial().unwrap();
     assert_eq!(recovered_after_power_loss.selected().generation(), 41);
-    assert_eq!(recovered_after_power_loss.state(), BootSelectionState::Successful);
+    assert_eq!(
+        recovered_after_power_loss.state(),
+        BootSelectionState::Successful
+    );
 }
 
 #[test]
