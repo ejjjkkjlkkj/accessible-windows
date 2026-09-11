@@ -1,7 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use aw_generation::ObjectId;
+use aw_generation::{ObjectId, SuccessfulGeneration};
 
 pub const MAX_TRIAL_BOOT_ATTEMPTS: u8 = 7;
 
@@ -58,6 +58,8 @@ pub enum BootStateError {
     ConflictingSequence,
     SequenceOverflow,
     NotTrial,
+    HealthGenerationMismatch { selected: u64, healthy: u64 },
+    HealthRollbackRejected { declared: u64, minimum: u64 },
 }
 
 impl BootStateRecord {
@@ -148,6 +150,45 @@ impl BootStateRecord {
             state: BootSelectionState::Successful,
         })
     }
+
+    /// Marks a trial generation successful only with a runtime-health proof produced by
+    /// `aw-generation` after all mandatory checks passed, including speech and accessible recovery.
+    ///
+    /// This prevents a graphical-only boot from becoming the new known-good generation. The
+    /// selected generation must exactly match the health proof, and the health proof's rollback
+    /// index must satisfy the persisted rollback floor.
+    pub fn after_successful_trial(
+        self,
+        healthy: SuccessfulGeneration,
+    ) -> Result<Self, BootStateError> {
+        let BootSelectionState::Trial { .. } = self.state else {
+            return Err(BootStateError::NotTrial);
+        };
+        if healthy.generation() != self.selected.generation() {
+            return Err(BootStateError::HealthGenerationMismatch {
+                selected: self.selected.generation(),
+                healthy: healthy.generation(),
+            });
+        }
+        if healthy.rollback_index() < self.rollback_floor {
+            return Err(BootStateError::HealthRollbackRejected {
+                declared: healthy.rollback_index(),
+                minimum: self.rollback_floor,
+            });
+        }
+
+        let next_sequence = self
+            .sequence
+            .checked_add(1)
+            .ok_or(BootStateError::SequenceOverflow)?;
+        Ok(Self {
+            sequence: next_sequence,
+            selected: self.selected,
+            previous_successful: self.selected,
+            rollback_floor: self.rollback_floor.max(healthy.rollback_index()),
+            state: BootSelectionState::Successful,
+        })
+    }
 }
 
 /// Selects the newest usable copy from two independently validated boot-state records.
@@ -180,6 +221,10 @@ pub fn select_newest_record(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aw_generation::{
+        GenerationPlan, REQUIRED_BOOT_COMPONENTS, REQUIRED_SUCCESS_HEALTH_CHECKS,
+        RuntimeHealthReport,
+    };
 
     fn object(seed: u8) -> ObjectId {
         ObjectId::new([seed; 32]).unwrap()
@@ -198,6 +243,19 @@ mod tests {
             BootSelectionState::Trial { tries_remaining },
         )
         .unwrap()
+    }
+
+    fn healthy_generation(generation: u64, rollback_index: u64) -> SuccessfulGeneration {
+        let mut plan = GenerationPlan::<8>::new(generation, rollback_index).unwrap();
+        for (index, kind) in REQUIRED_BOOT_COMPONENTS.into_iter().enumerate() {
+            plan.push(kind, object((index + 10) as u8)).unwrap();
+        }
+        let candidate = plan.boot_candidate(rollback_index).unwrap();
+        let mut health = RuntimeHealthReport::new();
+        for check in REQUIRED_SUCCESS_HEALTH_CHECKS {
+            health.mark_passed(check);
+        }
+        candidate.successful_generation(health).unwrap()
     }
 
     #[test]
@@ -287,5 +345,39 @@ mod tests {
             record.after_failed_trial(),
             Err(BootStateError::NotTrial)
         ));
+    }
+
+    #[test]
+    fn trial_success_requires_matching_accessibility_health_proof() {
+        let next = trial(10, 3)
+            .after_successful_trial(healthy_generation(42, 7))
+            .unwrap();
+        assert_eq!(next.sequence(), 11);
+        assert_eq!(next.selected().generation(), 42);
+        assert_eq!(next.previous_successful().generation(), 42);
+        assert_eq!(next.state(), BootSelectionState::Successful);
+        assert_eq!(next.rollback_floor(), 7);
+    }
+
+    #[test]
+    fn health_proof_for_another_generation_is_rejected() {
+        assert_eq!(
+            trial(10, 3).after_successful_trial(healthy_generation(43, 7)),
+            Err(BootStateError::HealthGenerationMismatch {
+                selected: 42,
+                healthy: 43,
+            })
+        );
+    }
+
+    #[test]
+    fn health_proof_below_persisted_rollback_floor_is_rejected() {
+        assert_eq!(
+            trial(10, 3).after_successful_trial(healthy_generation(42, 6)),
+            Err(BootStateError::HealthRollbackRejected {
+                declared: 6,
+                minimum: 7,
+            })
+        );
     }
 }
