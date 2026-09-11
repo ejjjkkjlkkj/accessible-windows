@@ -198,7 +198,7 @@ pub fn parse_mach_o_64(bytes: &[u8]) -> Result<MachHeader64, ParseError> {
                 size: command_size,
             });
         }
-        if command_size % 8 != 0 {
+        if !command_size.is_multiple_of(8) {
             return Err(ParseError::LoadCommandMisaligned {
                 index,
                 size: command_size,
@@ -264,7 +264,7 @@ fn read_fat_arch(bytes: &[u8], index: u32, table_end: usize) -> Result<FatArch, 
         return Err(ParseError::FatSliceMisaligned { index, align_power });
     }
     let alignment = 1usize << align_power;
-    if offset % alignment != 0 {
+    if !offset.is_multiple_of(alignment) {
         return Err(ParseError::FatSliceMisaligned { index, align_power });
     }
 
@@ -408,8 +408,8 @@ mod tests {
     fn fat_two(x86: &[u8], arm: &[u8]) -> Vec<u8> {
         let x86_offset = 48u32;
         let arm_offset = x86_offset + x86.len() as u32;
-        assert_eq!(x86_offset % 4, 0);
-        assert_eq!(arm_offset % 4, 0);
+        assert!(x86_offset.is_multiple_of(4));
+        assert!(arm_offset.is_multiple_of(4));
 
         let mut out = Vec::new();
         push_be(FAT_MAGIC, &mut out);
