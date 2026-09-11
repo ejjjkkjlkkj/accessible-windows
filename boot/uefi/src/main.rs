@@ -6,8 +6,8 @@ extern crate alloc;
 use alloc::vec;
 use aw_acpi::{McfgError, RsdpError, RsdpInfo, SdtError};
 use aw_kernel_core::{
-    FramebufferHandoff, HandoffPixelFormat, KernelHandoff, PciEcamHandoff,
-    MAX_PCIE_ECAM_REGIONS,
+    FramebufferHandoff, HandoffPixelFormat, KernelHandoff, MemoryDescriptorHandoff,
+    MemoryMapHandoff, PciEcamHandoff, MAX_PCIE_ECAM_REGIONS,
 };
 use uefi::boot::{self, AllocateType};
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
@@ -20,6 +20,7 @@ use uefi::{cstr16, system, Status};
 
 const UEFI_PAGE_SIZE: usize = 4096;
 const MAX_ACPI_SDT_LEN: usize = 1024 * 1024;
+const NORMALIZED_MEMORY_MAP_PAGES: usize = 16;
 
 #[derive(Clone, Copy, Debug)]
 struct LoadedKernel {
@@ -355,6 +356,47 @@ fn load_native_kernel() -> Result<LoadedKernel, Status> {
     })
 }
 
+fn normalize_final_memory_map<M: MemoryMap>(
+    memory_map: &M,
+    buffer_address: usize,
+    capacity_entries: usize,
+) -> Option<MemoryMapHandoff> {
+    if memory_map.is_empty() || memory_map.len() > capacity_entries {
+        return None;
+    }
+
+    let output = buffer_address as *mut MemoryDescriptorHandoff;
+    for (index, source) in memory_map.entries().enumerate() {
+        let descriptor = MemoryDescriptorHandoff {
+            memory_type: source.ty.0,
+            reserved: 0,
+            physical_start: source.phys_start,
+            page_count: source.page_count,
+            attributes: source.att.bits(),
+        };
+        if !descriptor.is_valid() {
+            return None;
+        }
+
+        // SAFETY: `output` points to the page-aligned LOADER_DATA allocation
+        // reserved before ExitBootServices. `capacity_entries` was derived from
+        // that allocation and the bounds check above guarantees this write is
+        // within it. No allocator or boot service is used here.
+        unsafe { output.add(index).write(descriptor) };
+    }
+
+    let entry_count = u32::try_from(memory_map.len()).ok()?;
+    let descriptor_size = u32::try_from(core::mem::size_of::<MemoryDescriptorHandoff>()).ok()?;
+    let byte_len = u64::from(entry_count).checked_mul(u64::from(descriptor_size))?;
+    let handoff = MemoryMapHandoff {
+        buffer_address: buffer_address as u64,
+        byte_len,
+        entry_count,
+        descriptor_size,
+    };
+    handoff.is_valid().then_some(handoff)
+}
+
 #[entry]
 fn main() -> Status {
     if uefi::helpers::init().is_err() {
@@ -479,13 +521,38 @@ fn main() -> Status {
     uefi::println!("ARCH=x86_64");
     uefi::println!("DISPLAY={}x{}", width, height);
 
+    let normalized_memory_map_buffer = match boot::allocate_pages(
+        AllocateType::AnyPages,
+        MemoryType::LOADER_DATA,
+        NORMALIZED_MEMORY_MAP_PAGES,
+    ) {
+        Ok(buffer) => buffer,
+        Err(error) => {
+            log::error!(
+                "AW_MEMORY_MAP_BUFFER_FAIL status={:?}",
+                error.status()
+            );
+            return error.status();
+        }
+    };
+    let normalized_memory_map_buffer_address = normalized_memory_map_buffer.as_ptr() as usize;
+    let normalized_memory_map_capacity = NORMALIZED_MEMORY_MAP_PAGES * UEFI_PAGE_SIZE
+        / core::mem::size_of::<MemoryDescriptorHandoff>();
+    log::info!(
+        "AW_MEMORY_MAP_BUFFER_OK address=0x{:x} pages={} capacity={}",
+        normalized_memory_map_buffer_address,
+        NORMALIZED_MEMORY_MAP_PAGES,
+        normalized_memory_map_capacity
+    );
+
     drop(gop);
 
     log::info!("AW_EXIT_BOOT_SERVICES_BEGIN");
 
     // SAFETY: All boot-services-backed protocol objects and temporary memory
-    // maps have been dropped. The native kernel occupies LOADER_DATA pages that
-    // remain reserved across ExitBootServices.
+    // maps have been dropped. The native kernel and normalized memory-map
+    // buffer occupy LOADER_DATA pages that remain reserved across
+    // ExitBootServices.
     let final_memory_map = unsafe { boot::exit_boot_services(None) };
 
     log::info!(
@@ -493,9 +560,33 @@ fn main() -> Status {
         final_memory_map.len()
     );
 
+    let memory_map_handoff = match normalize_final_memory_map(
+        &final_memory_map,
+        normalized_memory_map_buffer_address,
+        normalized_memory_map_capacity,
+    ) {
+        Some(memory_map) => memory_map,
+        None => {
+            log::error!(
+                "AW_MEMORY_MAP_NORMALIZE_FAIL entries={} capacity={}",
+                final_memory_map.len(),
+                normalized_memory_map_capacity
+            );
+            loop {
+                core::hint::spin_loop();
+            }
+        }
+    };
+    log::info!(
+        "AW_MEMORY_MAP_HANDOFF_OK entries={} bytes={} descriptor_size={}",
+        memory_map_handoff.entry_count,
+        memory_map_handoff.byte_len,
+        memory_map_handoff.descriptor_size
+    );
+
     let handoff = KernelHandoff::new(
         acpi_address as u64,
-        final_memory_map.len() as u64,
+        memory_map_handoff,
         framebuffer,
         ecam.regions,
         ecam.count,
@@ -513,7 +604,7 @@ fn main() -> Status {
         handoff.magic,
         handoff.abi_version,
         handoff.struct_size,
-        handoff.memory_map_entries,
+        handoff.memory_map.entry_count,
         handoff.flags,
         handoff.pcie_ecam_count
     );
