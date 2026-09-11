@@ -19,6 +19,13 @@ name = "aw-kernel-core"
 version = "0.1.0"
 
 [[package]]
+name = "aw-memory"
+version = "0.1.0"
+dependencies = [
+ "aw-kernel-core",
+]
+
+[[package]]
 name = "aw-pci"
 version = "0.1.0"
 
