@@ -25,10 +25,7 @@ pub struct RsdpInfo {
 
 #[must_use]
 fn checksum(bytes: &[u8]) -> u8 {
-    bytes
-        .iter()
-        .copied()
-        .fold(0_u8, u8::wrapping_add)
+    bytes.iter().copied().fold(0_u8, u8::wrapping_add)
 }
 
 /// Returns the total RSDP length after validating the signature and the
