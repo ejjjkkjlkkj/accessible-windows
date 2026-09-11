@@ -260,13 +260,7 @@ mod tests {
     fn rejects_invalid_framebuffer() {
         let mut framebuffer = VALID_FRAMEBUFFER;
         framebuffer.stride_pixels = framebuffer.width - 1;
-        let handoff = KernelHandoff::new(
-            0xf000_0000,
-            127,
-            Some(framebuffer),
-            empty_ecam(),
-            0,
-        );
+        let handoff = KernelHandoff::new(0xf000_0000, 127, Some(framebuffer), empty_ecam(), 0);
         assert_eq!(enter(&handoff), Err(HandoffError::InvalidFramebuffer));
     }
 
@@ -274,19 +268,13 @@ mod tests {
     fn rejects_inconsistent_ecam_flag() {
         let mut handoff = valid_handoff();
         handoff.flags &= !HANDOFF_FLAG_PCIE_ECAM_PRESENT;
-        assert_eq!(
-            enter(&handoff),
-            Err(HandoffError::InconsistentPcieEcamFlag)
-        );
+        assert_eq!(enter(&handoff), Err(HandoffError::InconsistentPcieEcamFlag));
     }
 
     #[test]
     fn rejects_nonzero_unused_ecam_slot() {
         let mut handoff = valid_handoff();
         handoff.pcie_ecam[1] = VALID_ECAM;
-        assert_eq!(
-            enter(&handoff),
-            Err(HandoffError::UnexpectedPcieEcamRegion)
-        );
+        assert_eq!(enter(&handoff), Err(HandoffError::UnexpectedPcieEcamRegion));
     }
 }
