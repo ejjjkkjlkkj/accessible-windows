@@ -103,6 +103,7 @@ jobs:
           grep -F "AW_BOOT_OK stage=uefi_init arch=x86_64" uefi-debug.log
           grep -F "AW_MEMORY_MAP_OK" uefi-debug.log
           grep -F "AW_ACPI_OK" uefi-debug.log
+          grep -F "AW_ACPI_VALIDATE_OK" uefi-debug.log
           grep -F "AW_GOP_OK" uefi-debug.log
           grep -F "AW_FRAMEBUFFER_OK" uefi-debug.log
           grep -F "AW_EXIT_BOOT_SERVICES_OK" uefi-debug.log

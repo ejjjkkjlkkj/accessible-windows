@@ -19,11 +19,12 @@
 - [x] Detect GOP and current display mode
 - [x] Capture framebuffer address/size when GOP exposes direct framebuffer access
 - [x] Locate the ACPI RSDP through the UEFI configuration table
-- [x] Produce a GPT disk image with a FAT32 EFI System Partition
+- [x] Validate ACPI RSDP signature, declared length and checksums
+- [x] Produce an aligned GPT disk image with a FAT32 EFI System Partition
 - [x] Boot-test the generated raw disk image under OVMF/QEMU
 - [x] Exit UEFI Boot Services after dropping boot-services resources
 - [x] Prove post-firmware execution through debugcon in CI
-- [ ] Validate ACPI RSDP signature/checksum and handoff structure
+- [ ] Define and validate the owned kernel handoff structure
 - [ ] Split the post-firmware stage into the freestanding kernel crate
 
 ## Phase 2 - Kernel foundation

@@ -32,13 +32,26 @@ for tool in sgdisk losetup mkfs.vfat mount; do
   fi
 done
 
+if [ "$IMAGE_SIZE_MIB" -lt 8 ]; then
+  echo "IMAGE_SIZE_MIB must be at least 8" >&2
+  exit 1
+fi
+
 mkdir -p "$(dirname "$OUTPUT_IMAGE")"
 rm -f "$OUTPUT_IMAGE"
 truncate -s "${IMAGE_SIZE_MIB}M" "$OUTPUT_IMAGE"
 
-# Create a GPT disk with one EFI System Partition, aligned at 1 MiB.
+# Keep both the start and the first sector after the ESP aligned to 1 MiB,
+# while reserving space for the secondary GPT structures at the end of disk.
+TOTAL_SECTORS=$((IMAGE_SIZE_MIB * 2048))
+PARTITION_END=$(( ((TOTAL_SECTORS - 34) / 2048) * 2048 - 1 ))
+if [ "$PARTITION_END" -le 2048 ]; then
+  echo "Image is too small for an aligned EFI System Partition" >&2
+  exit 1
+fi
+
 sgdisk --clear \
-  --new=1:2048:0 \
+  --new=1:2048:"$PARTITION_END" \
   --typecode=1:EF00 \
   --change-name=1:"Accessible Windows EFI" \
   "$OUTPUT_IMAGE"
@@ -46,7 +59,6 @@ sgdisk --clear \
 LOOP_DEVICE="$(sudo losetup --find --show --partscan "$OUTPUT_IMAGE")"
 PARTITION="${LOOP_DEVICE}p1"
 
-# Give the kernel a short window to expose the partition node.
 for _ in $(seq 1 50); do
   if [ -b "$PARTITION" ]; then
     break
@@ -72,4 +84,4 @@ LOOP_DEVICE=""
 
 sgdisk --verify "$OUTPUT_IMAGE"
 
-echo "AW_DISK_IMAGE_OK path=$OUTPUT_IMAGE size_mib=$IMAGE_SIZE_MIB"
+echo "AW_DISK_IMAGE_OK path=$OUTPUT_IMAGE size_mib=$IMAGE_SIZE_MIB partition_end=$PARTITION_END"
