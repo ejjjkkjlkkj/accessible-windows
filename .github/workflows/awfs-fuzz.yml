@@ -5,13 +5,17 @@ on:
     branches: [main, bootstrap-v0.1]
     paths:
       - "crates/aw-fs-core/**"
+      - "crates/aw-storefs/**"
       - "fuzz/fuzz_targets/awfs_checkpoint.rs"
+      - "fuzz/fuzz_targets/awstore_manifest.rs"
       - "fuzz/Cargo.toml"
       - ".github/workflows/awfs-fuzz.yml"
   pull_request:
     paths:
       - "crates/aw-fs-core/**"
+      - "crates/aw-storefs/**"
       - "fuzz/fuzz_targets/awfs_checkpoint.rs"
+      - "fuzz/fuzz_targets/awstore_manifest.rs"
       - "fuzz/Cargo.toml"
       - ".github/workflows/awfs-fuzz.yml"
   schedule:
@@ -43,7 +47,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Cache Cargo and AWFS corpus
+      - name: Cache Cargo and AWFS checkpoint corpus
         uses: actions/cache@v6
         with:
           path: |
@@ -52,9 +56,9 @@ jobs:
             ~/.cargo/git/db
             ~/.cargo/bin/cargo-fuzz
             fuzz/corpus/awfs_checkpoint
-          key: fuzz-awfs-${{ runner.os }}-${{ hashFiles('fuzz/Cargo.toml', 'fuzz/fuzz_targets/awfs_checkpoint.rs', 'crates/aw-fs-core/**') }}
+          key: fuzz-awfs-checkpoint-${{ runner.os }}-${{ hashFiles('fuzz/Cargo.toml', 'fuzz/fuzz_targets/awfs_checkpoint.rs', 'crates/aw-fs-core/**') }}
           restore-keys: |
-            fuzz-awfs-${{ runner.os }}-
+            fuzz-awfs-checkpoint-${{ runner.os }}-
 
       - name: Install nightly and cargo-fuzz
         shell: bash
@@ -81,7 +85,7 @@ jobs:
             -rss_limit_mb=2048 \
             -print_final_stats=1
 
-      - name: Upload AWFS crash artifacts
+      - name: Upload AWFS checkpoint crash artifacts
         if: failure()
         uses: actions/upload-artifact@v6
         with:
@@ -89,5 +93,63 @@ jobs:
           path: |
             fuzz/artifacts/awfs_checkpoint/**
             fuzz/corpus/awfs_checkpoint/**
+          if-no-files-found: ignore
+          retention-days: 30
+
+  manifest:
+    name: AWStoreFS manifest libFuzzer
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Cache Cargo and AWStoreFS manifest corpus
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cargo/bin/cargo-fuzz
+            fuzz/corpus/awstore_manifest
+          key: fuzz-awstore-manifest-${{ runner.os }}-${{ hashFiles('fuzz/Cargo.toml', 'fuzz/fuzz_targets/awstore_manifest.rs', 'crates/aw-fs-core/**', 'crates/aw-storefs/**') }}
+          restore-keys: |
+            fuzz-awstore-manifest-${{ runner.os }}-
+
+      - name: Install nightly and cargo-fuzz
+        shell: bash
+        run: |
+          rustup toolchain install nightly --profile minimal
+          if ! command -v cargo-fuzz >/dev/null 2>&1; then
+            cargo +stable install cargo-fuzz --locked
+          fi
+          rustc +nightly -Vv
+          cargo fuzz --version
+
+      - name: Fuzz canonical AWStoreFS manifest parser
+        shell: bash
+        working-directory: fuzz
+        env:
+          DEFAULT_SECONDS: "120"
+          INPUT_SECONDS: ${{ inputs.seconds }}
+        run: |
+          set -euo pipefail
+          SECONDS_TO_RUN="${INPUT_SECONDS:-$DEFAULT_SECONDS}"
+          cargo +nightly fuzz run awstore_manifest -- \
+            -max_total_time="$SECONDS_TO_RUN" \
+            -timeout=10 \
+            -rss_limit_mb=2048 \
+            -print_final_stats=1
+
+      - name: Upload AWStoreFS manifest crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: fuzz-awstore-manifest-crashes
+          path: |
+            fuzz/artifacts/awstore_manifest/**
+            fuzz/corpus/awstore_manifest/**
           if-no-files-found: ignore
           retention-days: 30
