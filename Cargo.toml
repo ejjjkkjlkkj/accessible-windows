@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/aw-accessibility",
     "crates/aw-acpi",
+    "crates/aw-app-compat",
     "crates/aw-bootstate",
     "crates/aw-fs-core",
     "crates/aw-generation",
