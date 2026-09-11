@@ -2,9 +2,9 @@
 
 ## Product target
 
-Accessible Windows is intended to become a standalone operating system for physical PCs, not a theme, Windows modification, virtual-machine image, or application shell.
+Accessible Windows is intended to become a standalone operating system for physical x64 PCs, not a theme, Windows modification, virtual-machine image, or application shell.
 
-The initial hardware contract is deliberately narrow:
+The hardware contract is deliberately narrow and **x86-64 only**:
 
 - x86-64 CPU;
 - UEFI firmware;
@@ -15,7 +15,9 @@ The initial hardware contract is deliberately narrow:
 - NVMe first, SATA/AHCI second;
 - installation to a GPT disk with an EFI System Partition.
 
-Virtual machines are used for deterministic CI and debugging, but every subsystem must be designed for eventual execution on physical hardware.
+ARM and ARM64 are explicitly out of scope. The project will not maintain ARM bootloaders, kernels, CI runners or release artifacts. This decision concentrates engineering and validation on the x64 PC ecosystem.
+
+Virtual machines are used for deterministic CI and debugging, but every subsystem must be designed for eventual execution on physical x64 hardware.
 
 ## Layering
 
@@ -56,7 +58,7 @@ Compatibility environments
 
 Rust is the default language for newly designed privileged components. Unsafe Rust is not globally forbidden forever because hardware access and context switching will require narrowly scoped unsafe code, but every unsafe boundary must eventually be isolated, documented and tested. During bootstrap the public contract crates forbid unsafe code entirely.
 
-The kernel ABI must avoid dependencies on the desktop, Win32 compatibility or a specific UI toolkit.
+The kernel ABI must avoid dependencies on the desktop, Win32 compatibility or a specific UI toolkit. It is an x86-64 ABI only; portability to ARM is not a design requirement.
 
 ## Boot contract
 
@@ -76,7 +78,7 @@ The boot stage must eventually provide the kernel with:
 
 The first installable milestone must support:
 
-1. booting from USB via UEFI;
+1. booting from USB via x86-64 UEFI;
 2. enumerating an NVMe device;
 3. reading and writing GPT structures safely;
 4. creating or selecting an EFI System Partition;
