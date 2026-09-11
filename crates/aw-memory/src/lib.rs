@@ -60,6 +60,30 @@ impl PhysicalRange {
         Self::new(start_address, end)
     }
 
+    /// Cover an arbitrary non-empty physical byte range with whole UEFI pages.
+    #[must_use]
+    pub const fn covering_byte_range(start_address: u64, byte_len: u64) -> Option<Self> {
+        if byte_len == 0 {
+            return None;
+        }
+
+        let end_unaligned = match start_address.checked_add(byte_len) {
+            Some(value) => value,
+            None => return None,
+        };
+        let aligned_start = start_address & !(UEFI_PAGE_SIZE - 1);
+        let aligned_end = if is_page_aligned(end_unaligned) {
+            end_unaligned
+        } else {
+            match end_unaligned.checked_add(UEFI_PAGE_SIZE - 1) {
+                Some(value) => value & !(UEFI_PAGE_SIZE - 1),
+                None => return None,
+            }
+        };
+
+        Self::new(aligned_start, aligned_end)
+    }
+
     #[must_use]
     pub const fn start_address(self) -> u64 {
         self.start_address
@@ -260,6 +284,25 @@ mod tests {
         assert!(PhysicalRange::new(0x20_0000, 0x20_0000).is_none());
         assert!(PhysicalRange::from_page_count(0x20_0000, 0).is_none());
         assert!(PhysicalRange::from_page_count(!(UEFI_PAGE_SIZE - 1), 2).is_none());
+    }
+
+    #[test]
+    fn physical_range_covers_unaligned_byte_ranges() {
+        assert_eq!(
+            PhysicalRange::covering_byte_range(0x20_0003, 1),
+            PhysicalRange::new(0x20_0000, 0x20_1000)
+        );
+        assert_eq!(
+            PhysicalRange::covering_byte_range(0x20_0fff, 2),
+            PhysicalRange::new(0x20_0000, 0x20_2000)
+        );
+        assert_eq!(
+            PhysicalRange::covering_byte_range(0x20_0000, UEFI_PAGE_SIZE),
+            PhysicalRange::new(0x20_0000, 0x20_1000)
+        );
+        assert!(PhysicalRange::covering_byte_range(0x20_0000, 0).is_none());
+        assert!(PhysicalRange::covering_byte_range(u64::MAX, 1).is_none());
+        assert!(PhysicalRange::covering_byte_range(u64::MAX - 1, 1).is_none());
     }
 
     #[test]
