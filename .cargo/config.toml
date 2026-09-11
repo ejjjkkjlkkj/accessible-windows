@@ -2,4 +2,6 @@
 rustflags = [
     "-C", "relocation-model=pic",
     "-C", "code-model=kernel",
+    "-C", "link-arg=-static",
+    "-C", "link-arg=-no-pie",
 ]
