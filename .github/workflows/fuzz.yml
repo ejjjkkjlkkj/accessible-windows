@@ -59,20 +59,21 @@ jobs:
         run: |
           rustup toolchain install nightly --profile minimal
           if ! command -v cargo-fuzz >/dev/null 2>&1; then
-            cargo install cargo-fuzz --locked
+            cargo +stable install cargo-fuzz --locked
           fi
           rustc +nightly -Vv
           cargo fuzz --version
 
       - name: Fuzz RSDP parser
         shell: bash
+        working-directory: fuzz
         env:
           DEFAULT_SECONDS: "120"
           INPUT_SECONDS: ${{ inputs.seconds }}
         run: |
           set -euo pipefail
           SECONDS_TO_RUN="${INPUT_SECONDS:-$DEFAULT_SECONDS}"
-          cargo +nightly fuzz run rsdp --manifest-path fuzz/Cargo.toml -- \
+          cargo +nightly fuzz run rsdp -- \
             -max_total_time="$SECONDS_TO_RUN" \
             -timeout=10 \
             -rss_limit_mb=2048 \
