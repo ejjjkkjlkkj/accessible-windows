@@ -1,6 +1,4 @@
-use crate::{
-    MappingError, PageTable, PageTableEntry, PageTableFlags, PhysicalFrame, VirtualPage,
-};
+use crate::{MappingError, PageTable, PageTableEntry, PageTableFlags, PhysicalFrame, VirtualPage};
 
 /// Supplies physical frames for page-table storage.
 ///
