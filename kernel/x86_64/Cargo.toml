@@ -1,0 +1,18 @@
+[package]
+name = "aw-kernel-x86_64"
+version = "0.1.0"
+edition = "2024"
+publish = false
+build = "build.rs"
+
+[dependencies]
+aw-kernel-core = { path = "../../crates/aw-kernel-core" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+strip = false
