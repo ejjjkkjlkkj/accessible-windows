@@ -14,13 +14,13 @@
 - [x] Add an x86-64 UEFI boot application
 - [x] Build the `.efi` executable in CI
 - [x] Print deterministic UEFI console diagnostics
+- [x] Add an OVMF/QEMU execution smoke test
 - [ ] Read the UEFI memory map
 - [ ] Detect GOP framebuffer
 - [ ] Locate ACPI RSDP
 - [ ] Exit UEFI boot services safely
 - [ ] Transfer control to a freestanding kernel entry point
-- [ ] Produce a bootable FAT/ESP test image
-- [ ] Boot under QEMU with automated smoke validation
+- [ ] Produce a bootable FAT/ESP test image artifact
 
 ## Phase 2 - Kernel foundation
 

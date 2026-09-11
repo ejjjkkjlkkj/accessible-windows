@@ -57,6 +57,42 @@ jobs:
       - name: Build UEFI executable
         run: cargo build --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
 
+      - name: Install QEMU and OVMF
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+
+      - name: UEFI boot smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p esp/EFI/BOOT
+          cp boot/uefi/target/x86_64-unknown-uefi/release/aw-uefi-boot.efi esp/EFI/BOOT/BOOTX64.EFI
+
+          OVMF_CODE="$(find /usr/share/OVMF -maxdepth 1 -type f -name 'OVMF_CODE*.fd' | sort | head -n 1)"
+          if [ -z "$OVMF_CODE" ]; then
+            echo "No OVMF firmware found" >&2
+            exit 1
+          fi
+
+          set +e
+          timeout 20s qemu-system-x86_64 \
+            -machine q35 \
+            -m 256M \
+            -display none \
+            -serial none \
+            -monitor none \
+            -no-reboot \
+            -debugcon file:uefi-debug.log \
+            -bios "$OVMF_CODE" \
+            -drive format=raw,file=fat:rw:esp
+          QEMU_STATUS=$?
+          set -e
+
+          echo "QEMU_STATUS=$QEMU_STATUS"
+          cat uefi-debug.log || true
+          grep -F "AW_BOOT_OK stage=uefi_init arch=x86_64" uefi-debug.log
+
       - name: Upload EFI executable
         uses: actions/upload-artifact@v4
         with:
