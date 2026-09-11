@@ -4,8 +4,11 @@
 extern crate alloc;
 
 use alloc::vec;
-use aw_acpi::{RsdpError, RsdpInfo};
-use aw_kernel_core::{FramebufferHandoff, HandoffPixelFormat, KernelHandoff};
+use aw_acpi::{McfgError, RsdpError, RsdpInfo, SdtError};
+use aw_kernel_core::{
+    FramebufferHandoff, HandoffPixelFormat, KernelHandoff, PciEcamHandoff,
+    MAX_PCIE_ECAM_REGIONS,
+};
 use uefi::boot::{self, AllocateType};
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
 use uefi::prelude::*;
@@ -16,11 +19,25 @@ use uefi::table::cfg::ConfigTableEntry;
 use uefi::{cstr16, system, Status};
 
 const UEFI_PAGE_SIZE: usize = 4096;
+const MAX_ACPI_SDT_LEN: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 struct LoadedKernel {
     entry_address: usize,
     image_size: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct EcamDiscovery {
+    regions: [PciEcamHandoff; MAX_PCIE_ECAM_REGIONS],
+    count: u32,
+}
+
+impl EcamDiscovery {
+    const NONE: Self = Self {
+        regions: [PciEcamHandoff::NONE; MAX_PCIE_ECAM_REGIONS],
+        count: 0,
+    };
 }
 
 fn validate_firmware_rsdp(address: usize, table_revision: u8) -> Result<RsdpInfo, RsdpError> {
@@ -47,6 +64,169 @@ fn validate_firmware_rsdp(address: usize, table_revision: u8) -> Result<RsdpInfo
     // borrow is also consumed before ExitBootServices and is not retained.
     let full = unsafe { core::slice::from_raw_parts(address as *const u8, declared_length) };
     aw_acpi::validate_rsdp(full)
+}
+
+fn borrow_valid_sdt(address: u64) -> Result<&'static [u8], SdtError> {
+    if address == 0 || address > usize::MAX as u64 {
+        return Err(SdtError::InvalidLength);
+    }
+
+    // SAFETY: The caller obtains SDT addresses from a validated ACPI root table.
+    // We first read only the fixed 36-byte header and cap the declared length
+    // before expanding the slice. All use occurs before ExitBootServices.
+    let header = unsafe {
+        core::slice::from_raw_parts(address as usize as *const u8, aw_acpi::SDT_HEADER_LEN)
+    };
+    let declared_length =
+        u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+    if !(aw_acpi::SDT_HEADER_LEN..=MAX_ACPI_SDT_LEN).contains(&declared_length) {
+        return Err(SdtError::InvalidLength);
+    }
+
+    // SAFETY: `declared_length` is bounded above. The pointer came from ACPI
+    // firmware data reachable through a validated root table.
+    let full = unsafe {
+        core::slice::from_raw_parts(address as usize as *const u8, declared_length)
+    };
+    aw_acpi::validate_sdt(full)?;
+    Ok(full)
+}
+
+fn discover_pcie_ecam(rsdp: &RsdpInfo) -> EcamDiscovery {
+    let (root_address, entry_size, expected_signature) = match rsdp.xsdt_address {
+        Some(xsdt) if xsdt != 0 => (xsdt, 8_usize, *b"XSDT"),
+        _ if rsdp.rsdt_address != 0 => (u64::from(rsdp.rsdt_address), 4_usize, *b"RSDT"),
+        _ => {
+            log::warn!("AW_PCIE_ECAM_UNAVAILABLE reason=no_acpi_root");
+            return EcamDiscovery::NONE;
+        }
+    };
+
+    let root = match borrow_valid_sdt(root_address) {
+        Ok(root) => root,
+        Err(error) => {
+            log::warn!("AW_PCIE_ECAM_UNAVAILABLE reason=root_invalid error={:?}", error);
+            return EcamDiscovery::NONE;
+        }
+    };
+
+    if root[..4] != expected_signature {
+        log::warn!(
+            "AW_PCIE_ECAM_UNAVAILABLE reason=root_signature actual={:?}",
+            &root[..4]
+        );
+        return EcamDiscovery::NONE;
+    }
+
+    let payload = &root[aw_acpi::SDT_HEADER_LEN..];
+    if !payload.len().is_multiple_of(entry_size) {
+        log::warn!("AW_PCIE_ECAM_UNAVAILABLE reason=root_entry_alignment");
+        return EcamDiscovery::NONE;
+    }
+
+    let mut discovery = EcamDiscovery::NONE;
+    let mut offset = 0_usize;
+    while offset < payload.len() {
+        let table_address = if entry_size == 8 {
+            u64::from_le_bytes([
+                payload[offset],
+                payload[offset + 1],
+                payload[offset + 2],
+                payload[offset + 3],
+                payload[offset + 4],
+                payload[offset + 5],
+                payload[offset + 6],
+                payload[offset + 7],
+            ])
+        } else {
+            u64::from(u32::from_le_bytes([
+                payload[offset],
+                payload[offset + 1],
+                payload[offset + 2],
+                payload[offset + 3],
+            ]))
+        };
+        offset += entry_size;
+
+        let table = match borrow_valid_sdt(table_address) {
+            Ok(table) => table,
+            Err(error) => {
+                log::warn!(
+                    "AW_ACPI_CHILD_SKIP address=0x{:x} error={:?}",
+                    table_address,
+                    error
+                );
+                continue;
+            }
+        };
+        if table[..4] != *b"MCFG" {
+            continue;
+        }
+
+        let mcfg = match aw_acpi::validate_mcfg(table) {
+            Ok(mcfg) => mcfg,
+            Err(error) => {
+                match error {
+                    McfgError::InvalidSdt(inner) => log::warn!(
+                        "AW_PCIE_ECAM_UNAVAILABLE reason=mcfg_sdt error={:?}",
+                        inner
+                    ),
+                    other => log::warn!(
+                        "AW_PCIE_ECAM_UNAVAILABLE reason=mcfg_invalid error={:?}",
+                        other
+                    ),
+                }
+                continue;
+            }
+        };
+
+        for allocation in mcfg.allocations() {
+            if discovery.count as usize >= MAX_PCIE_ECAM_REGIONS {
+                log::warn!(
+                    "AW_PCIE_ECAM_TRUNCATED max_regions={}",
+                    MAX_PCIE_ECAM_REGIONS
+                );
+                return discovery;
+            }
+
+            let region = PciEcamHandoff {
+                base_address: allocation.base_address,
+                segment_group: allocation.segment_group,
+                start_bus: allocation.start_bus,
+                end_bus: allocation.end_bus,
+                reserved: 0,
+            };
+            if !region.is_valid() {
+                log::warn!(
+                    "AW_PCIE_ECAM_REGION_SKIP base=0x{:x} segment={} buses={}-{}",
+                    region.base_address,
+                    region.segment_group,
+                    region.start_bus,
+                    region.end_bus
+                );
+                continue;
+            }
+
+            let index = discovery.count as usize;
+            discovery.regions[index] = region;
+            discovery.count += 1;
+            log::info!(
+                "AW_PCIE_ECAM_REGION_OK index={} base=0x{:x} segment={} buses={}-{}",
+                index,
+                region.base_address,
+                region.segment_group,
+                region.start_bus,
+                region.end_bus
+            );
+        }
+    }
+
+    if discovery.count == 0 {
+        log::warn!("AW_PCIE_ECAM_UNAVAILABLE reason=no_mcfg_allocation");
+    } else {
+        log::info!("AW_PCIE_ECAM_DISCOVERY_OK regions={}", discovery.count);
+    }
+    discovery
 }
 
 fn load_native_kernel() -> Result<LoadedKernel, Status> {
@@ -239,6 +419,8 @@ fn main() -> Status {
         rsdp.xsdt_address.unwrap_or(0)
     );
 
+    let ecam = discover_pcie_ecam(&rsdp);
+
     let gop_handle = match boot::get_handle_for_protocol::<GraphicsOutput>() {
         Ok(handle) => handle,
         Err(_) => {
@@ -315,6 +497,8 @@ fn main() -> Status {
         acpi_address as u64,
         final_memory_map.len() as u64,
         framebuffer,
+        ecam.regions,
+        ecam.count,
     );
 
     if let Err(error) = aw_kernel_core::enter(&handoff) {
@@ -325,12 +509,13 @@ fn main() -> Status {
     }
 
     log::info!(
-        "AW_KERNEL_HANDOFF_OK magic=0x{:x} abi={} size={} memory_entries={} flags=0x{:x}",
+        "AW_KERNEL_HANDOFF_OK magic=0x{:x} abi={} size={} memory_entries={} flags=0x{:x} ecam_regions={}",
         handoff.magic,
         handoff.abi_version,
         handoff.struct_size,
         handoff.memory_map_entries,
-        handoff.flags
+        handoff.flags,
+        handoff.pcie_ecam_count
     );
     log::info!(
         "AW_NATIVE_KERNEL_TRANSFER address=0x{:x} bytes={}",
