@@ -51,10 +51,10 @@ pub fn encode_manifest<const OBJECTS: usize>(
     manifest: &StoreManifest<OBJECTS>,
     output: &mut [u8],
 ) -> Result<usize, ManifestEncodeError> {
-    let object_count = u32::try_from(manifest.len())
-        .map_err(|_| ManifestEncodeError::ObjectCountOverflow)?;
-    let required = encoded_manifest_len(manifest.len())
-        .ok_or(ManifestEncodeError::ObjectCountOverflow)?;
+    let object_count =
+        u32::try_from(manifest.len()).map_err(|_| ManifestEncodeError::ObjectCountOverflow)?;
+    let required =
+        encoded_manifest_len(manifest.len()).ok_or(ManifestEncodeError::ObjectCountOverflow)?;
     if output.len() < required {
         return Err(ManifestEncodeError::OutputTooSmall);
     }
@@ -70,10 +70,8 @@ pub fn encode_manifest<const OBJECTS: usize>(
         let object = manifest.object(index).expect("manifest length invariant");
         let base = MANIFEST_HEADER_BYTES + index * OBJECT_RECORD_BYTES;
         output[base] = encode_class(object.class());
-        output[base + 8..base + 16]
-            .copy_from_slice(&object.extent().first_block().to_le_bytes());
-        output[base + 16..base + 24]
-            .copy_from_slice(&object.extent().block_count().to_le_bytes());
+        output[base + 8..base + 16].copy_from_slice(&object.extent().first_block().to_le_bytes());
+        output[base + 16..base + 24].copy_from_slice(&object.extent().block_count().to_le_bytes());
         output[base + 24..base + 32]
             .copy_from_slice(&object.extent().logical_bytes().to_le_bytes());
         output[base + 32..base + 64].copy_from_slice(&object.digest().bytes());
@@ -114,14 +112,14 @@ pub fn decode_manifest<const OBJECTS: usize>(
     if object_count > OBJECTS {
         return Err(ManifestDecodeError::ObjectCountOverflow);
     }
-    let expected_len = encoded_manifest_len(object_count)
-        .ok_or(ManifestDecodeError::ObjectCountOverflow)?;
+    let expected_len =
+        encoded_manifest_len(object_count).ok_or(ManifestDecodeError::ObjectCountOverflow)?;
     if input.len() != expected_len {
         return Err(ManifestDecodeError::InvalidLength);
     }
 
-    let mut manifest = StoreManifest::new(generation, volume_blocks)
-        .map_err(ManifestDecodeError::InvalidPlan)?;
+    let mut manifest =
+        StoreManifest::new(generation, volume_blocks).map_err(ManifestDecodeError::InvalidPlan)?;
     for index in 0..object_count {
         let base = MANIFEST_HEADER_BYTES + index * OBJECT_RECORD_BYTES;
         let class = decode_class(input[base])?;
