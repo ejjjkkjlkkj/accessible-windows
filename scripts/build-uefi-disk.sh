@@ -31,7 +31,7 @@ if [ ! -f "$KERNEL_BINARY" ]; then
   exit 1
 fi
 
-for tool in sgdisk losetup mkfs.vfat mount; do
+for tool in sgdisk losetup mkfs.vfat mount cmp; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "Required tool not found: $tool" >&2
     exit 1
@@ -80,10 +80,18 @@ fi
 sudo mkfs.vfat -F 32 -n AWBOOT "$PARTITION"
 sudo mount "$PARTITION" "$MOUNT_DIR"
 MOUNTED=1
-sudo mkdir -p "$MOUNT_DIR/EFI/BOOT" "$MOUNT_DIR/EFI/ACCESSIBLE"
+sudo mkdir -p "$MOUNT_DIR/EFI/BOOT"
 sudo cp "$EFI_BINARY" "$MOUNT_DIR/EFI/BOOT/BOOTX64.EFI"
-sudo cp "$KERNEL_BINARY" "$MOUNT_DIR/EFI/ACCESSIBLE/KERNEL.BIN"
+sudo cp "$KERNEL_BINARY" "$MOUNT_DIR/KERNEL.BIN"
 sync
+
+if [ ! -s "$MOUNT_DIR/EFI/BOOT/BOOTX64.EFI" ] || [ ! -s "$MOUNT_DIR/KERNEL.BIN" ]; then
+  echo "ESP verification failed: required boot files are missing" >&2
+  exit 1
+fi
+sudo cmp "$KERNEL_BINARY" "$MOUNT_DIR/KERNEL.BIN"
+echo "AW_ESP_KERNEL_VERIFY_OK path=\\KERNEL.BIN bytes=$(stat -c%s "$KERNEL_BINARY")"
+
 sudo umount "$MOUNT_DIR"
 MOUNTED=0
 sudo losetup -d "$LOOP_DEVICE"
