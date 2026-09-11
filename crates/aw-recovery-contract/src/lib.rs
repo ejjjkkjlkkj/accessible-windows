@@ -141,6 +141,133 @@ pub enum RecoveryAction {
     PowerOffSafely,
 }
 
+impl RecoveryAction {
+    /// Actions that can replace system content or end the current session are never one-key
+    /// operations. They require a distinct confirmation command that can be spoken or brailled.
+    #[must_use]
+    pub const fn requires_explicit_confirmation(self) -> bool {
+        matches!(Self::ReinstallSignedImage | Self::PowerOffSafely, self)
+    }
+}
+
+/// Stable keyboard traversal order shared by speech, braille and any visual frontend.
+///
+/// The order deliberately puts diagnostic export before reinstall and power-off. Nothing in this
+/// array is activated merely because it is selected.
+pub const RECOVERY_ACTION_ORDER: [RecoveryAction; 6] = [
+    RecoveryAction::RetryCurrentGeneration,
+    RecoveryAction::BootPreviousGeneration,
+    RecoveryAction::EnterRecovery,
+    RecoveryAction::ExportDiagnostics,
+    RecoveryAction::ReinstallSignedImage,
+    RecoveryAction::PowerOffSafely,
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecoveryKeyboardCommand {
+    Previous,
+    Next,
+    Activate,
+    Confirm,
+    Cancel,
+    Timeout,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecoveryInteractionOutcome {
+    SelectionChanged(RecoveryAction),
+    ConfirmationRequired(RecoveryAction),
+    ConfirmationCancelled,
+    ActionReady(RecoveryAction),
+    NoAction,
+}
+
+/// Deterministic, allocation-free keyboard interaction state for recovery-critical actions.
+///
+/// There is no pointer path in this contract. Selection never wraps implicitly. A timeout never
+/// activates or confirms any action, including while an explicit confirmation is pending.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RecoveryMenuState {
+    selected: usize,
+    pending_confirmation: Option<RecoveryAction>,
+}
+
+impl Default for RecoveryMenuState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RecoveryMenuState {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            selected: 0,
+            pending_confirmation: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn selected_action(self) -> RecoveryAction {
+        RECOVERY_ACTION_ORDER[self.selected]
+    }
+
+    #[must_use]
+    pub const fn pending_confirmation(self) -> Option<RecoveryAction> {
+        self.pending_confirmation
+    }
+
+    pub fn apply(&mut self, command: RecoveryKeyboardCommand) -> RecoveryInteractionOutcome {
+        if let Some(action) = self.pending_confirmation {
+            return match command {
+                RecoveryKeyboardCommand::Confirm => {
+                    self.pending_confirmation = None;
+                    RecoveryInteractionOutcome::ActionReady(action)
+                }
+                RecoveryKeyboardCommand::Cancel => {
+                    self.pending_confirmation = None;
+                    RecoveryInteractionOutcome::ConfirmationCancelled
+                }
+                RecoveryKeyboardCommand::Timeout => RecoveryInteractionOutcome::NoAction,
+                RecoveryKeyboardCommand::Previous
+                | RecoveryKeyboardCommand::Next
+                | RecoveryKeyboardCommand::Activate => RecoveryInteractionOutcome::NoAction,
+            };
+        }
+
+        match command {
+            RecoveryKeyboardCommand::Previous => {
+                if self.selected > 0 {
+                    self.selected -= 1;
+                    RecoveryInteractionOutcome::SelectionChanged(self.selected_action())
+                } else {
+                    RecoveryInteractionOutcome::NoAction
+                }
+            }
+            RecoveryKeyboardCommand::Next => {
+                if self.selected + 1 < RECOVERY_ACTION_ORDER.len() {
+                    self.selected += 1;
+                    RecoveryInteractionOutcome::SelectionChanged(self.selected_action())
+                } else {
+                    RecoveryInteractionOutcome::NoAction
+                }
+            }
+            RecoveryKeyboardCommand::Activate => {
+                let action = self.selected_action();
+                if action.requires_explicit_confirmation() {
+                    self.pending_confirmation = Some(action);
+                    RecoveryInteractionOutcome::ConfirmationRequired(action)
+                } else {
+                    RecoveryInteractionOutcome::ActionReady(action)
+                }
+            }
+            RecoveryKeyboardCommand::Confirm
+            | RecoveryKeyboardCommand::Cancel
+            | RecoveryKeyboardCommand::Timeout => RecoveryInteractionOutcome::NoAction,
+        }
+    }
+}
+
 /// Machine-readable recovery event. UI, speech, braille and serial frontends all consume the same
 /// event instead of inventing separate visual-only error paths.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -260,5 +387,102 @@ mod tests {
         assert_eq!(event.code().code(), 0x1301);
         assert_eq!(event.action(), RecoveryAction::BootPreviousGeneration);
         assert_eq!(event.generation(), Some(41));
+    }
+
+    #[test]
+    fn keyboard_action_order_is_stable_and_non_wrapping() {
+        assert_eq!(
+            RECOVERY_ACTION_ORDER,
+            [
+                RecoveryAction::RetryCurrentGeneration,
+                RecoveryAction::BootPreviousGeneration,
+                RecoveryAction::EnterRecovery,
+                RecoveryAction::ExportDiagnostics,
+                RecoveryAction::ReinstallSignedImage,
+                RecoveryAction::PowerOffSafely,
+            ]
+        );
+
+        let mut menu = RecoveryMenuState::new();
+        assert_eq!(menu.selected_action(), RecoveryAction::RetryCurrentGeneration);
+        assert_eq!(
+            menu.apply(RecoveryKeyboardCommand::Previous),
+            RecoveryInteractionOutcome::NoAction
+        );
+        assert_eq!(
+            menu.apply(RecoveryKeyboardCommand::Next),
+            RecoveryInteractionOutcome::SelectionChanged(RecoveryAction::BootPreviousGeneration)
+        );
+    }
+
+    #[test]
+    fn signed_reinstall_needs_distinct_confirmation_command() {
+        let mut menu = RecoveryMenuState::new();
+        for _ in 0..4 {
+            let _ = menu.apply(RecoveryKeyboardCommand::Next);
+        }
+        assert_eq!(menu.selected_action(), RecoveryAction::ReinstallSignedImage);
+        assert_eq!(
+            menu.apply(RecoveryKeyboardCommand::Activate),
+            RecoveryInteractionOutcome::ConfirmationRequired(RecoveryAction::ReinstallSignedImage)
+        );
+        assert_eq!(
+            menu.pending_confirmation(),
+            Some(RecoveryAction::ReinstallSignedImage)
+        );
+        assert_eq!(
+            menu.apply(RecoveryKeyboardCommand::Activate),
+            RecoveryInteractionOutcome::NoAction
+        );
+        assert_eq!(
+            menu.apply(RecoveryKeyboardCommand::Confirm),
+            RecoveryInteractionOutcome::ActionReady(RecoveryAction::ReinstallSignedImage)
+        );
+        assert_eq!(menu.pending_confirmation(), None);
+    }
+
+    #[test]
+    fn timeout_never_confirms_destructive_action() {
+        let mut menu = RecoveryMenuState::new();
+        for _ in 0..5 {
+            let _ = menu.apply(RecoveryKeyboardCommand::Next);
+        }
+        assert_eq!(menu.selected_action(), RecoveryAction::PowerOffSafely);
+        assert_eq!(
+            menu.apply(RecoveryKeyboardCommand::Activate),
+            RecoveryInteractionOutcome::ConfirmationRequired(RecoveryAction::PowerOffSafely)
+        );
+        assert_eq!(
+            menu.apply(RecoveryKeyboardCommand::Timeout),
+            RecoveryInteractionOutcome::NoAction
+        );
+        assert_eq!(
+            menu.pending_confirmation(),
+            Some(RecoveryAction::PowerOffSafely)
+        );
+    }
+
+    #[test]
+    fn cancel_clears_confirmation_without_running_action() {
+        let mut menu = RecoveryMenuState::new();
+        for _ in 0..4 {
+            let _ = menu.apply(RecoveryKeyboardCommand::Next);
+        }
+        let _ = menu.apply(RecoveryKeyboardCommand::Activate);
+        assert_eq!(
+            menu.apply(RecoveryKeyboardCommand::Cancel),
+            RecoveryInteractionOutcome::ConfirmationCancelled
+        );
+        assert_eq!(menu.pending_confirmation(), None);
+    }
+
+    #[test]
+    fn boot_previous_generation_is_direct_keyboard_action() {
+        let mut menu = RecoveryMenuState::new();
+        let _ = menu.apply(RecoveryKeyboardCommand::Next);
+        assert_eq!(
+            menu.apply(RecoveryKeyboardCommand::Activate),
+            RecoveryInteractionOutcome::ActionReady(RecoveryAction::BootPreviousGeneration)
+        );
     }
 }
