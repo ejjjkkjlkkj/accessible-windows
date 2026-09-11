@@ -73,6 +73,14 @@ fn final_trial() -> BootStateRecord {
     .unwrap()
 }
 
+fn consume_final_trial_and_roll_back() -> BootStateRecord {
+    final_trial()
+        .prepare_trial_boot()
+        .unwrap()
+        .after_failed_trial()
+        .unwrap()
+}
+
 #[derive(Default)]
 struct RecoveryRecorder {
     accepted: bool,
@@ -133,7 +141,7 @@ fn speech_failure_is_nonvisual_diagnostic_and_rolls_back_known_good() {
     assert_eq!(failure.action(), RecoveryAction::BootPreviousGeneration);
     assert_eq!(failure.generation(), Some(42));
 
-    let rolled_back = final_trial().after_failed_trial().unwrap();
+    let rolled_back = consume_final_trial_and_roll_back();
     assert_eq!(rolled_back.selected().generation(), 41);
     assert_eq!(rolled_back.previous_successful().generation(), 41);
     assert_eq!(rolled_back.state(), BootSelectionState::Successful);
@@ -178,10 +186,23 @@ fn delivered_braille_failure_event_precedes_known_good_rollback() {
     assert_eq!(delivered.action(), RecoveryAction::BootPreviousGeneration);
     assert_eq!(delivered.generation(), Some(42));
 
-    let rolled_back = final_trial().after_failed_trial().unwrap();
+    let rolled_back = consume_final_trial_and_roll_back();
     assert_eq!(rolled_back.selected().generation(), 41);
     assert_eq!(rolled_back.previous_successful().generation(), 41);
     assert_eq!(rolled_back.state(), BootSelectionState::Successful);
+}
+
+#[test]
+fn power_loss_after_attempt_consumption_cannot_loop_broken_generation_forever() {
+    let persisted_before_transfer = final_trial().prepare_trial_boot().unwrap();
+    assert_eq!(
+        persisted_before_transfer.state(),
+        BootSelectionState::TrialAttempt { tries_remaining: 0 }
+    );
+
+    let recovered_after_power_loss = persisted_before_transfer.after_interrupted_trial().unwrap();
+    assert_eq!(recovered_after_power_loss.selected().generation(), 41);
+    assert_eq!(recovered_after_power_loss.state(), BootSelectionState::Successful);
 }
 
 #[test]
@@ -220,7 +241,7 @@ fn inaccessible_recovery_cannot_promote_trial_and_exhaustion_rolls_back() {
     assert_eq!(failure.code().code(), 0x1501);
     assert_eq!(failure.action(), RecoveryAction::BootPreviousGeneration);
 
-    let rolled_back = final_trial().after_failed_trial().unwrap();
+    let rolled_back = consume_final_trial_and_roll_back();
     assert_eq!(rolled_back.selected().generation(), 41);
     assert_eq!(rolled_back.state(), BootSelectionState::Successful);
 }
@@ -238,7 +259,7 @@ fn graphical_only_boot_never_becomes_known_good() {
         ))
     );
 
-    let rolled_back = final_trial().after_failed_trial().unwrap();
+    let rolled_back = consume_final_trial_and_roll_back();
     assert_eq!(rolled_back.selected().generation(), 41);
     assert_eq!(rolled_back.state(), BootSelectionState::Successful);
 }
