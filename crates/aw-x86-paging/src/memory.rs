@@ -39,6 +39,19 @@ impl FrameAllocator for BootstrapFrameAllocator<'_, '_> {
     }
 }
 
+impl<const TABLES: usize> crate::OfflinePageTableBuilder<TABLES> {
+    /// Return one deterministic page-table image together with the physical frame reserved for it.
+    ///
+    /// The returned table is still ordinary Rust memory. This accessor is the safe handoff point
+    /// for a later architecture-specific materializer; it never writes physical memory itself.
+    #[must_use]
+    pub fn table_image(&self, index: usize) -> Option<(PhysicalFrame, &crate::PageTable)> {
+        let frame = self.table_frame(index)?;
+        let table = self.table_for_frame(frame)?;
+        Some((frame, table))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,6 +93,13 @@ mod tests {
             assert_eq!(builder.table_frame(1).unwrap().start_address(), 0x20_3000);
             assert_eq!(builder.table_frame(2).unwrap().start_address(), 0x20_4000);
             assert_eq!(builder.table_frame(3).unwrap().start_address(), 0x20_5000);
+
+            for index in 0..builder.table_count() {
+                let (frame, table) = builder.table_image(index).unwrap();
+                assert_eq!(frame, builder.table_frame(index).unwrap());
+                assert!(core::ptr::eq(table, builder.table_for_frame(frame).unwrap()));
+            }
+            assert!(builder.table_image(builder.table_count()).is_none());
         }
 
         assert_eq!(pages.allocated_pages(), 4);
