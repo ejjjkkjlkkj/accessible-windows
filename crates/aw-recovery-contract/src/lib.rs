@@ -146,7 +146,7 @@ impl RecoveryAction {
     /// operations. They require a distinct confirmation command that can be spoken or brailled.
     #[must_use]
     pub const fn requires_explicit_confirmation(self) -> bool {
-        matches!(Self::ReinstallSignedImage | Self::PowerOffSafely, self)
+        matches!(self, Self::ReinstallSignedImage | Self::PowerOffSafely)
     }
 }
 
