@@ -8,6 +8,7 @@ use uefi::fs::FileSystem;
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
 use uefi::prelude::*;
 use uefi::proto::console::gop::{GraphicsOutput, PixelFormat as UefiPixelFormat};
+use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::cfg::ConfigTableEntry;
 use uefi::{cstr16, system, Status};
 
@@ -41,8 +42,25 @@ fn validate_firmware_rsdp(address: usize, table_revision: u8) -> Result<RsdpInfo
 }
 
 fn load_native_kernel() -> Result<usize, Status> {
-    let image_handle = boot::image_handle();
-    let file_system = boot::get_image_file_system(image_handle).map_err(|error| error.status())?;
+    let file_system = match boot::get_image_file_system(boot::image_handle()) {
+        Ok(file_system) => {
+            log::info!("AW_KERNEL_FS_OK source=image_handle");
+            file_system
+        }
+        Err(error) => {
+            log::warn!(
+                "AW_KERNEL_FS_FALLBACK image_status={:?}",
+                error.status()
+            );
+            let handle = boot::get_handle_for_protocol::<SimpleFileSystem>()
+                .map_err(|error| error.status())?;
+            let file_system = boot::open_protocol_exclusive::<SimpleFileSystem>(handle)
+                .map_err(|error| error.status())?;
+            log::info!("AW_KERNEL_FS_OK source=protocol_scan");
+            file_system
+        }
+    };
+
     let mut file_system = FileSystem::new(file_system);
     let kernel_image = file_system
         .read(cstr16!(r"\EFI\ACCESSIBLE\KERNEL.BIN"))
