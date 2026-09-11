@@ -54,7 +54,7 @@ jobs:
           rustup default stable
           rustup target add x86_64-unknown-uefi x86_64-unknown-none
 
-      - name: Build and validate PIC native kernel
+      - name: Build and validate relocatable flat kernel
         shell: bash
         run: |
           set -euo pipefail
@@ -62,22 +62,32 @@ jobs:
           KERNEL_ELF="kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64"
           KERNEL_BIN="${KERNEL_ELF}.bin"
 
+          readelf -hW "$KERNEL_ELF"
+          objdump -h "$KERNEL_ELF"
+          nm -n "$KERNEL_ELF"
+
+          ELF_TYPE="$(readelf -hW "$KERNEL_ELF" | awk '/Type:/ { print $2; exit }')"
+          if [ "$ELF_TYPE" != "EXEC" ]; then
+            echo "Kernel ELF must be static ET_EXEC before flattening; got: $ELF_TYPE" >&2
+            exit 1
+          fi
+
           START_ADDRESS="$(nm -n "$KERNEL_ELF" | awk '$3 == "_start" { print $1; exit }')"
-          if [ "$START_ADDRESS" != "0000000000000000" ]; then
-            echo "Kernel _start must be linked at offset zero; got: $START_ADDRESS" >&2
-            nm -n "$KERNEL_ELF"
+          TEXT_ADDRESS="$(objdump -h "$KERNEL_ELF" | awk '$2 == ".text" { print $4; exit }')"
+          if [ -z "$START_ADDRESS" ] || [ -z "$TEXT_ADDRESS" ] || [ "$START_ADDRESS" != "$TEXT_ADDRESS" ]; then
+            echo "Kernel _start must be the first byte of the flattened .text image: start=$START_ADDRESS text=$TEXT_ADDRESS" >&2
             exit 1
           fi
 
           readelf -rW "$KERNEL_ELF" | tee kernel-relocations.txt
           if grep -Eq 'R_X86_64_' kernel-relocations.txt; then
-            echo "Flat PIC kernel still contains runtime relocations" >&2
+            echo "Flat kernel still contains runtime relocations" >&2
             exit 1
           fi
 
           objcopy -O binary "$KERNEL_ELF" "$KERNEL_BIN"
           test -s "$KERNEL_BIN"
-          echo "AW_NATIVE_KERNEL_BUILD_OK elf=$KERNEL_ELF bin=$KERNEL_BIN bytes=$(stat -c%s "$KERNEL_BIN") start=0x$START_ADDRESS relocations=none"
+          echo "AW_NATIVE_KERNEL_BUILD_OK elf=$KERNEL_ELF bin=$KERNEL_BIN bytes=$(stat -c%s "$KERNEL_BIN") start_vma=0x$START_ADDRESS relocations=none"
 
       - name: Build UEFI executable
         run: cargo build --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
