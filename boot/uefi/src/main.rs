@@ -6,8 +6,8 @@ extern crate alloc;
 use alloc::vec;
 use aw_acpi::{McfgError, RsdpError, RsdpInfo, SdtError};
 use aw_kernel_core::{
-    FramebufferHandoff, HandoffPixelFormat, KernelHandoff, MemoryDescriptorHandoff,
-    MemoryMapHandoff, PciEcamHandoff, MAX_PCIE_ECAM_REGIONS,
+    FramebufferHandoff, HandoffPixelFormat, KernelHandoff, KernelImageHandoff,
+    MemoryDescriptorHandoff, MemoryMapHandoff, PciEcamHandoff, MAX_PCIE_ECAM_REGIONS,
 };
 use uefi::boot::{self, AllocateType};
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
@@ -26,6 +26,7 @@ const NORMALIZED_MEMORY_MAP_PAGES: usize = 16;
 struct LoadedKernel {
     entry_address: usize,
     image_size: usize,
+    allocation_size: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -353,6 +354,7 @@ fn load_native_kernel() -> Result<LoadedKernel, Status> {
     Ok(LoadedKernel {
         entry_address: load_address,
         image_size: kernel_image.len(),
+        allocation_size: allocation_len,
     })
 }
 
@@ -584,8 +586,27 @@ fn main() -> Status {
         memory_map_handoff.descriptor_size
     );
 
+    let kernel_image_handoff = KernelImageHandoff {
+        physical_address: loaded_kernel.entry_address as u64,
+        image_byte_len: loaded_kernel.image_size as u64,
+        allocation_byte_len: loaded_kernel.allocation_size as u64,
+    };
+    if !kernel_image_handoff.is_valid() {
+        log::error!("AW_KERNEL_IMAGE_HANDOFF_FAIL");
+        loop {
+            core::hint::spin_loop();
+        }
+    }
+    log::info!(
+        "AW_KERNEL_IMAGE_HANDOFF_OK address=0x{:x} image_bytes={} allocation_bytes={}",
+        kernel_image_handoff.physical_address,
+        kernel_image_handoff.image_byte_len,
+        kernel_image_handoff.allocation_byte_len
+    );
+
     let handoff = KernelHandoff::new(
         acpi_address as u64,
+        kernel_image_handoff,
         memory_map_handoff,
         framebuffer,
         ecam.regions,
