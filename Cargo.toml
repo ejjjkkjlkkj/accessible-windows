@@ -11,6 +11,7 @@ members = [
     "crates/aw-kernel-contract",
     "crates/aw-kernel-core",
     "crates/aw-macho",
+    "crates/aw-macho-dyld",
     "crates/aw-macho-loader",
     "crates/aw-memory",
     "crates/aw-pci",
