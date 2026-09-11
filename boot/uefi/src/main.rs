@@ -3,11 +3,16 @@
 
 use aw_acpi::{RsdpError, RsdpInfo};
 use aw_kernel_core::{FramebufferHandoff, HandoffPixelFormat, KernelHandoff};
+use uefi::boot::{self, AllocateType};
+use uefi::fs::FileSystem;
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
 use uefi::prelude::*;
 use uefi::proto::console::gop::{GraphicsOutput, PixelFormat as UefiPixelFormat};
 use uefi::table::cfg::ConfigTableEntry;
-use uefi::{boot, system, Status};
+use uefi::{cstr16, system, Status};
+
+const KERNEL_LOAD_ADDRESS: u64 = 0x0100_0000;
+const UEFI_PAGE_SIZE: usize = 4096;
 
 fn validate_firmware_rsdp(address: usize, table_revision: u8) -> Result<RsdpInfo, RsdpError> {
     let probe_len = if table_revision >= 2 {
@@ -35,6 +40,59 @@ fn validate_firmware_rsdp(address: usize, table_revision: u8) -> Result<RsdpInfo
     aw_acpi::validate_rsdp(full)
 }
 
+fn load_native_kernel() -> Result<usize, Status> {
+    let image_handle = boot::image_handle();
+    let file_system = boot::get_image_file_system(image_handle).map_err(|error| error.status())?;
+    let mut file_system = FileSystem::new(file_system);
+    let kernel_image = file_system
+        .read(cstr16!(r"\EFI\ACCESSIBLE\KERNEL.BIN"))
+        .map_err(|_| Status::LOAD_ERROR)?;
+
+    if kernel_image.is_empty() {
+        return Err(Status::LOAD_ERROR);
+    }
+
+    let pages = kernel_image.len().div_ceil(UEFI_PAGE_SIZE);
+    let allocation = boot::allocate_pages(
+        AllocateType::Address(KERNEL_LOAD_ADDRESS),
+        MemoryType::LOADER_DATA,
+        pages,
+    )
+    .map_err(|error| error.status())?;
+
+    if allocation.as_ptr() as u64 != KERNEL_LOAD_ADDRESS {
+        return Err(Status::LOAD_ERROR);
+    }
+
+    let allocation_len = pages * UEFI_PAGE_SIZE;
+    // SAFETY: `allocation` owns `allocation_len` writable bytes allocated by
+    // UEFI at the exact kernel load address. The source Vec is valid and the
+    // copy length is bounded by the allocated page count.
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            kernel_image.as_ptr(),
+            allocation.as_ptr(),
+            kernel_image.len(),
+        );
+        if allocation_len > kernel_image.len() {
+            core::ptr::write_bytes(
+                allocation.as_ptr().add(kernel_image.len()),
+                0,
+                allocation_len - kernel_image.len(),
+            );
+        }
+    }
+
+    log::info!(
+        "AW_NATIVE_KERNEL_LOAD_OK address=0x{:x} bytes={} pages={}",
+        KERNEL_LOAD_ADDRESS,
+        kernel_image.len(),
+        pages
+    );
+
+    Ok(kernel_image.len())
+}
+
 #[entry]
 fn main() -> Status {
     if uefi::helpers::init().is_err() {
@@ -42,6 +100,14 @@ fn main() -> Status {
     }
 
     log::info!("AW_BOOT_OK stage=uefi_init arch=x86_64");
+
+    let kernel_size = match load_native_kernel() {
+        Ok(size) => size,
+        Err(status) => {
+            log::error!("AW_NATIVE_KERNEL_LOAD_FAIL status={:?}", status);
+            return status;
+        }
+    };
 
     let memory_map = match boot::memory_map(MemoryType::LOADER_DATA) {
         Ok(memory_map) => memory_map,
@@ -154,8 +220,8 @@ fn main() -> Status {
     log::info!("AW_EXIT_BOOT_SERVICES_BEGIN");
 
     // SAFETY: All boot-services-backed protocol objects and temporary memory
-    // maps have been dropped. The remaining handoff data is copied into scalar
-    // values. After this call, this function uses no UEFI Boot Services APIs.
+    // maps have been dropped. The kernel image lives in LOADER_DATA pages and
+    // remains valid after ExitBootServices.
     let final_memory_map = unsafe { boot::exit_boot_services(None) };
 
     log::info!(
@@ -169,35 +235,31 @@ fn main() -> Status {
         framebuffer,
     );
 
-    match aw_kernel_core::enter(&handoff) {
-        Ok(()) => log::info!(
-            "AW_KERNEL_HANDOFF_OK magic=0x{:x} abi={} size={} memory_entries={} flags=0x{:x}",
-            handoff.magic,
-            handoff.abi_version,
-            handoff.struct_size,
-            handoff.memory_map_entries,
-            handoff.flags
-        ),
-        Err(error) => {
-            log::error!("AW_KERNEL_HANDOFF_FAIL error={:?}", error);
-            return Status::COMPROMISED_DATA;
+    if let Err(error) = aw_kernel_core::enter(&handoff) {
+        log::error!("AW_KERNEL_HANDOFF_FAIL error={:?}", error);
+        loop {
+            core::hint::spin_loop();
         }
     }
 
-    match framebuffer {
-        Some(framebuffer) => log::info!(
-            "AW_KERNEL_STAGE_OK acpi_rsdp=0x{:x} framebuffer=0x{:x} framebuffer_size={}",
-            acpi_address,
-            framebuffer.physical_address,
-            framebuffer.byte_len
-        ),
-        None => log::info!(
-            "AW_KERNEL_STAGE_OK acpi_rsdp=0x{:x} framebuffer=unavailable",
-            acpi_address
-        ),
-    }
+    log::info!(
+        "AW_KERNEL_HANDOFF_OK magic=0x{:x} abi={} size={} memory_entries={} flags=0x{:x}",
+        handoff.magic,
+        handoff.abi_version,
+        handoff.struct_size,
+        handoff.memory_map_entries,
+        handoff.flags
+    );
+    log::info!(
+        "AW_NATIVE_KERNEL_TRANSFER address=0x{:x} bytes={}",
+        KERNEL_LOAD_ADDRESS,
+        kernel_size
+    );
 
-    loop {
-        core::hint::spin_loop();
-    }
+    type KernelEntry = extern "sysv64" fn(*const KernelHandoff) -> !;
+    // SAFETY: The raw kernel image was linked for KERNEL_LOAD_ADDRESS and copied
+    // there before ExitBootServices. Its first linked symbol is `_start` using
+    // the SysV64 ABI defined by this loader/kernel contract.
+    let kernel_entry: KernelEntry = unsafe { core::mem::transmute(KERNEL_LOAD_ADDRESS as usize) };
+    kernel_entry(core::ptr::addr_of!(handoff));
 }
