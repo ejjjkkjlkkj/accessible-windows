@@ -231,6 +231,9 @@ jobs:
           grep -F "AW_MEMORY_MAP_VALIDATE_OK" uefi-debug.log
           grep -F "AW_MEMORY_MAP_CONVENTIONAL_OK" uefi-debug.log
           grep -F "AW_BOOTSTRAP_PAGE_ALLOC_OK" uefi-debug.log
+          grep -F "AW_CPU_NX_OK" uefi-debug.log
+          grep -F "AW_CPU_ADDRESS_WIDTH_OK physical=" uefi-debug.log
+          grep -F "AW_PAGING_BASELINE_OK" uefi-debug.log
           grep -F "AW_NATIVE_FRAMEBUFFER_WRITE_OK" uefi-debug.log
           grep -F "AW_NATIVE_KERNEL_IDLE" uefi-debug.log
 
@@ -286,6 +289,7 @@ jobs:
             echo "- Target architecture: \`x86_64 only\`"
             echo "- Raw GPT/OVMF boot: see job result above"
             echo "- ABI v3 memory-map handoff and bootstrap page allocation are required boot markers"
+            echo "- NX and CPUID address-width paging baseline are required boot markers"
             echo "- CycloneDX SBOM: \`build/accessible-windows-x64.cdx.json\`"
             echo "- Provenance and SBOM attestations: generated on non-PR builds"
             if [ -f SHA256SUMS.txt ]; then
