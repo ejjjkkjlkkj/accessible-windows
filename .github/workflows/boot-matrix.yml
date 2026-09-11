@@ -135,7 +135,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 ovmf
 
-      - name: Boot raw image with generic PCI devices
+      - name: Boot raw image with generic PCIe devices
         shell: bash
         env:
           EXPECTED_VENDOR: ${{ matrix.expected_vendor }}
@@ -176,6 +176,9 @@ jobs:
           LOG="boot-${{ matrix.vendor }}-${{ matrix.ram }}-${{ matrix.cpus }}-${{ matrix.cpu_model }}.log"
           cat "$LOG" || true
           grep -F "AW_BOOT_OK stage=uefi_init arch=x86_64" "$LOG"
+          grep -F "AW_ACPI_VALIDATE_OK" "$LOG"
+          grep -F "AW_PCIE_ECAM_REGION_OK" "$LOG"
+          grep -F "AW_PCIE_ECAM_DISCOVERY_OK" "$LOG"
           grep -F "AW_EXIT_BOOT_SERVICES_OK" "$LOG"
           grep -F "AW_NATIVE_KERNEL_ENTRY_OK" "$LOG"
           grep -F "AW_CPU_VENDOR_OK vendor=" "$LOG"
@@ -184,7 +187,8 @@ jobs:
             grep -F "AW_CPU_VENDOR_OK vendor=$EXPECTED_VENDOR" "$LOG"
             grep -F "AW_CPU_VENDOR_SUPPORTED" "$LOG"
           fi
-          grep -F "AW_PCI_SCAN_OK" "$LOG"
+          grep -F "AW_PCIE_ECAM_SCAN_OK" "$LOG"
+          grep -F "AW_PCI_TRANSPORT_OK transport=ecam" "$LOG"
           grep -F "AW_PCI_NVME_FOUND" "$LOG"
           grep -F "AW_PCI_AHCI_FOUND" "$LOG"
           grep -F "AW_PCI_XHCI_FOUND" "$LOG"
