@@ -53,6 +53,13 @@ name = "aw-recovery-contract"
 version = "0.1.0"
 
 [[package]]
+name = "aw-recovery-io"
+version = "0.1.0"
+dependencies = [
+ "aw-recovery-contract",
+]
+
+[[package]]
 name = "aw-storefs"
 version = "0.1.0"
 dependencies = [
