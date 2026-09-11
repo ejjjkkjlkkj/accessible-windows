@@ -65,6 +65,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aw-runtime-sources"
+version = "0.1.0"
+
+[[package]]
 name = "aw-storefs"
 version = "0.1.0"
 dependencies = [
