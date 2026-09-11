@@ -58,6 +58,148 @@ impl VirtualAddress {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VirtualPage {
+    start_address: VirtualAddress,
+}
+
+impl VirtualPage {
+    #[must_use]
+    pub const fn new(start_address: u64) -> Option<Self> {
+        let address = match VirtualAddress::new(start_address) {
+            Some(address) => address,
+            None => return None,
+        };
+        if !address.is_page_aligned() {
+            return None;
+        }
+        Some(Self {
+            start_address: address,
+        })
+    }
+
+    #[must_use]
+    pub const fn start_address(self) -> VirtualAddress {
+        self.start_address
+    }
+
+    #[must_use]
+    pub const fn next(self) -> Option<Self> {
+        let next = match self.start_address.value().checked_add(PAGE_SIZE) {
+            Some(next) => next,
+            None => return None,
+        };
+        Self::new(next)
+    }
+
+    #[must_use]
+    pub const fn pml4_index(self) -> usize {
+        self.start_address.pml4_index()
+    }
+
+    #[must_use]
+    pub const fn pdpt_index(self) -> usize {
+        self.start_address.pdpt_index()
+    }
+
+    #[must_use]
+    pub const fn pd_index(self) -> usize {
+        self.start_address.pd_index()
+    }
+
+    #[must_use]
+    pub const fn pt_index(self) -> usize {
+        self.start_address.pt_index()
+    }
+}
+
+/// Half-open logical range of canonical 4 KiB virtual pages.
+///
+/// A range may not cross the x86-64 48-bit canonical-address hole. The final
+/// page is validated eagerly so later indexing cannot silently produce a
+/// non-canonical virtual address.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PageRange {
+    start: VirtualPage,
+    page_count: u64,
+}
+
+impl PageRange {
+    #[must_use]
+    pub const fn from_page_count(start: VirtualPage, page_count: u64) -> Option<Self> {
+        if page_count == 0 {
+            return None;
+        }
+
+        let last_offset = match (page_count - 1).checked_mul(PAGE_SIZE) {
+            Some(offset) => offset,
+            None => return None,
+        };
+        let last_address = match start.start_address().value().checked_add(last_offset) {
+            Some(address) => address,
+            None => return None,
+        };
+        let last = match VirtualPage::new(last_address) {
+            Some(page) => page,
+            None => return None,
+        };
+
+        let start_half = (start.start_address().value() >> 47) & 1;
+        let last_half = (last.start_address().value() >> 47) & 1;
+        if start_half != last_half {
+            return None;
+        }
+
+        Some(Self { start, page_count })
+    }
+
+    #[must_use]
+    pub const fn start(self) -> VirtualPage {
+        self.start
+    }
+
+    #[must_use]
+    pub const fn page_count(self) -> u64 {
+        self.page_count
+    }
+
+    #[must_use]
+    pub const fn page(self, index: u64) -> Option<VirtualPage> {
+        if index >= self.page_count {
+            return None;
+        }
+        let offset = match index.checked_mul(PAGE_SIZE) {
+            Some(offset) => offset,
+            None => return None,
+        };
+        let address = match self.start.start_address().value().checked_add(offset) {
+            Some(address) => address,
+            None => return None,
+        };
+        VirtualPage::new(address)
+    }
+
+    #[must_use]
+    pub const fn end_address_exclusive(self) -> Option<u64> {
+        let byte_len = match self.page_count.checked_mul(PAGE_SIZE) {
+            Some(byte_len) => byte_len,
+            None => return None,
+        };
+        self.start.start_address().value().checked_add(byte_len)
+    }
+
+    #[must_use]
+    pub const fn contains(self, page: VirtualPage) -> bool {
+        let start = self.start.start_address().value();
+        let address = page.start_address().value();
+        if address < start {
+            return false;
+        }
+        let delta = address - start;
+        delta / PAGE_SIZE < self.page_count
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PhysicalFrame {
     start_address: u64,
 }
@@ -120,6 +262,16 @@ impl PageTableFlags {
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MappingError {
+    AlreadyMapped,
+    NotMapped,
+    InvalidAddress,
+    Unaligned,
+    OutOfFrames,
+    Overflow,
 }
 
 #[repr(transparent)]
@@ -186,6 +338,39 @@ impl PageTable {
         self.entries[index] = entry;
         true
     }
+
+    /// Install one 4 KiB leaf mapping in an already selected PT.
+    ///
+    /// This deliberately does not allocate or walk higher-level page tables.
+    /// It is a safe primitive for the future offline page-table builder.
+    pub fn map_4k_leaf(
+        &mut self,
+        index: usize,
+        frame: PhysicalFrame,
+        flags: PageTableFlags,
+    ) -> Result<(), MappingError> {
+        let Some(current) = self.entry(index) else {
+            return Err(MappingError::InvalidAddress);
+        };
+        if current.is_present() {
+            return Err(MappingError::AlreadyMapped);
+        }
+
+        self.entries[index] = PageTableEntry::from_frame(frame, flags.union(PageTableFlags::PRESENT));
+        Ok(())
+    }
+
+    pub fn unmap_4k_leaf(&mut self, index: usize) -> Result<PageTableEntry, MappingError> {
+        let Some(current) = self.entry(index) else {
+            return Err(MappingError::InvalidAddress);
+        };
+        if !current.is_present() {
+            return Err(MappingError::NotMapped);
+        }
+
+        self.entries[index] = PageTableEntry::empty();
+        Ok(current)
+    }
 }
 
 impl Default for PageTable {
@@ -214,6 +399,58 @@ mod tests {
         assert_eq!(address.pd_index(), 0x02b);
         assert_eq!(address.pt_index(), 0x078);
         assert_eq!(address.page_offset(), 0x9ab);
+    }
+
+    #[test]
+    fn validates_virtual_pages_and_preserves_indices() {
+        let page = VirtualPage::new(0xffff_8123_4567_8000).unwrap();
+        assert_eq!(page.start_address().value(), 0xffff_8123_4567_8000);
+        assert_eq!(page.pml4_index(), 0x102);
+        assert_eq!(page.pdpt_index(), 0x08d);
+        assert_eq!(page.pd_index(), 0x02b);
+        assert_eq!(page.pt_index(), 0x078);
+        assert!(VirtualPage::new(0xffff_8123_4567_8001).is_none());
+        assert!(VirtualPage::new(0x0000_8000_0000_0000).is_none());
+    }
+
+    #[test]
+    fn virtual_page_next_rejects_noncanonical_transition() {
+        let last_low = VirtualPage::new(0x0000_7fff_ffff_f000).unwrap();
+        assert_eq!(last_low.next(), None);
+
+        let regular = VirtualPage::new(0x20_0000).unwrap();
+        assert_eq!(
+            regular.next().unwrap().start_address().value(),
+            0x20_1000
+        );
+    }
+
+    #[test]
+    fn page_ranges_validate_bounds_and_index_pages() {
+        let start = VirtualPage::new(0x20_0000).unwrap();
+        let range = PageRange::from_page_count(start, 3).unwrap();
+
+        assert_eq!(range.page_count(), 3);
+        assert_eq!(range.start(), start);
+        assert_eq!(range.page(0), Some(start));
+        assert_eq!(
+            range.page(2).unwrap().start_address().value(),
+            0x20_2000
+        );
+        assert_eq!(range.page(3), None);
+        assert_eq!(range.end_address_exclusive(), Some(0x20_3000));
+        assert!(range.contains(VirtualPage::new(0x20_1000).unwrap()));
+        assert!(!range.contains(VirtualPage::new(0x20_3000).unwrap()));
+    }
+
+    #[test]
+    fn page_ranges_reject_zero_overflow_and_canonical_hole_crossing() {
+        let low = VirtualPage::new(0x20_0000).unwrap();
+        assert!(PageRange::from_page_count(low, 0).is_none());
+        assert!(PageRange::from_page_count(low, u64::MAX).is_none());
+
+        let last_low = VirtualPage::new(0x0000_7fff_ffff_f000).unwrap();
+        assert!(PageRange::from_page_count(last_low, 2).is_none());
     }
 
     #[test]
@@ -255,5 +492,37 @@ mod tests {
         assert_eq!(table.entry(511), Some(entry));
         assert!(!table.set_entry(512, entry));
         assert_eq!(table.entry(512), None);
+    }
+
+    #[test]
+    fn maps_and_unmaps_4k_leaf_entries_safely() {
+        let mut table = PageTable::new();
+        let first = PhysicalFrame::new(0x20_0000, 52).unwrap();
+        let second = PhysicalFrame::new(0x30_0000, 52).unwrap();
+        let flags = PageTableFlags::WRITABLE.union(PageTableFlags::NO_EXECUTE);
+
+        assert_eq!(table.map_4k_leaf(7, first, flags), Ok(()));
+        let entry = table.entry(7).unwrap();
+        assert_eq!(entry.frame_address(), first.start_address());
+        assert!(entry.flags().contains(PageTableFlags::PRESENT));
+        assert!(entry.flags().contains(PageTableFlags::WRITABLE));
+        assert!(entry.flags().contains(PageTableFlags::NO_EXECUTE));
+
+        assert_eq!(
+            table.map_4k_leaf(7, second, PageTableFlags::empty()),
+            Err(MappingError::AlreadyMapped)
+        );
+        assert_eq!(
+            table.map_4k_leaf(PAGE_TABLE_ENTRIES, second, PageTableFlags::empty()),
+            Err(MappingError::InvalidAddress)
+        );
+
+        assert_eq!(table.unmap_4k_leaf(7), Ok(entry));
+        assert_eq!(table.entry(7), Some(PageTableEntry::empty()));
+        assert_eq!(table.unmap_4k_leaf(7), Err(MappingError::NotMapped));
+        assert_eq!(
+            table.unmap_4k_leaf(PAGE_TABLE_ENTRIES),
+            Err(MappingError::InvalidAddress)
+        );
     }
 }
