@@ -23,7 +23,10 @@ impl ObjectClass {
     pub const fn contains_executable_code(self) -> bool {
         matches!(
             self,
-            Self::Kernel | Self::SystemComponent | Self::RecoveryComponent | Self::ApplicationPackage
+            Self::Kernel
+                | Self::SystemComponent
+                | Self::RecoveryComponent
+                | Self::ApplicationPackage
         )
     }
 }
@@ -353,10 +356,7 @@ mod tests {
 
     #[test]
     fn extent_rejects_reserved_zero_overflow_and_slack_blocks() {
-        assert_eq!(
-            ObjectExtent::new(0, 1, 1),
-            Err(ExtentError::ReservedBlock)
-        );
+        assert_eq!(ObjectExtent::new(0, 1, 1), Err(ExtentError::ReservedBlock));
         assert_eq!(
             ObjectExtent::new(AWFS_CHECKPOINT_COPIES, 0, 1),
             Err(ExtentError::ZeroBlocks)
