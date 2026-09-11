@@ -92,10 +92,22 @@ grep -Fqx "AW_PHYSICAL_BOOT_RESULT=PASS" "$BACKEND_RESULT" || fail "physical boo
 grep -Fqx "AW_INTERNAL_DISK_UNCHANGED=PASS" "$BACKEND_RESULT" || fail "internal disk integrity was not proven"
 grep -Fqx "AW_NATIVE_KERNEL_ENTRY=PASS" "$BACKEND_RESULT" || fail "native kernel entry was not proven"
 
+# Accessibility evidence is mandatory. A graphical boot alone can never make this lab PASS.
+grep -Fqx "AW_KEYBOARD_RECOVERY=PASS" "$BACKEND_RESULT" || fail "keyboard recovery flow was not proven"
+grep -Fqx "AW_STRUCTURED_DIAGNOSTICS=PASS" "$BACKEND_RESULT" || fail "structured diagnostics were not proven"
+grep -Fqx "AW_ACCESSIBLE_RECOVERY_FLOW=PASS" "$BACKEND_RESULT" || fail "accessible recovery flow was not proven"
+grep -Fqx "AW_NONVISUAL_ROLLBACK_FLOW=PASS" "$BACKEND_RESULT" || fail "nonvisual rollback flow was not proven"
+NONVISUAL_CHANNEL="$(sed -n 's/^AW_NONVISUAL_CHANNEL=//p' "$BACKEND_RESULT" | tail -n1)"
+case "$NONVISUAL_CHANNEL" in
+  SPEECH|BRAILLE|SPEECH+BRAILLE) ;;
+  *) fail "direct nonvisual output channel was not proven" ;;
+esac
+
 {
   echo "AW_PHYSICAL_BOOT_RESULT=PASS"
   echo "AW_INTERNAL_DISK_UNCHANGED=PASS"
   echo "AW_NATIVE_KERNEL_ENTRY=PASS"
+  echo "AW_ACCESSIBILITY_HARDWARE_GATE=PASS"
   echo "AW_SOURCE_RUN=$SOURCE_RUN"
   echo "AW_COMMIT=$COMMIT"
   echo "AW_IMAGE_SHA256=$ACTUAL_SHA"
