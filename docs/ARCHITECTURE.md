@@ -1,0 +1,99 @@
+# Architecture
+
+## Product target
+
+Accessible Windows is intended to become a standalone operating system for physical PCs, not a theme, Windows modification, virtual-machine image, or application shell.
+
+The initial hardware contract is deliberately narrow:
+
+- x86-64 CPU;
+- UEFI firmware;
+- ACPI platform description;
+- PCI/PCIe discovery;
+- USB HID input;
+- UEFI framebuffer for first graphics;
+- NVMe first, SATA/AHCI second;
+- installation to a GPT disk with an EFI System Partition.
+
+Virtual machines are used for deterministic CI and debugging, but every subsystem must be designed for eventual execution on physical hardware.
+
+## Layering
+
+```text
+UEFI firmware
+    |
+Boot application / installer
+    |
+Kernel + HAL
+    |-- memory management
+    |-- scheduler
+    |-- interrupts / timers
+    |-- IPC / object model
+    |-- security
+    |
+Driver services
+    |-- ACPI / PCI
+    |-- NVMe / AHCI
+    |-- USB / HID
+    |-- network
+    |-- audio
+    |-- graphics
+    |
+System services
+    |-- filesystem
+    |-- networking
+    |-- package/update service
+    |-- accessibility service
+    |
+Compositor + Accessible UI framework
+    |
+Desktop / shell / applications
+    |
+Compatibility environments
+```
+
+## Kernel direction
+
+Rust is the default language for newly designed privileged components. Unsafe Rust is not globally forbidden forever because hardware access and context switching will require narrowly scoped unsafe code, but every unsafe boundary must eventually be isolated, documented and tested. During bootstrap the public contract crates forbid unsafe code entirely.
+
+The kernel ABI must avoid dependencies on the desktop, Win32 compatibility or a specific UI toolkit.
+
+## Boot contract
+
+The boot stage must eventually provide the kernel with:
+
+- validated memory map;
+- framebuffer description when available;
+- ACPI RSDP location;
+- UEFI system information needed after ExitBootServices only when explicitly retained;
+- boot volume identity;
+- entropy seed;
+- command-line/recovery flags.
+
+`aw-kernel-contract` starts this interface without requiring allocation.
+
+## Storage and installation
+
+The first installable milestone must support:
+
+1. booting from USB via UEFI;
+2. enumerating an NVMe device;
+3. reading and writing GPT structures safely;
+4. creating or selecting an EFI System Partition;
+5. installing boot files and an initial system image;
+6. rebooting and starting from the internal disk;
+7. preserving a recovery path.
+
+Destructive disk operations must never be enabled until explicit device identity and partition-layout checks exist.
+
+## Compatibility strategy
+
+Compatibility is layered rather than built into the kernel:
+
+1. native Accessible Windows APIs;
+2. POSIX/Linux workloads through an isolated subsystem;
+3. progressively compatible Win32 user-mode environment;
+4. web/PWA runtime;
+5. Android or other guest environments only after the core OS is stable.
+
+The project will not use leaked proprietary Windows source code to implement compatibility.
