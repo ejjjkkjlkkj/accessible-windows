@@ -5,6 +5,7 @@ use aw_kernel_core::{
     HANDOFF_FLAG_FRAMEBUFFER_PRESENT, HANDOFF_FLAG_PCIE_ECAM_PRESENT, HandoffPixelFormat,
     KernelHandoff, MemoryDescriptorHandoff, PciEcamHandoff, UEFI_MEMORY_TYPE_CONVENTIONAL,
 };
+use aw_memory::BootstrapPageAllocator;
 use aw_pci::{PciAddress, PciDeviceIdentity};
 use aw_x86_platform::{CpuFeatures, CpuIdentity, CpuSignature, CpuVendor, CpuidRegisters};
 use core::arch::asm;
@@ -150,22 +151,28 @@ fn validate_cpu_baseline() {
     }
 }
 
-fn validate_memory_map(handoff: &KernelHandoff) -> bool {
+fn memory_map_descriptors(handoff: &KernelHandoff) -> Option<&[MemoryDescriptorHandoff]> {
     let map = handoff.memory_map;
     if !map.is_valid() || map.buffer_address > usize::MAX as u64 {
-        debug_write("AW_MEMORY_MAP_VALIDATE_FAIL reason=shape\n");
-        return false;
+        return None;
     }
 
     // SAFETY: The ABI v3 loader reserves the normalized descriptor buffer as
     // LOADER_DATA before ExitBootServices and transfers control without freeing
     // it. `MemoryMapHandoff::is_valid` verifies alignment, descriptor size and
     // byte length before this slice is constructed.
-    let descriptors = unsafe {
+    Some(unsafe {
         core::slice::from_raw_parts(
             map.buffer_address as usize as *const MemoryDescriptorHandoff,
             map.entry_count as usize,
         )
+    })
+}
+
+fn validate_memory_map(handoff: &KernelHandoff) -> bool {
+    let Some(descriptors) = memory_map_descriptors(handoff) else {
+        debug_write("AW_MEMORY_MAP_VALIDATE_FAIL reason=shape\n");
+        return false;
     };
 
     let mut conventional_pages = 0_u64;
@@ -190,6 +197,29 @@ fn validate_memory_map(handoff: &KernelHandoff) -> bool {
 
     debug_write("AW_MEMORY_MAP_VALIDATE_OK\n");
     debug_write("AW_MEMORY_MAP_CONVENTIONAL_OK\n");
+    true
+}
+
+fn probe_bootstrap_page_allocator(handoff: &KernelHandoff) -> bool {
+    let Some(descriptors) = memory_map_descriptors(handoff) else {
+        debug_write("AW_BOOTSTRAP_PAGE_ALLOC_FAIL reason=memory_map\n");
+        return false;
+    };
+
+    let mut allocator = match BootstrapPageAllocator::new(descriptors) {
+        Ok(allocator) => allocator,
+        Err(_) => {
+            debug_write("AW_BOOTSTRAP_PAGE_ALLOC_FAIL reason=allocator_init\n");
+            return false;
+        }
+    };
+
+    if allocator.allocate_page().is_none() {
+        debug_write("AW_BOOTSTRAP_PAGE_ALLOC_FAIL reason=no_page\n");
+        return false;
+    }
+
+    debug_write("AW_BOOTSTRAP_PAGE_ALLOC_OK\n");
     true
 }
 
@@ -454,6 +484,9 @@ pub extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
 
     debug_write("AW_NATIVE_KERNEL_ENTRY_OK\n");
     if !validate_memory_map(handoff) {
+        halt_forever();
+    }
+    if !probe_bootstrap_page_allocator(handoff) {
         halt_forever();
     }
     validate_cpu_baseline();
