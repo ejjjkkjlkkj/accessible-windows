@@ -127,8 +127,7 @@ impl MemoryMapHandoff {
             return false;
         }
 
-        u64::from(self.entry_count)
-            .checked_mul(u64::from(self.descriptor_size))
+        u64::from(self.entry_count).checked_mul(u64::from(self.descriptor_size))
             == Some(self.byte_len)
     }
 }
@@ -359,20 +358,17 @@ mod tests {
 
     #[test]
     fn accepts_handoff_without_optional_devices() {
-        let handoff = KernelHandoff::new(
-            0xf000_0000,
-            valid_memory_map(),
-            None,
-            empty_ecam(),
-            0,
-        );
+        let handoff = KernelHandoff::new(0xf000_0000, valid_memory_map(), None, empty_ecam(), 0);
         assert_eq!(enter(&handoff), Ok(()));
     }
 
     #[test]
     fn validates_normalized_memory_descriptor() {
         assert!(VALID_MEMORY_DESCRIPTOR.is_valid());
-        assert_eq!(VALID_MEMORY_DESCRIPTOR.byte_len(), Some(256 * UEFI_PAGE_SIZE));
+        assert_eq!(
+            VALID_MEMORY_DESCRIPTOR.byte_len(),
+            Some(256 * UEFI_PAGE_SIZE)
+        );
         assert_eq!(
             VALID_MEMORY_DESCRIPTOR.physical_end_exclusive(),
             Some(0x10_0000 + 256 * UEFI_PAGE_SIZE)
@@ -439,13 +435,8 @@ mod tests {
 
     #[test]
     fn rejects_empty_memory_map() {
-        let handoff = KernelHandoff::new(
-            0xf000_0000,
-            MemoryMapHandoff::NONE,
-            None,
-            empty_ecam(),
-            0,
-        );
+        let handoff =
+            KernelHandoff::new(0xf000_0000, MemoryMapHandoff::NONE, None, empty_ecam(), 0);
         assert_eq!(enter(&handoff), Err(HandoffError::EmptyMemoryMap));
     }
 
