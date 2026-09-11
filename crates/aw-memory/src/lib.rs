@@ -17,6 +17,67 @@ impl PhysicalPage {
     }
 }
 
+/// Page-aligned physical address interval with an exclusive upper bound.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PhysicalRange {
+    start_address: u64,
+    end_address_exclusive: u64,
+}
+
+impl PhysicalRange {
+    #[must_use]
+    pub const fn new(start_address: u64, end_address_exclusive: u64) -> Option<Self> {
+        if start_address >= end_address_exclusive
+            || start_address % UEFI_PAGE_SIZE != 0
+            || end_address_exclusive % UEFI_PAGE_SIZE != 0
+        {
+            return None;
+        }
+
+        Some(Self {
+            start_address,
+            end_address_exclusive,
+        })
+    }
+
+    #[must_use]
+    pub const fn from_page_count(start_address: u64, page_count: u64) -> Option<Self> {
+        if page_count == 0 || start_address % UEFI_PAGE_SIZE != 0 {
+            return None;
+        }
+        let byte_len = match page_count.checked_mul(UEFI_PAGE_SIZE) {
+            Some(value) => value,
+            None => return None,
+        };
+        let end = match start_address.checked_add(byte_len) {
+            Some(value) => value,
+            None => return None,
+        };
+        Self::new(start_address, end)
+    }
+
+    #[must_use]
+    pub const fn start_address(self) -> u64 {
+        self.start_address
+    }
+
+    #[must_use]
+    pub const fn end_address_exclusive(self) -> u64 {
+        self.end_address_exclusive
+    }
+
+    #[must_use]
+    pub const fn contains_address(self, address: u64) -> bool {
+        address >= self.start_address && address < self.end_address_exclusive
+    }
+
+    #[must_use]
+    pub const fn overlaps(self, other: Self) -> bool {
+        self.start_address < other.end_address_exclusive
+            && other.start_address < self.end_address_exclusive
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BootstrapAllocatorError {
     EmptyMemoryMap,
@@ -29,13 +90,16 @@ pub enum BootstrapAllocatorError {
 ///
 /// The allocator only returns pages from UEFI `CONVENTIONAL` descriptors. It
 /// deliberately ignores boot-services, ACPI reclaimable and loader memory even
-/// though some of those ranges can be reclaimed later. This keeps early page
-/// allocation safe until ownership and teardown rules are implemented.
+/// though some of those ranges can be reclaimed later. Explicit protected
+/// ranges provide a second safety boundary for kernel, handoff, framebuffer,
+/// ECAM/MMIO and future page-table ownership.
 ///
-/// Descriptors do not need to be sorted. Each allocation scans the complete map
-/// and selects the lowest page at or above the monotonically increasing cursor.
+/// Descriptors and protected ranges do not need to be sorted. Each allocation
+/// scans the complete map and selects the lowest unprotected page at or above
+/// the monotonically increasing cursor.
 pub struct BootstrapPageAllocator<'a> {
     descriptors: &'a [MemoryDescriptorHandoff],
+    protected_ranges: &'a [PhysicalRange],
     cursor: u64,
     allocated_pages: u64,
 }
@@ -44,12 +108,35 @@ impl<'a> BootstrapPageAllocator<'a> {
     pub fn new(
         descriptors: &'a [MemoryDescriptorHandoff],
     ) -> Result<Self, BootstrapAllocatorError> {
-        Self::with_minimum_address(descriptors, DEFAULT_BOOTSTRAP_MIN_ADDRESS)
+        Self::with_minimum_address_and_protected_ranges(
+            descriptors,
+            DEFAULT_BOOTSTRAP_MIN_ADDRESS,
+            &[],
+        )
     }
 
     pub fn with_minimum_address(
         descriptors: &'a [MemoryDescriptorHandoff],
         minimum_address: u64,
+    ) -> Result<Self, BootstrapAllocatorError> {
+        Self::with_minimum_address_and_protected_ranges(descriptors, minimum_address, &[])
+    }
+
+    pub fn with_protected_ranges(
+        descriptors: &'a [MemoryDescriptorHandoff],
+        protected_ranges: &'a [PhysicalRange],
+    ) -> Result<Self, BootstrapAllocatorError> {
+        Self::with_minimum_address_and_protected_ranges(
+            descriptors,
+            DEFAULT_BOOTSTRAP_MIN_ADDRESS,
+            protected_ranges,
+        )
+    }
+
+    pub fn with_minimum_address_and_protected_ranges(
+        descriptors: &'a [MemoryDescriptorHandoff],
+        minimum_address: u64,
+        protected_ranges: &'a [PhysicalRange],
     ) -> Result<Self, BootstrapAllocatorError> {
         if descriptors.is_empty() {
             return Err(BootstrapAllocatorError::EmptyMemoryMap);
@@ -78,6 +165,7 @@ impl<'a> BootstrapPageAllocator<'a> {
 
         Ok(Self {
             descriptors,
+            protected_ranges,
             cursor: minimum_address,
             allocated_pages: 0,
         })
@@ -86,6 +174,30 @@ impl<'a> BootstrapPageAllocator<'a> {
     #[must_use]
     pub const fn allocated_pages(&self) -> u64 {
         self.allocated_pages
+    }
+
+    fn next_unprotected_candidate(&self, mut candidate: u64, end: u64) -> Option<u64> {
+        loop {
+            if candidate >= end {
+                return None;
+            }
+
+            let mut jump_to: Option<u64> = None;
+            for range in self.protected_ranges {
+                if range.contains_address(candidate) {
+                    jump_to = Some(
+                        jump_to.map_or(range.end_address_exclusive(), |current| {
+                            current.max(range.end_address_exclusive())
+                        }),
+                    );
+                }
+            }
+
+            match jump_to {
+                Some(next) => candidate = next,
+                None => return Some(candidate),
+            }
+        }
     }
 
     pub fn allocate_page(&mut self) -> Option<PhysicalPage> {
@@ -102,9 +214,9 @@ impl<'a> BootstrapPageAllocator<'a> {
             }
 
             let candidate = descriptor.physical_start.max(self.cursor);
-            if candidate >= end {
+            let Some(candidate) = self.next_unprotected_candidate(candidate, end) else {
                 continue;
-            }
+            };
 
             if best.is_none_or(|current| candidate < current) {
                 best = Some(candidate);
@@ -130,6 +242,33 @@ mod tests {
             page_count,
             attributes: 0,
         }
+    }
+
+    #[test]
+    fn physical_ranges_validate_alignment_bounds_and_overflow() {
+        assert_eq!(
+            PhysicalRange::new(0x20_0000, 0x20_2000),
+            Some(PhysicalRange {
+                start_address: 0x20_0000,
+                end_address_exclusive: 0x20_2000,
+            })
+        );
+        assert!(PhysicalRange::new(0x20_0001, 0x20_2000).is_none());
+        assert!(PhysicalRange::new(0x20_0000, 0x20_2001).is_none());
+        assert!(PhysicalRange::new(0x20_0000, 0x20_0000).is_none());
+        assert!(PhysicalRange::from_page_count(0x20_0000, 0).is_none());
+        assert!(PhysicalRange::from_page_count(u64::MAX & !(UEFI_PAGE_SIZE - 1), 2).is_none());
+    }
+
+    #[test]
+    fn physical_range_overlap_is_half_open() {
+        let first = PhysicalRange::new(0x20_0000, 0x20_2000).unwrap();
+        let touching = PhysicalRange::new(0x20_2000, 0x20_3000).unwrap();
+        let overlapping = PhysicalRange::new(0x20_1000, 0x20_3000).unwrap();
+
+        assert!(!first.overlaps(touching));
+        assert!(first.overlaps(overlapping));
+        assert!(overlapping.overlaps(first));
     }
 
     #[test]
@@ -194,6 +333,44 @@ mod tests {
             0x80_3000
         );
         assert_eq!(allocator.allocate_page(), None);
+    }
+
+    #[test]
+    fn protected_range_splits_conventional_memory() {
+        let map = [descriptor(UEFI_MEMORY_TYPE_CONVENTIONAL, 0x20_0000, 5)];
+        let protected = [PhysicalRange::new(0x20_1000, 0x20_3000).unwrap()];
+        let mut allocator = BootstrapPageAllocator::with_protected_ranges(&map, &protected).unwrap();
+
+        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x20_0000);
+        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x20_3000);
+        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x20_4000);
+        assert_eq!(allocator.allocate_page(), None);
+        assert_eq!(allocator.allocated_pages(), 3);
+    }
+
+    #[test]
+    fn overlapping_unsorted_protected_ranges_are_all_skipped() {
+        let map = [descriptor(UEFI_MEMORY_TYPE_CONVENTIONAL, 0x30_0000, 8)];
+        let protected = [
+            PhysicalRange::new(0x30_3000, 0x30_6000).unwrap(),
+            PhysicalRange::new(0x30_1000, 0x30_4000).unwrap(),
+        ];
+        let mut allocator = BootstrapPageAllocator::with_protected_ranges(&map, &protected).unwrap();
+
+        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x30_0000);
+        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x30_6000);
+        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x30_7000);
+        assert_eq!(allocator.allocate_page(), None);
+    }
+
+    #[test]
+    fn fully_protected_conventional_memory_returns_no_page() {
+        let map = [descriptor(UEFI_MEMORY_TYPE_CONVENTIONAL, 0x40_0000, 2)];
+        let protected = [PhysicalRange::new(0x40_0000, 0x40_2000).unwrap()];
+        let mut allocator = BootstrapPageAllocator::with_protected_ranges(&map, &protected).unwrap();
+
+        assert_eq!(allocator.allocate_page(), None);
+        assert_eq!(allocator.allocated_pages(), 0);
     }
 
     #[test]
