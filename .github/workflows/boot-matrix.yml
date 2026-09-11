@@ -135,7 +135,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 ovmf
 
-      - name: Boot raw image
+      - name: Boot raw image with generic PCI devices
         shell: bash
         env:
           EXPECTED_VENDOR: ${{ matrix.expected_vendor }}
@@ -150,6 +150,7 @@ jobs:
           test -f "$OVMF_CODE"
           test -f "$OVMF_VARS"
           cp "$OVMF_VARS" ovmf-vars.fd
+          truncate -s 32M nvme-test.img
 
           set +e
           timeout 20s qemu-system-x86_64 \
@@ -164,7 +165,11 @@ jobs:
             -debugcon file:boot-${{ matrix.vendor }}-${{ matrix.ram }}-${{ matrix.cpus }}-${{ matrix.cpu_model }}.log \
             -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
             -drive if=pflash,format=raw,file=ovmf-vars.fd \
-            -drive format=raw,file=build/accessible-windows-uefi-x86_64.img
+            -drive format=raw,file=build/accessible-windows-uefi-x86_64.img \
+            -drive if=none,format=raw,file=nvme-test.img,id=nvme0 \
+            -device nvme,drive=nvme0,serial=AWNVME \
+            -device qemu-xhci \
+            -device ich9-intel-hda
           STATUS=$?
           set -e
 
@@ -179,6 +184,11 @@ jobs:
             grep -F "AW_CPU_VENDOR_OK vendor=$EXPECTED_VENDOR" "$LOG"
             grep -F "AW_CPU_VENDOR_SUPPORTED" "$LOG"
           fi
+          grep -F "AW_PCI_SCAN_OK" "$LOG"
+          grep -F "AW_PCI_NVME_FOUND" "$LOG"
+          grep -F "AW_PCI_AHCI_FOUND" "$LOG"
+          grep -F "AW_PCI_XHCI_FOUND" "$LOG"
+          grep -F "AW_PCI_HDA_FOUND" "$LOG"
           grep -F "AW_NATIVE_FRAMEBUFFER_WRITE_OK" "$LOG"
           grep -F "AW_NATIVE_KERNEL_IDLE" "$LOG"
           if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 124 ]; then
