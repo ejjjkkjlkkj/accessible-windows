@@ -5,6 +5,10 @@ use aw_kernel_core::{MemoryDescriptorHandoff, UEFI_MEMORY_TYPE_CONVENTIONAL, UEF
 
 pub const DEFAULT_BOOTSTRAP_MIN_ADDRESS: u64 = 0x10_0000;
 
+const fn is_page_aligned(address: u64) -> bool {
+    address & (UEFI_PAGE_SIZE - 1) == 0
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PhysicalPage {
     start_address: u64,
@@ -28,8 +32,8 @@ impl PhysicalRange {
     #[must_use]
     pub const fn new(start_address: u64, end_address_exclusive: u64) -> Option<Self> {
         if start_address >= end_address_exclusive
-            || start_address % UEFI_PAGE_SIZE != 0
-            || end_address_exclusive % UEFI_PAGE_SIZE != 0
+            || !is_page_aligned(start_address)
+            || !is_page_aligned(end_address_exclusive)
         {
             return None;
         }
@@ -42,7 +46,7 @@ impl PhysicalRange {
 
     #[must_use]
     pub const fn from_page_count(start_address: u64, page_count: u64) -> Option<Self> {
-        if page_count == 0 || start_address % UEFI_PAGE_SIZE != 0 {
+        if page_count == 0 || !is_page_aligned(start_address) {
             return None;
         }
         let byte_len = match page_count.checked_mul(UEFI_PAGE_SIZE) {
@@ -257,7 +261,7 @@ mod tests {
         assert!(PhysicalRange::new(0x20_0000, 0x20_2001).is_none());
         assert!(PhysicalRange::new(0x20_0000, 0x20_0000).is_none());
         assert!(PhysicalRange::from_page_count(0x20_0000, 0).is_none());
-        assert!(PhysicalRange::from_page_count(u64::MAX & !(UEFI_PAGE_SIZE - 1), 2).is_none());
+        assert!(PhysicalRange::from_page_count(!(UEFI_PAGE_SIZE - 1), 2).is_none());
     }
 
     #[test]
