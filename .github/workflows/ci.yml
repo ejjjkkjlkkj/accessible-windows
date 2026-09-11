@@ -224,9 +224,13 @@ jobs:
           grep -F "AW_GOP_OK" uefi-debug.log
           grep -F "AW_FRAMEBUFFER_OK" uefi-debug.log
           grep -F "AW_EXIT_BOOT_SERVICES_OK" uefi-debug.log
+          grep -F "AW_MEMORY_MAP_HANDOFF_OK" uefi-debug.log
           grep -F "AW_KERNEL_HANDOFF_OK" uefi-debug.log
           grep -F "AW_NATIVE_KERNEL_TRANSFER" uefi-debug.log
           grep -F "AW_NATIVE_KERNEL_ENTRY_OK" uefi-debug.log
+          grep -F "AW_MEMORY_MAP_VALIDATE_OK" uefi-debug.log
+          grep -F "AW_MEMORY_MAP_CONVENTIONAL_OK" uefi-debug.log
+          grep -F "AW_BOOTSTRAP_PAGE_ALLOC_OK" uefi-debug.log
           grep -F "AW_NATIVE_FRAMEBUFFER_WRITE_OK" uefi-debug.log
           grep -F "AW_NATIVE_KERNEL_IDLE" uefi-debug.log
 
@@ -281,6 +285,7 @@ jobs:
             echo "- Runner: \`${RUNNER_OS}/${RUNNER_ARCH}\`"
             echo "- Target architecture: \`x86_64 only\`"
             echo "- Raw GPT/OVMF boot: see job result above"
+            echo "- ABI v3 memory-map handoff and bootstrap page allocation are required boot markers"
             echo "- CycloneDX SBOM: \`build/accessible-windows-x64.cdx.json\`"
             echo "- Provenance and SBOM attestations: generated on non-PR builds"
             if [ -f SHA256SUMS.txt ]; then
