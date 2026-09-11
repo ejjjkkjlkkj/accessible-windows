@@ -77,9 +77,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aw_recovery_contract::{
-        RecoveryAction, RecoveryDiagnosticCode, RecoverySeverity,
-    };
+    use aw_recovery_contract::{RecoveryAction, RecoveryDiagnosticCode, RecoverySeverity};
 
     #[derive(Default)]
     struct Recorder {
