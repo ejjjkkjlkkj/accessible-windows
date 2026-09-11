@@ -1,0 +1,79 @@
+name: Extended platforms
+
+on:
+  push:
+    branches: [main, bootstrap-v0.1]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "rust-toolchain.toml"
+      - ".github/workflows/extended-platforms.yml"
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "rust-toolchain.toml"
+      - ".github/workflows/extended-platforms.yml"
+  schedule:
+    - cron: "41 4 * * 2"
+  workflow_dispatch:
+
+concurrency:
+  group: extended-platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  portability:
+    name: Portable crates (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04-arm
+            experimental: false
+          - os: windows-11-arm
+            experimental: false
+          - os: macos-15-intel
+            experimental: false
+          - os: macos-26
+            experimental: false
+          - os: ubuntu-26.04-arm
+            experimental: true
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: portable-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.toml', 'rust-toolchain.toml') }}
+
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+          rustc -Vv
+          cargo -V
+
+      - name: Check portable workspace
+        run: cargo check --workspace --all-targets
+
+      - name: Test portable workspace
+        run: cargo test --workspace --all-targets
+
+      - name: Clippy portable workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
