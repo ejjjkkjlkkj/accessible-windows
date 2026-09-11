@@ -66,6 +66,9 @@ action are the interoperability contract.
 - Structured diagnostics must remain exportable even if the graphical shell does not start.
 - Destructive actions require deterministic keyboard focus/order and an explicit confirmation model
   that can be spoken or represented in braille.
+- A timeout must never silently select a destructive action or confirmation.
+- Speech, braille, structured text and any visual frontend must expose the same diagnostic identity
+  and action order so hidden visual state cannot surprise the user.
 
 ## Validation before release-grade claims
 
@@ -80,7 +83,9 @@ flows from power-on through failure and recovery, including at minimum:
    fail-closed readiness;
 5. performing signed reinstall and diagnostic export using keyboard-only navigation;
 6. power-loss/reboot during recovery/update without losing the last known-good accessible generation;
-7. AMD and Intel physical x64 hardware tests, not only QEMU/OVMF.
+7. AMD and Intel physical x64 hardware tests, not only QEMU/OVMF;
+8. a blind-user walkthrough in which every prompt, focus transition, confirmation, progress state,
+   failure and rollback result is available without visual inspection.
 
 Until these tests pass, the project may claim an implemented recovery contract, but not a fully
 validated accessible recovery experience.
