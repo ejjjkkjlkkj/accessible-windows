@@ -1,9 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use aw_macho::{
-    CpuType, MachSlice, ParseError, select_mach_o_64, validate_main_executable,
-};
+use aw_macho::{CpuType, MachSlice, ParseError, select_mach_o_64, validate_main_executable};
 
 const MACH_HEADER_64_SIZE: usize = 32;
 const LOAD_COMMAND_HEADER_SIZE: usize = 8;
@@ -24,22 +22,49 @@ pub enum LoaderError {
     Mach(ParseError),
     IntegerOverflow,
     SliceOutOfBounds,
-    LoadCommandOutOfBounds { index: u32 },
-    LoadCommandTooSmall { index: u32, size: u32 },
-    SegmentCommandTooSmall { index: u32, size: u32 },
+    LoadCommandOutOfBounds {
+        index: u32,
+    },
+    LoadCommandTooSmall {
+        index: u32,
+        size: u32,
+    },
+    SegmentCommandTooSmall {
+        index: u32,
+        size: u32,
+    },
     SegmentCommandSizeMismatch {
         index: u32,
         declared: u32,
         expected: usize,
     },
-    SegmentFileOutOfBounds { index: u32 },
-    SegmentFileLargerThanVm { index: u32 },
-    SegmentVmRangeOverflow { index: u32 },
-    SegmentProtectionEscalation { index: u32 },
-    WritableExecutableSegment { index: u32 },
-    SegmentFileOverlap { first: u32, second: u32 },
-    SegmentVmOverlap { first: u32, second: u32 },
-    MainCommandTooSmall { index: u32, size: u32 },
+    SegmentFileOutOfBounds {
+        index: u32,
+    },
+    SegmentFileLargerThanVm {
+        index: u32,
+    },
+    SegmentVmRangeOverflow {
+        index: u32,
+    },
+    SegmentProtectionEscalation {
+        index: u32,
+    },
+    WritableExecutableSegment {
+        index: u32,
+    },
+    SegmentFileOverlap {
+        first: u32,
+        second: u32,
+    },
+    SegmentVmOverlap {
+        first: u32,
+        second: u32,
+    },
+    MainCommandTooSmall {
+        index: u32,
+        size: u32,
+    },
     DuplicateMainCommand,
     MissingMainCommand,
     EntryPointOutOfBounds,
@@ -119,9 +144,7 @@ pub struct SegmentIter<'a> {
 }
 
 fn checked_end(offset: usize, size: usize) -> Result<usize, LoaderError> {
-    offset
-        .checked_add(size)
-        .ok_or(LoaderError::IntegerOverflow)
+    offset.checked_add(size).ok_or(LoaderError::IntegerOverflow)
 }
 
 fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, LoaderError> {
@@ -241,10 +264,7 @@ fn validate_segment(image: &[u8], segment: Segment64) -> Result<(), LoaderError>
     Ok(())
 }
 
-pub fn segments<'a>(
-    bytes: &'a [u8],
-    slice: MachSlice,
-) -> Result<SegmentIter<'a>, LoaderError> {
+pub fn segments<'a>(bytes: &'a [u8], slice: MachSlice) -> Result<SegmentIter<'a>, LoaderError> {
     let image = selected_image(bytes, slice)?;
     let commands_end = checked_end(MACH_HEADER_64_SIZE, slice.header.command_bytes as usize)?;
     if commands_end > image.len() {
@@ -437,8 +457,8 @@ mod tests {
 
     fn fixture(main_count: u32, initial_protection: u32, entryoff: u64) -> Vec<u8> {
         let command_count = 1 + main_count;
-        let command_bytes = SEGMENT_COMMAND_64_SIZE as u32
-            + main_count * ENTRY_POINT_COMMAND_SIZE as u32;
+        let command_bytes =
+            SEGMENT_COMMAND_64_SIZE as u32 + main_count * ENTRY_POINT_COMMAND_SIZE as u32;
 
         let mut out = Vec::new();
         push_u32(MH_MAGIC_64, &mut out);
@@ -499,11 +519,7 @@ mod tests {
 
     #[test]
     fn rejects_writable_executable_segment() {
-        let image = fixture(
-            1,
-            VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE,
-            0x100,
-        );
+        let image = fixture(1, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE, 0x100);
         assert_eq!(
             plan_executable(&image, CpuType::X86_64),
             Err(LoaderError::WritableExecutableSegment { index: 0 })
