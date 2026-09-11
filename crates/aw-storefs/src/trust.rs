@@ -70,7 +70,8 @@ pub fn authenticate_manifest<const OBJECTS: usize, A: ManifestAuthenticator>(
     if !authenticator.authenticate(canonical_manifest) {
         return Err(ManifestAuthenticationError::Rejected);
     }
-    let manifest = decode_manifest(canonical_manifest).map_err(ManifestAuthenticationError::Decode)?;
+    let manifest =
+        decode_manifest(canonical_manifest).map_err(ManifestAuthenticationError::Decode)?;
     if manifest.generation() < minimum_generation {
         return Err(ManifestAuthenticationError::RollbackRejected {
             declared: manifest.generation(),
@@ -204,8 +205,8 @@ mod tests {
         let (bytes, used) = canonical_manifest();
         let trusted = authenticate_manifest::<1, _>(&bytes[..used], 42, &Allow).unwrap();
         let object_bytes = [7_u8; 4];
-        let object = verify_authenticated_object(&trusted, digest(7), &object_bytes, &ExactDigest)
-            .unwrap();
+        let object =
+            verify_authenticated_object(&trusted, digest(7), &object_bytes, &ExactDigest).unwrap();
         assert_eq!(object.generation(), 42);
         assert_eq!(object.bytes(), &object_bytes);
 
