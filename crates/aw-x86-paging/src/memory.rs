@@ -1,6 +1,6 @@
 use aw_memory::BootstrapPageAllocator;
 
-use crate::{FrameAllocator, MappingError, PhysicalFrame, MAX_X86_64_PHYSICAL_ADDRESS_BITS};
+use crate::{FrameAllocator, MAX_X86_64_PHYSICAL_ADDRESS_BITS, MappingError, PhysicalFrame};
 
 /// Bridges the generic bootstrap physical-page allocator into the x86-64 paging builder.
 ///
