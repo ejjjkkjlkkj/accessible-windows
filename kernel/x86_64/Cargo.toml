@@ -7,6 +7,7 @@ build = "build.rs"
 
 [dependencies]
 aw-kernel-core = { path = "../../crates/aw-kernel-core" }
+aw-pci = { path = "../../crates/aw-pci" }
 aw-x86-platform = { path = "../../crates/aw-x86-platform" }
 
 [profile.dev]
