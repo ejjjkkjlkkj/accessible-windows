@@ -84,6 +84,27 @@ action are the interoperability contract.
 | Health rollback index is below persisted floor | FAIL |
 | Trial attempts exhausted | automatic fallback to previous known-good generation |
 
+## Physical hardware evidence gate
+
+The physical hardware helper must not turn a successful graphical/native-kernel boot into an
+accessibility PASS. Its trusted DUT backend must emit all of the following exact evidence before the
+lab can report `AW_ACCESSIBILITY_HARDWARE_GATE=PASS`:
+
+- `AW_KEYBOARD_RECOVERY=PASS`;
+- `AW_STRUCTURED_DIAGNOSTICS=PASS`;
+- `AW_ACCESSIBLE_RECOVERY_FLOW=PASS`;
+- `AW_NONVISUAL_ROLLBACK_FLOW=PASS`;
+- exactly one direct-channel declaration matching `AW_NONVISUAL_CHANNEL=SPEECH`,
+  `AW_NONVISUAL_CHANNEL=BRAILLE`, or `AW_NONVISUAL_CHANNEL=SPEECH+BRAILLE`.
+
+These markers are evidence contracts, not placeholders that CI may synthesize. They must come from
+the root-owned DUT cycle backend after it has exercised the corresponding behaviour on the physical
+test machine. Missing, malformed or visual-only evidence fails closed.
+
+This automated hardware gate still does **not** prove that a blind human can use the complete system.
+It deliberately remains separate from the human walkthrough below so automation cannot overclaim
+release-grade accessibility.
+
 ## Validation before release-grade claims
 
 Automated tests are necessary but insufficient. Release-grade validation must include real blind-user
