@@ -72,7 +72,7 @@ pub enum GenerationPlanError {
 /// In-memory semantic plan for one immutable OS generation.
 ///
 /// This type intentionally does not perform hashing, signature verification, serialization, or
-/// disk I/O. Those security boundaries belong to later dedicated layers. `ObjectId` values are
+/// disk I/O. Those security boundaries belong to dedicated layers. `ObjectId` values are
 /// references to already content-addressed objects and this plan validates only composition and
 /// boot-health policy.
 pub struct GenerationPlan<const COMPONENTS: usize> {
@@ -184,8 +184,8 @@ impl<const COMPONENTS: usize> GenerationPlan<COMPONENTS> {
 
 /// Proof that semantic generation composition and anti-rollback policy passed.
 ///
-/// Cryptographic authentication is intentionally a separate future proof layer. A boot loader
-/// must never treat this token alone as signature verification.
+/// Cryptographic authentication remains a separate proof layer. A boot loader must never treat
+/// this token alone as signature verification.
 pub struct BootCandidate<'a, const COMPONENTS: usize> {
     plan: &'a GenerationPlan<COMPONENTS>,
 }
@@ -205,6 +205,119 @@ impl<const COMPONENTS: usize> BootCandidate<'_, COMPONENTS> {
     pub const fn component_count(&self) -> usize {
         self.plan.len()
     }
+
+    /// Converts a boot candidate into a success proof only after every mandatory runtime health
+    /// check has passed. In particular, a graphical desktop is insufficient: keyboard input,
+    /// audio, the accessibility broker, speech and an independently usable accessible recovery
+    /// path must all be healthy.
+    pub fn successful_generation(
+        &self,
+        health: RuntimeHealthReport,
+    ) -> Result<SuccessfulGeneration, RuntimeHealthError> {
+        for required in REQUIRED_SUCCESS_HEALTH_CHECKS {
+            if !health.passed(required) {
+                return Err(RuntimeHealthError::MissingRequiredCheck(required));
+            }
+        }
+
+        Ok(SuccessfulGeneration {
+            generation: self.generation(),
+            rollback_index: self.rollback_index(),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeHealthCheck {
+    Kernel,
+    Storage,
+    Input,
+    Audio,
+    AccessibilityBroker,
+    Speech,
+    AccessibleRecovery,
+    Security,
+    Update,
+}
+
+impl RuntimeHealthCheck {
+    const fn bit(self) -> u16 {
+        match self {
+            Self::Kernel => 1 << 0,
+            Self::Storage => 1 << 1,
+            Self::Input => 1 << 2,
+            Self::Audio => 1 << 3,
+            Self::AccessibilityBroker => 1 << 4,
+            Self::Speech => 1 << 5,
+            Self::AccessibleRecovery => 1 << 6,
+            Self::Security => 1 << 7,
+            Self::Update => 1 << 8,
+        }
+    }
+}
+
+pub const REQUIRED_SUCCESS_HEALTH_CHECKS: [RuntimeHealthCheck; 9] = [
+    RuntimeHealthCheck::Kernel,
+    RuntimeHealthCheck::Storage,
+    RuntimeHealthCheck::Input,
+    RuntimeHealthCheck::Audio,
+    RuntimeHealthCheck::AccessibilityBroker,
+    RuntimeHealthCheck::Speech,
+    RuntimeHealthCheck::AccessibleRecovery,
+    RuntimeHealthCheck::Security,
+    RuntimeHealthCheck::Update,
+];
+
+/// Semantic record of completed runtime probes.
+///
+/// Probe execution itself belongs to platform/runtime code. This type only records explicit PASS
+/// evidence and deliberately has no implicit defaults: a check is absent until a probe marks it
+/// passed.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RuntimeHealthReport {
+    passed: u16,
+}
+
+impl RuntimeHealthReport {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { passed: 0 }
+    }
+
+    pub fn mark_passed(&mut self, check: RuntimeHealthCheck) {
+        self.passed |= check.bit();
+    }
+
+    #[must_use]
+    pub const fn passed(self, check: RuntimeHealthCheck) -> bool {
+        self.passed & check.bit() != 0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeHealthError {
+    MissingRequiredCheck(RuntimeHealthCheck),
+}
+
+/// Proof that boot composition, anti-rollback and all mandatory runtime health checks passed.
+///
+/// Fields are private so callers cannot construct this token without passing the checks above.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SuccessfulGeneration {
+    generation: u64,
+    rollback_index: u64,
+}
+
+impl SuccessfulGeneration {
+    #[must_use]
+    pub const fn generation(self) -> u64 {
+        self.generation
+    }
+
+    #[must_use]
+    pub const fn rollback_index(self) -> u64 {
+        self.rollback_index
+    }
 }
 
 #[cfg(test)]
@@ -221,6 +334,14 @@ mod tests {
             plan.push(kind, object((index + 1) as u8)).unwrap();
         }
         plan
+    }
+
+    fn complete_health() -> RuntimeHealthReport {
+        let mut health = RuntimeHealthReport::new();
+        for check in REQUIRED_SUCCESS_HEALTH_CHECKS {
+            health.mark_passed(check);
+        }
+        health
     }
 
     #[test]
@@ -282,5 +403,44 @@ mod tests {
         assert_eq!(candidate.generation(), 42);
         assert_eq!(candidate.rollback_index(), 7);
         assert_eq!(candidate.component_count(), 8);
+    }
+
+    #[test]
+    fn graphical_boot_without_speech_cannot_be_successful() {
+        let plan = complete_plan();
+        let candidate = plan.boot_candidate(7).unwrap();
+        let mut health = complete_health();
+        health.passed &= !RuntimeHealthCheck::Speech.bit();
+
+        assert_eq!(
+            candidate.successful_generation(health),
+            Err(RuntimeHealthError::MissingRequiredCheck(
+                RuntimeHealthCheck::Speech
+            ))
+        );
+    }
+
+    #[test]
+    fn inaccessible_recovery_cannot_be_marked_successful() {
+        let plan = complete_plan();
+        let candidate = plan.boot_candidate(7).unwrap();
+        let mut health = complete_health();
+        health.passed &= !RuntimeHealthCheck::AccessibleRecovery.bit();
+
+        assert_eq!(
+            candidate.successful_generation(health),
+            Err(RuntimeHealthError::MissingRequiredCheck(
+                RuntimeHealthCheck::AccessibleRecovery
+            ))
+        );
+    }
+
+    #[test]
+    fn all_runtime_health_checks_produce_success_proof() {
+        let plan = complete_plan();
+        let candidate = plan.boot_candidate(7).unwrap();
+        let successful = candidate.successful_generation(complete_health()).unwrap();
+        assert_eq!(successful.generation(), 42);
+        assert_eq!(successful.rollback_index(), 7);
     }
 }
