@@ -33,6 +33,20 @@ impl PciAddress {
                 | register_offset as u64,
         )
     }
+
+    pub const fn mechanism1_address(self, register_offset: u8) -> Option<u32> {
+        if self.segment != 0 || register_offset > 0xfc || register_offset & 0x03 != 0 {
+            return None;
+        }
+
+        Some(
+            0x8000_0000
+                | ((self.bus as u32) << 16)
+                | ((self.device as u32) << 11)
+                | ((self.function as u32) << 8)
+                | register_offset as u32,
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -48,6 +62,14 @@ impl PciClassCode {
             base,
             subclass,
             programming_interface,
+        }
+    }
+
+    pub const fn from_class_revision_register(value: u32) -> Self {
+        Self {
+            base: (value >> 24) as u8,
+            subclass: (value >> 16) as u8,
+            programming_interface: (value >> 8) as u8,
         }
     }
 
@@ -101,6 +123,25 @@ pub struct PciDeviceIdentity {
 }
 
 impl PciDeviceIdentity {
+    pub const fn from_config_registers(
+        vendor_device: u32,
+        class_revision: u32,
+        subsystem: Option<u32>,
+    ) -> Self {
+        let (subsystem_vendor_id, subsystem_device_id) = match subsystem {
+            Some(value) => (Some(value as u16), Some((value >> 16) as u16)),
+            None => (None, None),
+        };
+
+        Self {
+            vendor_id: vendor_device as u16,
+            device_id: (vendor_device >> 16) as u16,
+            subsystem_vendor_id,
+            subsystem_device_id,
+            class: PciClassCode::from_class_revision_register(class_revision),
+        }
+    }
+
     pub const fn is_present(self) -> bool {
         self.vendor_id != 0xffff
     }
@@ -125,6 +166,31 @@ mod tests {
             Some((2_u64 << 20) | (5_u64 << 15) | (3_u64 << 12) | 0x120)
         );
         assert_eq!(address.ecam_offset(0x1000), None);
+    }
+
+    #[test]
+    fn computes_legacy_mechanism1_address_for_segment_zero() {
+        let address = PciAddress::new(0, 2, 5, 3).unwrap();
+        assert_eq!(
+            address.mechanism1_address(0x08),
+            Some(0x8000_0000 | (2 << 16) | (5 << 11) | (3 << 8) | 0x08)
+        );
+        assert_eq!(address.mechanism1_address(0x09), None);
+        assert_eq!(PciAddress::new(1, 0, 0, 0).unwrap().mechanism1_address(0), None);
+    }
+
+    #[test]
+    fn parses_standard_configuration_registers() {
+        let identity = PciDeviceIdentity::from_config_registers(
+            0x1234_8086,
+            0x0108_0201,
+            Some(0xabcd_1043),
+        );
+        assert_eq!(identity.vendor_id, 0x8086);
+        assert_eq!(identity.device_id, 0x1234);
+        assert_eq!(identity.subsystem_vendor_id, Some(0x1043));
+        assert_eq!(identity.subsystem_device_id, Some(0xabcd));
+        assert!(identity.class.is_nvme());
     }
 
     #[test]
