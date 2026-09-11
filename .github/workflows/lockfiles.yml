@@ -1,0 +1,59 @@
+name: Lockfiles
+
+on:
+  push:
+    branches: [main, bootstrap-v0.1]
+    paths:
+      - "**/Cargo.toml"
+      - "rust-toolchain.toml"
+      - ".github/workflows/lockfiles.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: lockfiles-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Generate Cargo lockfiles
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc -Vv
+          cargo -V
+
+      - name: Generate exact dependency locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo generate-lockfile --manifest-path Cargo.toml
+          cargo generate-lockfile --manifest-path boot/uefi/Cargo.toml
+          cargo generate-lockfile --manifest-path kernel/x86_64/Cargo.toml
+          test -s Cargo.lock
+          test -s boot/uefi/Cargo.lock
+          test -s kernel/x86_64/Cargo.lock
+          sha256sum Cargo.lock boot/uefi/Cargo.lock kernel/x86_64/Cargo.lock | tee LOCKFILES-SHA256.txt
+
+      - name: Upload lockfiles
+        uses: actions/upload-artifact@v6
+        with:
+          name: cargo-lockfiles
+          path: |
+            Cargo.lock
+            boot/uefi/Cargo.lock
+            kernel/x86_64/Cargo.lock
+            LOCKFILES-SHA256.txt
+          if-no-files-found: error
+          retention-days: 7
