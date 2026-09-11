@@ -241,9 +241,7 @@ mod tests {
         );
         assert_eq!(address.mechanism1_address(0x09), None);
         assert_eq!(
-            PciAddress::new(1, 0, 0, 0)
-                .unwrap()
-                .mechanism1_address(0),
+            PciAddress::new(1, 0, 0, 0).unwrap().mechanism1_address(0),
             None
         );
     }
