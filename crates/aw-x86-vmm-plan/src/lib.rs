@@ -146,7 +146,8 @@ impl<const MAPPINGS: usize> X86IdentityMappingPlan<MAPPINGS> {
                 PhysicalPreservationKind::AcpiRsdp => {
                     (PageTableFlags::NO_EXECUTE, MappingHardening::Final)
                 }
-                PhysicalPreservationKind::Framebuffer | PhysicalPreservationKind::PcieEcam { .. } => (
+                PhysicalPreservationKind::Framebuffer
+                | PhysicalPreservationKind::PcieEcam { .. } => (
                     PageTableFlags::WRITABLE
                         .union(PageTableFlags::NO_EXECUTE)
                         .union(PageTableFlags::CACHE_DISABLE),
@@ -191,9 +192,7 @@ impl<const MAPPINGS: usize> X86IdentityMappingPlan<MAPPINGS> {
     /// This is intentionally fail-closed. Every mapping must be marked fully hardened and no
     /// mapping may be both writable and executable. The returned guard cannot be created directly
     /// by safe downstream code.
-    pub fn activation_guard(
-        &self,
-    ) -> Result<ActivationGuard<'_, MAPPINGS>, ActivationGateError> {
+    pub fn activation_guard(&self) -> Result<ActivationGuard<'_, MAPPINGS>, ActivationGateError> {
         let mut index = 0;
         while index < self.len {
             let Some(mapping) = self.mappings[index] else {
