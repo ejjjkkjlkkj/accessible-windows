@@ -11,6 +11,10 @@
 - [x] Committed Cargo lockfiles and reproducibility gate
 - [x] CodeQL, RustSec, fuzzing, coverage and dependency review
 - [x] SBOM/checksum/provenance pipeline
+- [x] Accessible recovery contract with deterministic keyboard semantics and nonvisual delivery evidence
+- [x] Trial-generation attempt consumption before control transfer so power loss cannot create infinite retry loops
+- [x] Recovery/boot architecture research covering WinRE, GRUB, systemd/BLS, OSTree and ChromiumOS concepts
+- [x] Ten-year persistent-format/accessibility compatibility policy
 
 ## Phase 1 - UEFI bring-up
 
@@ -81,8 +85,13 @@
 - [ ] Filesystem implementation/selection
 - [ ] Install system image
 - [ ] UEFI boot entry creation
+- [ ] One-shot boot request that cannot silently become the permanent default
+- [ ] Independent signed local Recovery Core, not dependent on normal mutable OS configuration
+- [ ] Signed external recovery media path when local boot/recovery metadata is damaged
+- [ ] Recovery from corrupted/ambiguous redundant boot-state copies without guessing
 - [ ] First boot from physical NVMe/SATA SSD
 - [ ] Recovery environment
+- [ ] Recovery keyboard flow with no destructive timeout and explicit reinstall confirmation
 - [ ] Installer fallback to GOP without accelerated GPU driver
 
 ## Phase 5 - Desktop and accessibility
@@ -110,6 +119,9 @@
 - [ ] Package manager
 - [ ] Atomic updates
 - [ ] Rollback/snapshots
+- [ ] Optional signed network remediation that stages a new generation instead of patching known-good content in place
+- [ ] Power-loss fault injection at every update and boot-state persistence boundary
+- [ ] Migration fixtures for every persistent format still inside the ten-year support window
 
 ## Phase 7 - Compatibility
 
@@ -122,3 +134,5 @@
 ## Definition of success
 
 The project does not claim to exceed Windows 11 until reproducible benchmarks demonstrate improvements in selected areas such as accessibility coverage, idle resource use, recovery, update reliability, input latency and security isolation while maintaining useful application and hardware compatibility.
+
+Recovery is not considered better merely because it has more options: it must demonstrably survive boot/update corruption, remain independently recoverable, preserve a known-good generation, and be fully operable by a blind user without visual assistance.
