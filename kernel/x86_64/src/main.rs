@@ -7,7 +7,9 @@ use aw_kernel_core::{
 };
 use aw_memory::BootstrapPageAllocator;
 use aw_pci::{PciAddress, PciDeviceIdentity};
-use aw_x86_platform::{CpuFeatures, CpuIdentity, CpuSignature, CpuVendor, CpuidRegisters};
+use aw_x86_platform::{
+    CpuAddressWidths, CpuFeatures, CpuIdentity, CpuSignature, CpuVendor, CpuidRegisters,
+};
 use core::arch::asm;
 use core::arch::x86_64::__cpuid_count;
 use core::panic::PanicInfo;
@@ -64,6 +66,28 @@ fn debug_write(message: &str) {
     }
 }
 
+fn debug_write_u8(mut value: u8) {
+    let mut digits = [0_u8; 3];
+    let mut index = digits.len();
+
+    if value == 0 {
+        // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
+        unsafe { outb(DEBUG_PORT, b'0') };
+        return;
+    }
+
+    while value != 0 {
+        index -= 1;
+        digits[index] = b'0' + value % 10;
+        value /= 10;
+    }
+
+    for byte in &digits[index..] {
+        // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
+        unsafe { outb(DEBUG_PORT, *byte) };
+    }
+}
+
 #[inline(always)]
 fn halt_forever() -> ! {
     loop {
@@ -75,9 +99,7 @@ fn halt_forever() -> ! {
 
 #[inline(always)]
 fn cpuid(leaf: u32, subleaf: u32) -> CpuidRegisters {
-    // SAFETY: CPUID is available in x86-64 long mode. The intrinsic only reads
-    // architectural CPU identification registers and does not dereference memory.
-    let registers = unsafe { __cpuid_count(leaf, subleaf) };
+    let registers = __cpuid_count(leaf, subleaf);
     CpuidRegisters {
         eax: registers.eax,
         ebx: registers.ebx,
@@ -100,12 +122,14 @@ fn detect_cpu() -> CpuIdentity {
     let leaf7 = (max_basic_leaf >= 7).then(|| cpuid(7, 0));
     let extended_leaf1 = (max_extended_leaf >= 0x8000_0001).then(|| cpuid(0x8000_0001, 0));
     let extended_leaf7 = (max_extended_leaf >= 0x8000_0007).then(|| cpuid(0x8000_0007, 0));
+    let extended_leaf8 = (max_extended_leaf >= 0x8000_0008).then(|| cpuid(0x8000_0008, 0));
 
     CpuIdentity {
         vendor: CpuVendor::from_leaf0(leaf0),
         signature: CpuSignature::from_leaf1_eax(leaf1.eax),
         max_basic_leaf,
         max_extended_leaf,
+        address_widths: CpuAddressWidths::from_extended_leaf8(extended_leaf8),
         features: CpuFeatures::from_leaves(leaf1, leaf7, extended_leaf1, extended_leaf7),
     }
 }
@@ -117,6 +141,14 @@ fn debug_cpu_vendor(vendor: CpuVendor) {
         CpuVendor::Intel => debug_write("intel"),
         CpuVendor::Other(_) => debug_write("other"),
     }
+    debug_write("\n");
+}
+
+fn debug_cpu_address_widths(widths: CpuAddressWidths) {
+    debug_write("AW_CPU_ADDRESS_WIDTH_OK physical=");
+    debug_write_u8(widths.physical);
+    debug_write(" linear=");
+    debug_write_u8(widths.linear);
     debug_write("\n");
 }
 
@@ -136,6 +168,21 @@ fn validate_cpu_baseline() {
         debug_write("AW_CPU_VENDOR_SUPPORTED\n");
     } else {
         debug_write("AW_CPU_VENDOR_GENERIC_FALLBACK\n");
+    }
+
+    if cpu.features.nx {
+        debug_write("AW_CPU_NX_OK\n");
+    } else {
+        debug_write("AW_CPU_NX_FAIL\n");
+        halt_forever();
+    }
+
+    debug_cpu_address_widths(cpu.address_widths);
+    if cpu.meets_paging_baseline() {
+        debug_write("AW_PAGING_BASELINE_OK\n");
+    } else {
+        debug_write("AW_PAGING_BASELINE_FAIL\n");
+        halt_forever();
     }
 
     if cpu.features.x2apic {
