@@ -15,8 +15,13 @@ use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::cfg::ConfigTableEntry;
 use uefi::{cstr16, system, Status};
 
-const KERNEL_LOAD_ADDRESS: u64 = 0x0100_0000;
 const UEFI_PAGE_SIZE: usize = 4096;
+
+#[derive(Clone, Copy, Debug)]
+struct LoadedKernel {
+    entry_address: usize,
+    image_size: usize,
+}
 
 fn validate_firmware_rsdp(address: usize, table_revision: u8) -> Result<RsdpInfo, RsdpError> {
     let probe_len = if table_revision >= 2 {
@@ -44,7 +49,7 @@ fn validate_firmware_rsdp(address: usize, table_revision: u8) -> Result<RsdpInfo
     aw_acpi::validate_rsdp(full)
 }
 
-fn load_native_kernel() -> Result<usize, Status> {
+fn load_native_kernel() -> Result<LoadedKernel, Status> {
     let mut file_system = match boot::get_image_file_system(boot::image_handle()) {
         Ok(file_system) => {
             log::info!("AW_KERNEL_FS_OK source=image_handle");
@@ -130,20 +135,18 @@ fn load_native_kernel() -> Result<usize, Status> {
 
     let pages = kernel_image.len().div_ceil(UEFI_PAGE_SIZE);
     let allocation = boot::allocate_pages(
-        AllocateType::Address(KERNEL_LOAD_ADDRESS),
+        AllocateType::AnyPages,
         MemoryType::LOADER_DATA,
         pages,
     )
     .map_err(|error| error.status())?;
-
-    if allocation.as_ptr() as u64 != KERNEL_LOAD_ADDRESS {
-        return Err(Status::LOAD_ERROR);
-    }
-
+    let load_address = allocation.as_ptr() as usize;
     let allocation_len = pages * UEFI_PAGE_SIZE;
+
     // SAFETY: `allocation` owns `allocation_len` writable bytes allocated by
-    // UEFI at the exact kernel load address. The source Vec is valid and the
-    // copy length is bounded by the allocated page count.
+    // UEFI. The kernel is linked from virtual address zero using PIC, so its
+    // flat image can execute at the firmware-selected page-aligned address.
+    // The copy length is bounded by the allocated page count.
     unsafe {
         core::ptr::copy_nonoverlapping(
             kernel_image.as_ptr(),
@@ -160,13 +163,16 @@ fn load_native_kernel() -> Result<usize, Status> {
     }
 
     log::info!(
-        "AW_NATIVE_KERNEL_LOAD_OK address=0x{:x} bytes={} pages={}",
-        KERNEL_LOAD_ADDRESS,
+        "AW_NATIVE_KERNEL_LOAD_OK address=0x{:x} bytes={} pages={} mode=dynamic_pic",
+        load_address,
         kernel_image.len(),
         pages
     );
 
-    Ok(kernel_image.len())
+    Ok(LoadedKernel {
+        entry_address: load_address,
+        image_size: kernel_image.len(),
+    })
 }
 
 #[entry]
@@ -177,8 +183,8 @@ fn main() -> Status {
 
     log::info!("AW_BOOT_OK stage=uefi_init arch=x86_64");
 
-    let kernel_size = match load_native_kernel() {
-        Ok(size) => size,
+    let loaded_kernel = match load_native_kernel() {
+        Ok(kernel) => kernel,
         Err(status) => {
             log::error!("AW_NATIVE_KERNEL_LOAD_FAIL status={:?}", status);
             return status;
@@ -296,8 +302,8 @@ fn main() -> Status {
     log::info!("AW_EXIT_BOOT_SERVICES_BEGIN");
 
     // SAFETY: All boot-services-backed protocol objects and temporary memory
-    // maps have been dropped. The kernel image lives in LOADER_DATA pages and
-    // remains valid after ExitBootServices.
+    // maps have been dropped. The native kernel occupies LOADER_DATA pages that
+    // remain reserved across ExitBootServices.
     let final_memory_map = unsafe { boot::exit_boot_services(None) };
 
     log::info!(
@@ -328,14 +334,14 @@ fn main() -> Status {
     );
     log::info!(
         "AW_NATIVE_KERNEL_TRANSFER address=0x{:x} bytes={}",
-        KERNEL_LOAD_ADDRESS,
-        kernel_size
+        loaded_kernel.entry_address,
+        loaded_kernel.image_size
     );
 
     type KernelEntry = extern "sysv64" fn(*const KernelHandoff) -> !;
-    // SAFETY: The raw kernel image was linked for KERNEL_LOAD_ADDRESS and copied
-    // there before ExitBootServices. Its first linked symbol is `_start` using
-    // the SysV64 ABI defined by this loader/kernel contract.
-    let kernel_entry: KernelEntry = unsafe { core::mem::transmute(KERNEL_LOAD_ADDRESS as usize) };
+    // SAFETY: The kernel was linked at offset zero with position-independent
+    // code, copied into the allocated page range, and `_start` is the first
+    // byte in the flat image. The ABI is shared with the kernel crate.
+    let kernel_entry: KernelEntry = unsafe { core::mem::transmute(loaded_kernel.entry_address) };
     kernel_entry(core::ptr::addr_of!(handoff));
 }
