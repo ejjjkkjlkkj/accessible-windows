@@ -107,6 +107,7 @@ jobs:
           grep -F "AW_GOP_OK" uefi-debug.log
           grep -F "AW_FRAMEBUFFER_OK" uefi-debug.log
           grep -F "AW_EXIT_BOOT_SERVICES_OK" uefi-debug.log
+          grep -F "AW_KERNEL_HANDOFF_OK" uefi-debug.log
           grep -F "AW_KERNEL_STAGE_OK" uefi-debug.log
 
       - name: Upload boot artifacts

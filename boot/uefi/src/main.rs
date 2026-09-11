@@ -2,9 +2,10 @@
 #![no_std]
 
 use aw_acpi::{RsdpError, RsdpInfo};
+use aw_kernel_core::{FramebufferHandoff, HandoffPixelFormat, KernelHandoff};
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
 use uefi::prelude::*;
-use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
+use uefi::proto::console::gop::{GraphicsOutput, PixelFormat as UefiPixelFormat};
 use uefi::table::cfg::ConfigTableEntry;
 use uefi::{boot, system, Status};
 
@@ -108,15 +109,24 @@ fn main() -> Status {
 
     let mode = gop.current_mode_info();
     let (width, height) = mode.resolution();
+    let stride_pixels = mode.stride();
+    let uefi_pixel_format = mode.pixel_format();
+    let handoff_pixel_format = match uefi_pixel_format {
+        UefiPixelFormat::Rgb => HandoffPixelFormat::Rgb,
+        UefiPixelFormat::Bgr => HandoffPixelFormat::Bgr,
+        UefiPixelFormat::Bitmask => HandoffPixelFormat::Bitmask,
+        UefiPixelFormat::BltOnly => HandoffPixelFormat::Unknown,
+    };
+
     log::info!(
         "AW_GOP_OK width={} height={} stride={} format={:?}",
         width,
         height,
-        mode.stride(),
-        mode.pixel_format()
+        stride_pixels,
+        uefi_pixel_format
     );
 
-    let framebuffer = if mode.pixel_format() == PixelFormat::BltOnly {
+    let framebuffer = if uefi_pixel_format == UefiPixelFormat::BltOnly {
         log::warn!("AW_FRAMEBUFFER_UNAVAILABLE reason=blt_only");
         None
     } else {
@@ -124,7 +134,14 @@ fn main() -> Status {
         let address = frame_buffer.as_mut_ptr() as usize;
         let size = frame_buffer.size();
         log::info!("AW_FRAMEBUFFER_OK address=0x{:x} size={}", address, size);
-        Some((address, size))
+        Some(FramebufferHandoff {
+            physical_address: address as u64,
+            byte_len: size as u64,
+            width: width as u32,
+            height: height as u32,
+            stride_pixels: stride_pixels as u32,
+            pixel_format: handoff_pixel_format,
+        })
     };
 
     uefi::println!("Accessible Windows");
@@ -146,12 +163,33 @@ fn main() -> Status {
         final_memory_map.len()
     );
 
+    let handoff = KernelHandoff::new(
+        acpi_address as u64,
+        final_memory_map.len() as u64,
+        framebuffer,
+    );
+
+    match aw_kernel_core::enter(&handoff) {
+        Ok(()) => log::info!(
+            "AW_KERNEL_HANDOFF_OK magic=0x{:x} abi={} size={} memory_entries={} flags=0x{:x}",
+            handoff.magic,
+            handoff.abi_version,
+            handoff.struct_size,
+            handoff.memory_map_entries,
+            handoff.flags
+        ),
+        Err(error) => {
+            log::error!("AW_KERNEL_HANDOFF_FAIL error={:?}", error);
+            return Status::COMPROMISED_DATA;
+        }
+    }
+
     match framebuffer {
-        Some((address, size)) => log::info!(
+        Some(framebuffer) => log::info!(
             "AW_KERNEL_STAGE_OK acpi_rsdp=0x{:x} framebuffer=0x{:x} framebuffer_size={}",
             acpi_address,
-            address,
-            size
+            framebuffer.physical_address,
+            framebuffer.byte_len
         ),
         None => log::info!(
             "AW_KERNEL_STAGE_OK acpi_rsdp=0x{:x} framebuffer=unavailable",

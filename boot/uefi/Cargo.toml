@@ -6,5 +6,6 @@ publish = false
 
 [dependencies]
 aw-acpi = { path = "../../crates/aw-acpi" }
+aw-kernel-core = { path = "../../crates/aw-kernel-core" }
 log = { version = "0.4", default-features = false }
 uefi = { version = "=0.40.0", features = ["logger", "log-debugcon", "panic_handler"] }
