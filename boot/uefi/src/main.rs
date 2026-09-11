@@ -64,7 +64,8 @@ fn load_native_kernel() -> Result<usize, Status> {
     let mut file_system = FileSystem::new(file_system);
     let kernel_image = file_system
         .read(cstr16!(r"\EFI\ACCESSIBLE\KERNEL.BIN"))
-        .map_err(|_| Status::LOAD_ERROR)?;
+        .or_else(|_| file_system.read(cstr16!(r"EFI\ACCESSIBLE\KERNEL.BIN")))
+        .map_err(|_| Status::NOT_FOUND)?;
 
     if kernel_image.is_empty() {
         return Err(Status::LOAD_ERROR);
