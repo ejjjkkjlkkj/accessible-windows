@@ -11,4 +11,9 @@ name = "aw-kernel-x86_64"
 version = "0.1.0"
 dependencies = [
  "aw-kernel-core",
+ "aw-x86-platform",
 ]
+
+[[package]]
+name = "aw-x86-platform"
+version = "0.1.0"
