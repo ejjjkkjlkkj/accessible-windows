@@ -25,9 +25,11 @@ jobs:
       - name: Validate cross-runtime VMM and translation lock
         run: python scripts/check-cross-runtime-lock.py
       - name: Compile source tooling
-        run: python -m py_compile scripts/check-runtime-sources.py scripts/check-runtime-source-locks.py scripts/check-cross-runtime-lock.py scripts/sync-runtime-source-closure.py
+        run: python -m py_compile scripts/check-runtime-sources.py scripts/check-runtime-source-locks.py scripts/check-cross-runtime-lock.py scripts/sync-runtime-source-closure.py scripts/sync-linux-runtime-closure.py
       - name: Dry-run pinned Android source synchronization
         run: python scripts/sync-runtime-source-closure.py android --dest "$RUNNER_TEMP/runtime-sources" --dry-run
+      - name: Dry-run pinned Linux transitive source closure
+        run: python scripts/sync-linux-runtime-closure.py --dest "$RUNNER_TEMP/linux-source-closure" --dry-run
       - name: Dry-run pinned Apple OSS synchronization
         run: python scripts/sync-runtime-source-closure.py darwin-apple-oss --dest "$RUNNER_TEMP/runtime-sources" --dry-run
       - name: Test runtime source completeness contract
