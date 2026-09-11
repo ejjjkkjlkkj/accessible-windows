@@ -5,6 +5,8 @@ use aw_kernel_core::{
     MemoryDescriptorHandoff, UEFI_MEMORY_TYPE_CONVENTIONAL, UEFI_PAGE_SIZE,
 };
 
+pub const DEFAULT_BOOTSTRAP_MIN_ADDRESS: u64 = 0x10_0000;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PhysicalPage {
     start_address: u64,
@@ -21,6 +23,7 @@ impl PhysicalPage {
 pub enum BootstrapAllocatorError {
     EmptyMemoryMap,
     InvalidDescriptor,
+    InvalidMinimumAddress,
     NoConventionalMemory,
 }
 
@@ -43,27 +46,41 @@ impl<'a> BootstrapPageAllocator<'a> {
     pub fn new(
         descriptors: &'a [MemoryDescriptorHandoff],
     ) -> Result<Self, BootstrapAllocatorError> {
+        Self::with_minimum_address(descriptors, DEFAULT_BOOTSTRAP_MIN_ADDRESS)
+    }
+
+    pub fn with_minimum_address(
+        descriptors: &'a [MemoryDescriptorHandoff],
+        minimum_address: u64,
+    ) -> Result<Self, BootstrapAllocatorError> {
         if descriptors.is_empty() {
             return Err(BootstrapAllocatorError::EmptyMemoryMap);
         }
+        if !minimum_address.is_multiple_of(UEFI_PAGE_SIZE) {
+            return Err(BootstrapAllocatorError::InvalidMinimumAddress);
+        }
 
-        let mut has_conventional = false;
+        let mut has_usable_conventional = false;
         for descriptor in descriptors {
             if !descriptor.is_valid() {
                 return Err(BootstrapAllocatorError::InvalidDescriptor);
             }
-            if descriptor.memory_type == UEFI_MEMORY_TYPE_CONVENTIONAL {
-                has_conventional = true;
+            if descriptor.memory_type == UEFI_MEMORY_TYPE_CONVENTIONAL
+                && descriptor
+                    .physical_end_exclusive()
+                    .is_some_and(|end| end > minimum_address)
+            {
+                has_usable_conventional = true;
             }
         }
 
-        if !has_conventional {
+        if !has_usable_conventional {
             return Err(BootstrapAllocatorError::NoConventionalMemory);
         }
 
         Ok(Self {
             descriptors,
-            cursor: 0,
+            cursor: minimum_address,
             allocated_pages: 0,
         })
     }
@@ -136,6 +153,28 @@ mod tests {
     }
 
     #[test]
+    fn default_allocator_skips_low_memory() {
+        let map = [
+            descriptor(UEFI_MEMORY_TYPE_CONVENTIONAL, 0x0, 0x100),
+            descriptor(UEFI_MEMORY_TYPE_CONVENTIONAL, 0x10_0000, 1),
+        ];
+        let mut allocator = BootstrapPageAllocator::new(&map).unwrap();
+
+        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x10_0000);
+        assert_eq!(allocator.allocate_page(), None);
+    }
+
+    #[test]
+    fn custom_minimum_address_is_supported() {
+        let map = [descriptor(UEFI_MEMORY_TYPE_CONVENTIONAL, 0x80_0000, 4)];
+        let mut allocator = BootstrapPageAllocator::with_minimum_address(&map, 0x80_2000).unwrap();
+
+        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x80_2000);
+        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x80_3000);
+        assert_eq!(allocator.allocate_page(), None);
+    }
+
+    #[test]
     fn ignores_non_conventional_ranges() {
         let map = [
             descriptor(2, 0x10_0000, 8),
@@ -165,8 +204,22 @@ mod tests {
     }
 
     #[test]
-    fn rejects_map_without_conventional_memory() {
-        let map = [descriptor(2, 0x10_0000, 1), descriptor(11, 0x20_0000, 1)];
+    fn rejects_unaligned_minimum_address() {
+        let map = [descriptor(UEFI_MEMORY_TYPE_CONVENTIONAL, 0x10_0000, 1)];
+
+        assert!(matches!(
+            BootstrapPageAllocator::with_minimum_address(&map, 0x10_0001),
+            Err(BootstrapAllocatorError::InvalidMinimumAddress)
+        ));
+    }
+
+    #[test]
+    fn rejects_map_without_usable_conventional_memory() {
+        let map = [
+            descriptor(2, 0x10_0000, 1),
+            descriptor(11, 0x20_0000, 1),
+            descriptor(UEFI_MEMORY_TYPE_CONVENTIONAL, 0x0, 1),
+        ];
 
         assert!(matches!(
             BootstrapPageAllocator::new(&map),
