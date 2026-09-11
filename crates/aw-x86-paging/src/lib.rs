@@ -356,7 +356,8 @@ impl PageTable {
             return Err(MappingError::AlreadyMapped);
         }
 
-        self.entries[index] = PageTableEntry::from_frame(frame, flags.union(PageTableFlags::PRESENT));
+        self.entries[index] =
+            PageTableEntry::from_frame(frame, flags.union(PageTableFlags::PRESENT));
         Ok(())
     }
 
