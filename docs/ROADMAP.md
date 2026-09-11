@@ -15,8 +15,9 @@
 - [x] Build the `.efi` executable in CI
 - [x] Print deterministic UEFI console diagnostics
 - [x] Add an OVMF/QEMU execution smoke test
-- [ ] Read the UEFI memory map
-- [ ] Detect GOP framebuffer
+- [x] Read and validate availability of the UEFI memory map
+- [x] Detect GOP and current display mode
+- [ ] Capture framebuffer address/size for kernel handoff
 - [ ] Locate ACPI RSDP
 - [ ] Exit UEFI boot services safely
 - [ ] Transfer control to a freestanding kernel entry point
