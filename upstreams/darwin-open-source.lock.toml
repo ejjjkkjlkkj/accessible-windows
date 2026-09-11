@@ -18,9 +18,13 @@ security = "https://github.com/apple-oss-distributions/Security.git"
 
 [compatibility_projects]
 darling = "https://github.com/darlinghq/darling.git"
+darling_commit = "60ba801decee7a00782f74f6be4c8ffb013f79ff"
 objc_runtime = "https://github.com/gnustep/libobjc2.git"
+objc_runtime_commit = "aca3916553665f01550832d02462bcf137c94c39"
 foundation = "https://github.com/gnustep/libs-base.git"
+foundation_commit = "89d607609da2040b9583f06be0e4f095fd3a2df8"
 appkit = "https://github.com/gnustep/libs-gui.git"
+appkit_commit = "3201d35411351c995efe10a1afe5d05b719196d5"
 
 [clean_room_required]
 graphics_bridge = "project:compat/darwin/graphics"
@@ -47,4 +51,4 @@ mach_o_loader_verified = false
 cli_compatibility_verified = false
 gui_compatibility_verified = false
 accessibility_verified = false
-reason = "The Apple open-source distribution inventory is pinned, but component-level license review, compatibility-source pins and clean-room framework coverage remain incomplete."
+reason = "Apple OSS inventory and compatibility projects are immutably pinned; component-level license review, source-closure verification and clean-room framework coverage remain incomplete."
