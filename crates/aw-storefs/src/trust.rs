@@ -1,3 +1,5 @@
+pub mod chunk;
+
 use super::{
     DigestVerifier, ObjectDescriptor, ObjectVerificationError, StoreManifest, VerifiedObject,
     verify_resident_object,
