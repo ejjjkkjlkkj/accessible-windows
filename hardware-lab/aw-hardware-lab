@@ -88,26 +88,79 @@ trap 'rm -f "$BACKEND_RESULT"' EXIT
   --result "$BACKEND_RESULT"
 
 [[ -s "$BACKEND_RESULT" ]] || fail "DUT backend produced no evidence"
-grep -Fqx "AW_PHYSICAL_BOOT_RESULT=PASS" "$BACKEND_RESULT" || fail "physical boot did not pass"
-grep -Fqx "AW_INTERNAL_DISK_UNCHANGED=PASS" "$BACKEND_RESULT" || fail "internal disk integrity was not proven"
-grep -Fqx "AW_NATIVE_KERNEL_ENTRY=PASS" "$BACKEND_RESULT" || fail "native kernel entry was not proven"
+
+require_line() {
+  local line="$1"
+  local message="$2"
+  grep -Fqx "$line" "$BACKEND_RESULT" || fail "$message"
+}
+
+single_value() {
+  local key="$1"
+  local count
+  local value
+  count="$(grep -c "^${key}=" "$BACKEND_RESULT" || true)"
+  [[ "$count" == "1" ]] || fail "$key must appear exactly once in DUT evidence"
+  value="$(sed -n "s/^${key}=//p" "$BACKEND_RESULT")"
+  [[ -n "$value" ]] || fail "$key must not be empty"
+  printf '%s' "$value"
+}
+
+require_line "AW_PHYSICAL_BOOT_RESULT=PASS" "physical boot did not pass"
+require_line "AW_INTERNAL_DISK_UNCHANGED=PASS" "internal disk integrity was not proven"
+require_line "AW_NATIVE_KERNEL_ENTRY=PASS" "native kernel entry was not proven"
 
 # Accessibility evidence is mandatory. A graphical boot alone can never make this lab PASS.
-grep -Fqx "AW_KEYBOARD_RECOVERY=PASS" "$BACKEND_RESULT" || fail "keyboard recovery flow was not proven"
-grep -Fqx "AW_STRUCTURED_DIAGNOSTICS=PASS" "$BACKEND_RESULT" || fail "structured diagnostics were not proven"
-grep -Fqx "AW_ACCESSIBLE_RECOVERY_FLOW=PASS" "$BACKEND_RESULT" || fail "accessible recovery flow was not proven"
-grep -Fqx "AW_NONVISUAL_ROLLBACK_FLOW=PASS" "$BACKEND_RESULT" || fail "nonvisual rollback flow was not proven"
-NONVISUAL_CHANNEL="$(sed -n 's/^AW_NONVISUAL_CHANNEL=//p' "$BACKEND_RESULT" | tail -n1)"
+require_line "AW_KEYBOARD_RECOVERY=PASS" "keyboard recovery flow was not proven"
+require_line "AW_STRUCTURED_DIAGNOSTICS=PASS" "structured diagnostics were not proven"
+require_line "AW_ACCESSIBLE_RECOVERY_FLOW=PASS" "accessible recovery flow was not proven"
+require_line "AW_NONVISUAL_ROLLBACK_FLOW=PASS" "nonvisual rollback flow was not proven"
+require_line "AW_ROLLBACK_TARGET_IS_PREVIOUS_SUCCESSFUL=PASS" "rollback target was not proven to be the previous successful generation"
+require_line "AW_DIAGNOSTIC_EXPORT=PASS" "keyboard-accessible diagnostic export was not proven"
+require_line "AW_SIGNED_REINSTALL_ACTION_AVAILABLE=PASS" "keyboard-accessible signed reinstall action was not proven"
+
+NONVISUAL_CHANNEL="$(single_value AW_NONVISUAL_CHANNEL)"
 case "$NONVISUAL_CHANNEL" in
   SPEECH|BRAILLE|SPEECH+BRAILLE) ;;
   *) fail "direct nonvisual output channel was not proven" ;;
 esac
+
+RECOVERY_INPUT="$(single_value AW_RECOVERY_INPUT)"
+[[ "$RECOVERY_INPUT" == "KEYBOARD" ]] || fail "recovery-critical input must be keyboard"
+
+VISUAL_ASSISTANCE="$(single_value AW_VISUAL_ASSISTANCE_USED)"
+[[ "$VISUAL_ASSISTANCE" == "NO" ]] || fail "blind-user flow used visual assistance"
+
+POINTER_INPUT="$(single_value AW_POINTER_INPUT_USED)"
+[[ "$POINTER_INPUT" == "NO" ]] || fail "recovery-critical flow used pointer input"
+
+FAILURE_CODE="$(single_value AW_FAILURE_DIAGNOSTIC_CODE)"
+case "$FAILURE_CODE" in
+  0x1001|0x1002|0x1101|0x1102|0x1201|0x1401|0x1402|0x1403|0x1404|0x1501) ;;
+  *) fail "unknown or non-failure structured diagnostic code: $FAILURE_CODE" ;;
+esac
+
+FAILURE_SEVERITY="$(single_value AW_FAILURE_SEVERITY)"
+[[ "$FAILURE_SEVERITY" == "CRITICAL" ]] || fail "injected recovery failure must be reported as CRITICAL"
+
+FAILURE_ACTION="$(single_value AW_FAILURE_ACTION)"
+[[ "$FAILURE_ACTION" == "BOOT_PREVIOUS_GENERATION" ]] || fail "failure action must be BOOT_PREVIOUS_GENERATION"
+
+TRIAL_GENERATION="$(single_value AW_TRIAL_GENERATION)"
+ROLLBACK_GENERATION="$(single_value AW_ROLLBACK_GENERATION)"
+[[ "$TRIAL_GENERATION" =~ ^[1-9][0-9]*$ ]] || fail "trial generation must be a positive decimal integer"
+[[ "$ROLLBACK_GENERATION" =~ ^[1-9][0-9]*$ ]] || fail "rollback generation must be a positive decimal integer"
+[[ "$TRIAL_GENERATION" != "$ROLLBACK_GENERATION" ]] || fail "rollback generation must differ from failed trial generation"
+
+printf 'AW_BLIND_RECOVERY_EVIDENCE_OK code=%s action=%s trial=%s rollback=%s channel=%s\n' \
+  "$FAILURE_CODE" "$FAILURE_ACTION" "$TRIAL_GENERATION" "$ROLLBACK_GENERATION" "$NONVISUAL_CHANNEL"
 
 {
   echo "AW_PHYSICAL_BOOT_RESULT=PASS"
   echo "AW_INTERNAL_DISK_UNCHANGED=PASS"
   echo "AW_NATIVE_KERNEL_ENTRY=PASS"
   echo "AW_ACCESSIBILITY_HARDWARE_GATE=PASS"
+  echo "AW_BLIND_RECOVERY_EVIDENCE=PASS"
   echo "AW_SOURCE_RUN=$SOURCE_RUN"
   echo "AW_COMMIT=$COMMIT"
   echo "AW_IMAGE_SHA256=$ACTUAL_SHA"
