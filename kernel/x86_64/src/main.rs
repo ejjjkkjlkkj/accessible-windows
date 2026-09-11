@@ -106,12 +106,23 @@ fn detect_cpu() -> CpuIdentity {
     }
 }
 
+fn debug_cpu_vendor(vendor: CpuVendor) {
+    debug_write("AW_CPU_VENDOR_OK vendor=");
+    match vendor {
+        CpuVendor::Amd => debug_write("amd"),
+        CpuVendor::Intel => debug_write("intel"),
+        CpuVendor::Other(_) => debug_write("other"),
+    }
+    debug_write("\n");
+}
+
 fn validate_cpu_baseline() {
     let cpu = detect_cpu();
 
-    debug_write("AW_CPU_VENDOR_OK vendor=");
-    debug_write(cpu.vendor.canonical_name());
-    debug_write("\n");
+    // Keep the emitted strings in this flat kernel image rather than returning
+    // &'static str pointers from a dependency. The latter can become an absolute
+    // address and is unsafe for a kernel loaded at an arbitrary physical address.
+    debug_cpu_vendor(cpu.vendor);
 
     if cpu.features.meets_boot_baseline() {
         debug_write("AW_CPU_BASELINE_OK apic=1 sse2=1 long_mode=1\n");
