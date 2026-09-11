@@ -17,10 +17,11 @@
 - [x] Boot the EFI stage automatically under OVMF/QEMU
 - [x] Read and validate availability of the UEFI memory map
 - [x] Detect GOP and current display mode
+- [x] Capture framebuffer address/size when GOP exposes direct framebuffer access
+- [x] Locate the ACPI RSDP through the UEFI configuration table
 - [x] Produce a GPT disk image with a FAT32 EFI System Partition
 - [x] Boot-test the generated raw disk image under OVMF/QEMU
-- [ ] Capture framebuffer address/size for kernel handoff
-- [ ] Locate ACPI RSDP
+- [ ] Validate ACPI RSDP signature/checksum and handoff structure
 - [ ] Exit UEFI boot services safely
 - [ ] Transfer control to a freestanding kernel entry point
 
