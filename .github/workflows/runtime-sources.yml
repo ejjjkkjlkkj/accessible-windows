@@ -20,5 +20,9 @@ jobs:
           python-version: "3.12"
       - name: Validate complete Linux Android and Darwin source inventory
         run: python scripts/check-runtime-sources.py
+      - name: Validate per-family source closure locks
+        run: python scripts/check-runtime-source-locks.py
       - name: Test runtime source completeness contract
         run: cargo test -p aw-runtime-sources --locked
+      - name: Test release admission binding
+        run: cargo test -p aw-app-compat --locked
