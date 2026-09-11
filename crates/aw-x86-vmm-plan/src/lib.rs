@@ -50,6 +50,16 @@ impl IdentityMapping {
     pub const fn hardening(self) -> MappingHardening {
         self.hardening
     }
+
+    /// Returns true when a mapping is simultaneously writable and executable.
+    ///
+    /// On x86-64 execution is permitted when the NX bit is absent. Permanent W+X mappings are
+    /// forbidden by the activation gate even if their hardening marker is otherwise final.
+    #[must_use]
+    pub fn is_writable_executable(self) -> bool {
+        self.flags.contains(PageTableFlags::WRITABLE)
+            && !self.flags.contains(PageTableFlags::NO_EXECUTE)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -58,6 +68,27 @@ pub enum X86MappingPlanError {
     InvalidPhysicalAddress,
     NonCanonicalIdentityMapping,
     ArithmeticOverflow,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActivationGateError {
+    IncompleteHardening { index: usize },
+    WritableExecutable { index: usize },
+}
+
+/// Proof that a mapping plan passed the security checks required before a future CR3 switch.
+///
+/// The field is private so safe downstream code cannot manufacture this token. A future CR3
+/// activation boundary must accept this guard rather than a raw mapping plan.
+pub struct ActivationGuard<'a, const MAPPINGS: usize> {
+    plan: &'a X86IdentityMappingPlan<MAPPINGS>,
+}
+
+impl<const MAPPINGS: usize> ActivationGuard<'_, MAPPINGS> {
+    #[must_use]
+    pub const fn mapping_count(&self) -> usize {
+        self.plan.len()
+    }
 }
 
 /// x86-64 identity mappings required before a future first CR3 switch.
@@ -155,6 +186,32 @@ impl<const MAPPINGS: usize> X86IdentityMappingPlan<MAPPINGS> {
         self.mappings[index]
     }
 
+    /// Validates whether this plan is permitted to reach a future CR3 activation boundary.
+    ///
+    /// This is intentionally fail-closed. Every mapping must be marked fully hardened and no
+    /// mapping may be both writable and executable. The returned guard cannot be created directly
+    /// by safe downstream code.
+    pub fn activation_guard(
+        &self,
+    ) -> Result<ActivationGuard<'_, MAPPINGS>, ActivationGateError> {
+        let mut index = 0;
+        while index < self.len {
+            let Some(mapping) = self.mappings[index] else {
+                return Err(ActivationGateError::IncompleteHardening { index });
+            };
+
+            if mapping.hardening() != MappingHardening::Final {
+                return Err(ActivationGateError::IncompleteHardening { index });
+            }
+            if mapping.is_writable_executable() {
+                return Err(ActivationGateError::WritableExecutable { index });
+            }
+            index += 1;
+        }
+
+        Ok(ActivationGuard { plan: self })
+    }
+
     fn push(&mut self, mapping: IdentityMapping) -> Result<(), X86MappingPlanError> {
         if self.len >= MAPPINGS {
             return Err(X86MappingPlanError::Capacity);
@@ -224,6 +281,7 @@ mod tests {
         assert_eq!(kernel.page_count(), 2);
         assert!(kernel.flags().contains(PageTableFlags::WRITABLE));
         assert!(!kernel.flags().contains(PageTableFlags::NO_EXECUTE));
+        assert!(kernel.is_writable_executable());
         assert_eq!(
             kernel.hardening(),
             MappingHardening::KernelSectionSplitRequired
@@ -233,6 +291,7 @@ mod tests {
         assert_eq!(acpi.kind(), PhysicalPreservationKind::AcpiRsdp);
         assert!(acpi.flags().contains(PageTableFlags::NO_EXECUTE));
         assert!(!acpi.flags().contains(PageTableFlags::WRITABLE));
+        assert!(!acpi.is_writable_executable());
         assert_eq!(acpi.hardening(), MappingHardening::Final);
 
         let framebuffer = plan.get(2).unwrap();
@@ -240,6 +299,7 @@ mod tests {
         assert!(framebuffer.flags().contains(PageTableFlags::WRITABLE));
         assert!(framebuffer.flags().contains(PageTableFlags::NO_EXECUTE));
         assert!(framebuffer.flags().contains(PageTableFlags::CACHE_DISABLE));
+        assert!(!framebuffer.is_writable_executable());
 
         let ecam = plan.get(3).unwrap();
         assert!(matches!(
@@ -250,7 +310,61 @@ mod tests {
         assert!(ecam.flags().contains(PageTableFlags::WRITABLE));
         assert!(ecam.flags().contains(PageTableFlags::NO_EXECUTE));
         assert!(ecam.flags().contains(PageTableFlags::CACHE_DISABLE));
+        assert!(!ecam.is_writable_executable());
         assert_eq!(plan.get(4), None);
+    }
+
+    #[test]
+    fn current_kernel_mapping_cannot_obtain_activation_guard() {
+        let preservation = PreservationPlan::<4>::from_handoff(&handoff(0xe000_0000)).unwrap();
+        let plan = X86IdentityMappingPlan::<4>::from_preservation(&preservation, 52).unwrap();
+
+        assert!(matches!(
+            plan.activation_guard(),
+            Err(ActivationGateError::IncompleteHardening { index: 0 })
+        ));
+    }
+
+    #[test]
+    fn activation_gate_rejects_final_writable_executable_mapping() {
+        let mut plan = X86IdentityMappingPlan::<1> {
+            mappings: [None; 1],
+            len: 0,
+        };
+        plan.push(IdentityMapping {
+            kind: PhysicalPreservationKind::KernelImage,
+            virtual_page: VirtualPage::new(0x40_0000).unwrap(),
+            physical_frame: PhysicalFrame::new(0x40_0000, 52).unwrap(),
+            page_count: 1,
+            flags: PageTableFlags::WRITABLE,
+            hardening: MappingHardening::Final,
+        })
+        .unwrap();
+
+        assert!(matches!(
+            plan.activation_guard(),
+            Err(ActivationGateError::WritableExecutable { index: 0 })
+        ));
+    }
+
+    #[test]
+    fn activation_gate_accepts_only_final_non_wx_mappings() {
+        let mut plan = X86IdentityMappingPlan::<1> {
+            mappings: [None; 1],
+            len: 0,
+        };
+        plan.push(IdentityMapping {
+            kind: PhysicalPreservationKind::AcpiRsdp,
+            virtual_page: VirtualPage::new(0x7f00_0000).unwrap(),
+            physical_frame: PhysicalFrame::new(0x7f00_0000, 52).unwrap(),
+            page_count: 1,
+            flags: PageTableFlags::NO_EXECUTE,
+            hardening: MappingHardening::Final,
+        })
+        .unwrap();
+
+        let guard = plan.activation_guard().unwrap();
+        assert_eq!(guard.mapping_count(), 1);
     }
 
     #[test]
