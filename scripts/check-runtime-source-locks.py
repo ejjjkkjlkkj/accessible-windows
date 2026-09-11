@@ -104,6 +104,21 @@ def check_darwin() -> None:
     inventory = data.get("apple_open_source_inventory", {})
     if not SHA40.fullmatch(str(inventory.get("commit", ""))):
         fail("Darwin Apple OSS inventory must be immutably pinned")
+
+    compatibility = data.get("compatibility_projects", {})
+    for repository_key, commit_key in (
+        ("darling", "darling_commit"),
+        ("objc_runtime", "objc_runtime_commit"),
+        ("foundation", "foundation_commit"),
+        ("appkit", "appkit_commit"),
+    ):
+        repository = str(compatibility.get(repository_key, ""))
+        commit = str(compatibility.get(commit_key, ""))
+        if not repository.startswith("https://github.com/") or not repository.endswith(".git"):
+            fail(f"Darwin compatibility repository {repository_key} must be an explicit GitHub clone URL")
+        if not SHA40.fullmatch(commit):
+            fail(f"Darwin compatibility source {commit_key} must be a 40-hex immutable id")
+
     closure = data.get("closure", {})
     for key in (
         "walk_all_projects_in_apple_distribution_inventory",
@@ -143,6 +158,7 @@ def main() -> None:
     print("ANDROID_FULL_MANIFEST_BASELINE = PINNED")
     print("LINUX_FULL_SOURCE_CLOSURE = NOT_READY")
     print("DARWIN_OPEN_SOURCE_INVENTORY = PINNED")
+    print("DARWIN_COMPATIBILITY_PROJECTS = PINNED")
     print("DARWIN_FULL_COMPATIBILITY_CLOSURE = NOT_READY")
 
 
