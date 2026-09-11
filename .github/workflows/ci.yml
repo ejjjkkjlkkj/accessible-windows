@@ -65,7 +65,7 @@ jobs:
       - name: Build GPT/ESP boot disk image
         run: ./scripts/build-uefi-disk.sh
 
-      - name: UEFI disk boot smoke test
+      - name: UEFI to kernel-stage smoke test
         shell: bash
         run: |
           set -euo pipefail
@@ -105,6 +105,8 @@ jobs:
           grep -F "AW_ACPI_OK" uefi-debug.log
           grep -F "AW_GOP_OK" uefi-debug.log
           grep -F "AW_FRAMEBUFFER_OK" uefi-debug.log
+          grep -F "AW_EXIT_BOOT_SERVICES_OK" uefi-debug.log
+          grep -F "AW_KERNEL_STAGE_OK" uefi-debug.log
 
       - name: Upload boot artifacts
         uses: actions/upload-artifact@v4

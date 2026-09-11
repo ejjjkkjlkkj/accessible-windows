@@ -21,9 +21,10 @@
 - [x] Locate the ACPI RSDP through the UEFI configuration table
 - [x] Produce a GPT disk image with a FAT32 EFI System Partition
 - [x] Boot-test the generated raw disk image under OVMF/QEMU
+- [x] Exit UEFI Boot Services after dropping boot-services resources
+- [x] Prove post-firmware execution through debugcon in CI
 - [ ] Validate ACPI RSDP signature/checksum and handoff structure
-- [ ] Exit UEFI boot services safely
-- [ ] Transfer control to a freestanding kernel entry point
+- [ ] Split the post-firmware stage into the freestanding kernel crate
 
 ## Phase 2 - Kernel foundation
 

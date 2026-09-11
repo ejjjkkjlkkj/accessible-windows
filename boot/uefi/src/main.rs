@@ -74,19 +74,55 @@ fn main() -> Status {
         mode.pixel_format()
     );
 
-    if mode.pixel_format() == PixelFormat::BltOnly {
+    let framebuffer = if mode.pixel_format() == PixelFormat::BltOnly {
         log::warn!("AW_FRAMEBUFFER_UNAVAILABLE reason=blt_only");
+        None
     } else {
         let mut frame_buffer = gop.frame_buffer();
         let address = frame_buffer.as_mut_ptr() as usize;
         let size = frame_buffer.size();
         log::info!("AW_FRAMEBUFFER_OK address=0x{:x} size={}", address, size);
-    }
+        Some((address, size))
+    };
 
     uefi::println!("Accessible Windows");
     uefi::println!("BOOT_STAGE=UEFI_HARDWARE_DISCOVERY");
     uefi::println!("ARCH=x86_64");
     uefi::println!("DISPLAY={}x{}", width, height);
 
-    Status::SUCCESS
+    // `ScopedProtocol<GraphicsOutput>` depends on UEFI Boot Services and must
+    // not survive ExitBootServices.
+    drop(gop);
+
+    log::info!("AW_EXIT_BOOT_SERVICES_BEGIN");
+
+    // SAFETY: All boot-services-backed protocol objects and temporary memory
+    // maps have been dropped. The remaining handoff data is copied into scalar
+    // values. After this call, this function uses no UEFI Boot Services APIs.
+    let final_memory_map = unsafe { boot::exit_boot_services(None) };
+
+    // The UEFI helper disconnects its stdout pointer during ExitBootServices.
+    // With `log-debugcon`, these records continue to QEMU debugcon without
+    // touching the retired firmware console protocol.
+    log::info!(
+        "AW_EXIT_BOOT_SERVICES_OK entries={}",
+        final_memory_map.len()
+    );
+
+    match framebuffer {
+        Some((address, size)) => log::info!(
+            "AW_KERNEL_STAGE_OK acpi_rsdp=0x{:x} framebuffer=0x{:x} framebuffer_size={}",
+            acpi_address,
+            address,
+            size
+        ),
+        None => log::info!(
+            "AW_KERNEL_STAGE_OK acpi_rsdp=0x{:x} framebuffer=unavailable",
+            acpi_address
+        ),
+    }
+
+    loop {
+        core::hint::spin_loop();
+    }
 }
