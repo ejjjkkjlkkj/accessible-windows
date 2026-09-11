@@ -1,10 +1,17 @@
-name: Lockfiles
+name: Lockfile reproducibility
 
 on:
   push:
     branches: [main, bootstrap-v0.1]
     paths:
       - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/lockfiles.yml"
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
       - "rust-toolchain.toml"
       - ".github/workflows/lockfiles.yml"
   workflow_dispatch:
@@ -17,8 +24,8 @@ permissions:
   contents: read
 
 jobs:
-  generate:
-    name: Generate Cargo lockfiles
+  verify:
+    name: Verify Cargo lockfiles
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -34,26 +41,29 @@ jobs:
           rustc -Vv
           cargo -V
 
-      - name: Generate exact dependency locks
+      - name: Require committed lockfiles
         shell: bash
         run: |
           set -euo pipefail
-          cargo generate-lockfile --manifest-path Cargo.toml
-          cargo generate-lockfile --manifest-path boot/uefi/Cargo.toml
-          cargo generate-lockfile --manifest-path kernel/x86_64/Cargo.toml
           test -s Cargo.lock
           test -s boot/uefi/Cargo.lock
           test -s kernel/x86_64/Cargo.lock
-          sha256sum Cargo.lock boot/uefi/Cargo.lock kernel/x86_64/Cargo.lock | tee LOCKFILES-SHA256.txt
 
-      - name: Upload lockfiles
-        uses: actions/upload-artifact@v6
-        with:
-          name: cargo-lockfiles
-          path: |
-            Cargo.lock
-            boot/uefi/Cargo.lock
-            kernel/x86_64/Cargo.lock
-            LOCKFILES-SHA256.txt
-          if-no-files-found: error
-          retention-days: 7
+      - name: Resolve workspace strictly from lockfile
+        run: cargo metadata --locked --format-version 1 --manifest-path Cargo.toml > /dev/null
+
+      - name: Resolve UEFI strictly from lockfile
+        run: cargo metadata --locked --format-version 1 --manifest-path boot/uefi/Cargo.toml > /dev/null
+
+      - name: Resolve kernel strictly from lockfile
+        run: cargo metadata --locked --format-version 1 --manifest-path kernel/x86_64/Cargo.toml > /dev/null
+
+      - name: Verify no lockfile mutation
+        shell: bash
+        run: git diff --exit-code -- Cargo.lock boot/uefi/Cargo.lock kernel/x86_64/Cargo.lock
+
+      - name: Record lockfile checksums
+        shell: bash
+        run: |
+          sha256sum Cargo.lock boot/uefi/Cargo.lock kernel/x86_64/Cargo.lock | tee LOCKFILES-SHA256.txt
+          cat LOCKFILES-SHA256.txt >> "$GITHUB_STEP_SUMMARY"
