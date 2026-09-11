@@ -191,7 +191,7 @@ impl PciBar {
                     return Err(PciBarError::MissingUpperDword);
                 };
                 Ok(Some(Self::Memory64 {
-                    base_address: (u64::from(high) << 32) | u64::from(low & 0xffff_fff0),
+                    base_address: ((high as u64) << 32) | ((low & 0xffff_fff0) as u64),
                     prefetchable,
                 }))
             }
