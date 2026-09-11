@@ -5,6 +5,7 @@ members = [
     "crates/aw-acpi",
     "crates/aw-kernel-contract",
     "crates/aw-kernel-core",
+    "crates/aw-memory",
     "crates/aw-pci",
     "crates/aw-x86-platform",
 ]
