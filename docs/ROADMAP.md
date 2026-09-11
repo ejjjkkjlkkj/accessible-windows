@@ -7,9 +7,10 @@
 - [x] Accessibility semantic primitives
 - [x] Accessibility invariant tests
 - [x] Architecture specification
-- [x] Cross-platform CI
-- [x] Define x64-only architecture scope
-- [x] Define one generic AMD/Intel hardware-compatibility model
+- [x] Cross-platform x64 CI
+- [x] Committed Cargo lockfiles and reproducibility gate
+- [x] CodeQL, RustSec, fuzzing, coverage and dependency review
+- [x] SBOM/checksum/provenance pipeline
 
 ## Phase 1 - UEFI bring-up
 
@@ -27,56 +28,62 @@
 - [x] Exit UEFI Boot Services after dropping boot-services resources
 - [x] Prove post-firmware execution through debugcon in CI
 - [x] Define and validate the owned kernel handoff structure
-- [x] Split the post-firmware stage into the freestanding x86-64 kernel crate
+- [x] Split the post-firmware stage into a freestanding x86-64 kernel
+- [x] Dynamically load the PIC flat kernel from the ESP
+- [x] Execute the separate native kernel after ExitBootServices
+- [x] Write directly to the framebuffer from the native kernel
 
 ## Phase 2 - Generic x64 kernel foundation
 
-- [ ] CPUID-based CPU feature detection
-- [ ] Detect AMD vs Intel without making either vendor mandatory
-- [ ] Common x86-64 feature policy and safe fallbacks
+- [x] Detect AMD, Intel and unknown x86-64 CPU vendors with CPUID
+- [x] Validate common APIC/SSE2/long-mode boot baseline
+- [x] Detect x2APIC and invariant-TSC capabilities
+- [x] Parse ACPI MCFG and pass PCIe ECAM regions to the kernel
+- [x] Enumerate PCIe configuration space through ECAM
+- [x] Keep PCI mechanism #1 (CF8/CFC) as a legacy fallback
+- [x] Classify NVMe, AHCI, xHCI and HDA controllers by PCI class
+- [x] Decode PCI I/O, MMIO32 and MMIO64 BARs
+- [ ] Transfer the complete final UEFI memory map to the kernel
 - [ ] Physical page allocator
 - [ ] Virtual-memory manager
 - [ ] GDT/IDT and exception handling
-- [ ] APIC/x2APIC timers and interrupts
-- [ ] TSC capability/frequency handling with timer fallbacks
-- [ ] SMP bring-up through ACPI topology
+- [ ] APIC timers and interrupts
+- [ ] SMP bring-up on both AMD and Intel test profiles
 - [ ] Scheduler
 - [ ] User/kernel privilege separation
 - [ ] IPC and handle/object model
 
 ## Phase 3 - Generic physical PC minimum
 
-- [ ] Full ACPI table enumeration
-- [ ] PCI/PCIe enumeration
-- [ ] PCI class/vendor/device/subsystem driver matching
+- [ ] ACPI table enumeration beyond MCFG
+- [ ] MADT/APIC topology parsing
+- [ ] PCI bridge-aware enumeration
+- [ ] NVMe controller initialization and identify
 - [ ] NVMe read/write
+- [ ] AHCI controller initialization
 - [ ] AHCI/SATA read/write
 - [ ] GPT parser/writer with safety checks
-- [ ] xHCI USB host controller
-- [ ] USB hub support
+- [ ] xHCI controller initialization
+- [ ] USB hub enumeration
 - [ ] USB HID keyboard
 - [ ] USB HID pointer baseline
-- [ ] UEFI GOP framebuffer console/recovery fallback
-- [ ] ACPI power button/lid/battery baseline
-- [ ] Power off/reboot
-- [ ] Boot successfully on at least one physical AMD x64 PC
-- [ ] Boot successfully on at least one physical Intel x64 PC
+- [ ] Basic framebuffer console
+- [ ] ACPI power off/reboot
+- [ ] Physical boot validation on at least one AMD x64 PC
+- [ ] Physical boot validation on at least one Intel x64 PC
 
-## Phase 4 - Generic installable system
+## Phase 4 - Installable generic x64 system
 
-- [ ] Produce generic x86-64 UEFI installation ISO
-- [ ] Keep raw GPT/ESP image as deterministic CI/USB artifact
-- [ ] Accessible USB/ISO installer
-- [ ] Runtime hardware discovery instead of OEM-specific installer images
+- [ ] Produce one AMD/Intel x64 installation image
+- [ ] Accessible USB installer
 - [ ] Disk selection with spoken device identity
-- [ ] NVMe and AHCI installation paths
 - [ ] System partition creation
 - [ ] Filesystem implementation/selection
 - [ ] Install system image
 - [ ] UEFI boot entry creation
-- [ ] First boot from physical SSD on AMD
-- [ ] First boot from physical SSD on Intel
-- [ ] Recovery environment using generic framebuffer/input fallbacks
+- [ ] First boot from physical NVMe/SATA SSD
+- [ ] Recovery environment
+- [ ] Installer fallback to GOP without accelerated GPU driver
 
 ## Phase 5 - Desktop and accessibility
 
@@ -88,25 +95,18 @@
 - [ ] Native screen reader
 - [ ] Braille transport layer
 - [ ] Accessible settings, file manager and terminal
+- [ ] Accessibility available in boot, installer, recovery and first boot
 
-## Phase 6 - Broad hardware drivers, networking, audio and updates
+## Phase 6 - Networking, audio, graphics and updates
 
-- [ ] PCI High Definition Audio baseline
-- [ ] AMD laptop audio extensions where required
-- [ ] Intel laptop DSP/audio extensions where required
-- [ ] Ethernet baseline
-- [ ] Common Intel Ethernet families
-- [ ] Common Realtek Ethernet families
+- [ ] Generic HDA controller baseline
+- [ ] Common Ethernet driver families
+- [ ] AMD GPU driver family
+- [ ] Intel GPU driver family
+- [ ] Wi-Fi architecture and first supported families
+- [ ] Bluetooth architecture
+- [ ] Audio stack including vendor DSP extensions later
 - [ ] Network stack
-- [ ] Wi-Fi architecture
-- [ ] Intel Wi-Fi family
-- [ ] Realtek Wi-Fi family
-- [ ] MediaTek Wi-Fi family
-- [ ] Bluetooth HCI/USB baseline
-- [ ] AMD accelerated graphics family
-- [ ] Intel accelerated graphics family
-- [ ] Preserve GOP safe graphics fallback when native GPU driver fails
-- [ ] IOMMU discovery: AMD-Vi and Intel VT-d
 - [ ] Package manager
 - [ ] Atomic updates
 - [ ] Rollback/snapshots
@@ -119,12 +119,6 @@
 - [ ] Web/PWA runtime
 - [ ] Optional Android compatibility research
 
-## Hardware validation rule
-
-Virtual-machine success is necessary but never sufficient for a hardware milestone. Physical AMD and Intel results are tracked separately with firmware version, CPU identity, PCI/USB inventory, storage controller and boot result.
-
-No OEM-specific machine such as ASUS, Dell, HP or Lenovo defines the release image. OEM quirks are optional runtime modules selected after standard hardware discovery.
-
 ## Definition of success
 
-The project does not claim to exceed Windows 11 until reproducible benchmarks demonstrate improvements in selected areas such as accessibility coverage, idle resource use, recovery, update reliability, input latency and security isolation while maintaining useful application and hardware compatibility across both AMD and Intel x64 PCs.
+The project does not claim to exceed Windows 11 until reproducible benchmarks demonstrate improvements in selected areas such as accessibility coverage, idle resource use, recovery, update reliability, input latency and security isolation while maintaining useful application and hardware compatibility.
