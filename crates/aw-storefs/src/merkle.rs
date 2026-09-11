@@ -137,13 +137,7 @@ pub fn verify_chunk<'a, const MAX_DEPTH: usize, H: MerkleHasher>(
     let mut current = hasher.hash_leaf(proof.leaf_index, window.valid_bytes(), bytes);
     let mut index = proof.leaf_index;
     let mut nodes = proof.leaf_count;
-    for (level, sibling) in proof
-        .siblings
-        .iter()
-        .copied()
-        .enumerate()
-        .take(proof.depth)
-    {
+    for (level, sibling) in proof.siblings.iter().copied().enumerate().take(proof.depth) {
         current = if index % 2 == 1 {
             hasher.hash_parent(level as u32, sibling.expect("validated sibling"), current)
         } else if index + 1 < nodes {
