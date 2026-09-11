@@ -57,17 +57,18 @@ jobs:
       - name: Build UEFI executable
         run: cargo build --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
 
-      - name: Install QEMU and OVMF
+      - name: Install image and emulator tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 ovmf
+          sudo apt-get install -y qemu-system-x86 ovmf gdisk dosfstools
 
-      - name: UEFI boot smoke test
+      - name: Build GPT/ESP boot disk image
+        run: ./scripts/build-uefi-disk.sh
+
+      - name: UEFI disk boot smoke test
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p esp/EFI/BOOT
-          cp boot/uefi/target/x86_64-unknown-uefi/release/aw-uefi-boot.efi esp/EFI/BOOT/BOOTX64.EFI
 
           OVMF_CODE="/usr/share/OVMF/OVMF_CODE_4M.fd"
           OVMF_VARS="/usr/share/OVMF/OVMF_VARS_4M.fd"
@@ -93,7 +94,7 @@ jobs:
             -debugcon file:uefi-debug.log \
             -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
             -drive if=pflash,format=raw,file=ovmf-vars.fd \
-            -drive format=raw,file=fat:rw:esp
+            -drive format=raw,file=build/accessible-windows-uefi-x86_64.img
           QEMU_STATUS=$?
           set -e
 
@@ -103,9 +104,11 @@ jobs:
           grep -F "AW_MEMORY_MAP_OK" uefi-debug.log
           grep -F "AW_GOP_OK" uefi-debug.log
 
-      - name: Upload EFI executable
+      - name: Upload boot artifacts
         uses: actions/upload-artifact@v4
         with:
           name: accessible-windows-uefi-x86_64
-          path: boot/uefi/target/x86_64-unknown-uefi/release/aw-uefi-boot.efi
+          path: |
+            boot/uefi/target/x86_64-unknown-uefi/release/aw-uefi-boot.efi
+            build/accessible-windows-uefi-x86_64.img
           if-no-files-found: error

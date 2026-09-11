@@ -17,14 +17,16 @@ The target is a real x86-64 UEFI operating system that can eventually boot from 
 
 Bootstrap phase. The repository currently contains:
 
-- a first x86-64 UEFI executable under `boot/uefi`;
+- an x86-64 UEFI executable under `boot/uefi`;
+- UEFI memory-map and GOP/display discovery;
+- a GPT disk-image builder with a FAT32 EFI System Partition;
+- an OVMF/QEMU smoke test that executes the real disk image;
 - a `no_std` kernel/boot contract crate;
 - a `no_std` accessibility semantic model crate;
 - architecture and accessibility specifications;
-- a staged roadmap toward an installable UEFI system;
-- cross-platform CI plus a dedicated UEFI build job.
+- cross-platform Rust CI.
 
-The UEFI job produces an `aw-uefi-boot.efi` build artifact. A complete bootable USB/disk image is the next milestone.
+The generated disk image is a boot prototype, not an operating-system installer yet. It contains only the early UEFI stage.
 
 ## Initial target
 
@@ -48,6 +50,8 @@ docs/
   ACCESSIBILITY.md
   ROADMAP.md
   LEGAL.md
+scripts/
+  build-uefi-disk.sh    Builds the GPT/FAT32 UEFI disk image
 ```
 
 ## Build workspace
@@ -66,11 +70,25 @@ rustup target add x86_64-unknown-uefi
 cargo build --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
 ```
 
-Expected output:
+Expected EFI output:
 
 ```text
-target/x86_64-unknown-uefi/release/aw-uefi-boot.efi
+boot/uefi/target/x86_64-unknown-uefi/release/aw-uefi-boot.efi
 ```
+
+On Linux with `gdisk`, `dosfstools` and loop-device support, build the GPT/ESP image with:
+
+```bash
+./scripts/build-uefi-disk.sh
+```
+
+Expected disk image:
+
+```text
+build/accessible-windows-uefi-x86_64.img
+```
+
+The image is intended for controlled boot testing. It is not yet an installer and must not be written over a disk containing data you need.
 
 ## Source policy
 
