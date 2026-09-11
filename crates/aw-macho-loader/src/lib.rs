@@ -232,11 +232,11 @@ fn validate_segment(image: &[u8], segment: Segment64) -> Result<(), LoaderError>
         .vm_address
         .checked_add(segment.vm_size)
         .ok_or(LoaderError::SegmentVmRangeOverflow { index })?;
-    if segment.initial_protection & !segment.max_protection != 0 {
-        return Err(LoaderError::SegmentProtectionEscalation { index });
-    }
     if segment.is_executable() && segment.is_writable() {
         return Err(LoaderError::WritableExecutableSegment { index });
+    }
+    if segment.initial_protection & !segment.max_protection != 0 {
+        return Err(LoaderError::SegmentProtectionEscalation { index });
     }
     Ok(())
 }
