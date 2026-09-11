@@ -32,6 +32,10 @@ version = "0.1.0"
 [[package]]
 name = "aw-x86-paging"
 version = "0.1.0"
+dependencies = [
+ "aw-kernel-core",
+ "aw-memory",
+]
 
 [[package]]
 name = "aw-x86-platform"

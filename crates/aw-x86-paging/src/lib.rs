@@ -1,8 +1,10 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+mod memory;
 mod offline;
 
+pub use memory::BootstrapFrameAllocator;
 pub use offline::{FrameAllocator, OfflinePageTableBuilder, ResolvedMapping};
 
 pub const PAGE_SIZE: u64 = 4096;
