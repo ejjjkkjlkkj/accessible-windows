@@ -75,11 +75,7 @@ impl McfgAllocation {
         function: u8,
         register_offset: u16,
     ) -> Option<u64> {
-        if !self.contains_bus(bus)
-            || device > 31
-            || function > 7
-            || register_offset > 0x0fff
-        {
+        if !self.contains_bus(bus) || device > 31 || function > 7 || register_offset > 0x0fff {
             return None;
         }
 
