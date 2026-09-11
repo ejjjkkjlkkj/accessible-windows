@@ -167,15 +167,18 @@ fn delivered_braille_failure_event_precedes_known_good_rollback() {
         &mut braille,
     )
     .unwrap();
+    assert_eq!(evidence.event(), failure);
     assert!(!evidence.speech_delivered());
     assert!(evidence.braille_delivered());
     assert_eq!(diagnostics.seen, Some(failure));
     assert_eq!(speech.seen, Some(failure));
     assert_eq!(braille.seen, Some(failure));
 
+    let delivered = evidence.event();
+    assert_eq!(delivered.action(), RecoveryAction::BootPreviousGeneration);
+    assert_eq!(delivered.generation(), Some(42));
+
     let rolled_back = final_trial().after_failed_trial().unwrap();
-    assert_eq!(failure.action(), RecoveryAction::BootPreviousGeneration);
-    assert_eq!(failure.generation(), Some(42));
     assert_eq!(rolled_back.selected().generation(), 41);
     assert_eq!(rolled_back.previous_successful().generation(), 41);
     assert_eq!(rolled_back.state(), BootSelectionState::Successful);
