@@ -16,6 +16,7 @@ version = "0.1.0"
 dependencies = [
  "aw-generation",
  "aw-recovery-contract",
+ "aw-recovery-io",
 ]
 
 [[package]]
