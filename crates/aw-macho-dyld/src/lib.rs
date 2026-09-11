@@ -110,9 +110,7 @@ fn checked_end(offset: usize, size: usize) -> Result<usize, DyldError> {
 
 fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, DyldError> {
     let end = checked_end(offset, 4)?;
-    let data = bytes
-        .get(offset..end)
-        .ok_or(DyldError::SliceOutOfBounds)?;
+    let data = bytes.get(offset..end).ok_or(DyldError::SliceOutOfBounds)?;
     Ok(u32::from_le_bytes([data[0], data[1], data[2], data[3]]))
 }
 
@@ -149,8 +147,8 @@ impl<'a> Iterator for CommandIter<'a> {
         }
 
         let index = self.next_index;
-        let header_end = match checked_end(self.cursor, LOAD_COMMAND_HEADER_SIZE) {
-            Ok(end) if end <= self.commands_end => end,
+        match checked_end(self.cursor, LOAD_COMMAND_HEADER_SIZE) {
+            Ok(end) if end <= self.commands_end => {}
             Ok(_) => {
                 self.failed = true;
                 return Some(Err(DyldError::LoadCommandOutOfBounds { index }));
@@ -159,8 +157,7 @@ impl<'a> Iterator for CommandIter<'a> {
                 self.failed = true;
                 return Some(Err(error));
             }
-        };
-        let _ = header_end;
+        }
 
         let command = match read_u32_le(self.image, self.cursor) {
             Ok(value) => value,
@@ -234,12 +231,12 @@ fn path_from_command<'a>(
     }
 
     let tail = &command.bytes[offset as usize..];
-    let terminator = tail
-        .iter()
-        .position(|byte| *byte == 0)
-        .ok_or(DyldError::UnterminatedPath {
-            index: command.index,
-        })?;
+    let terminator =
+        tail.iter()
+            .position(|byte| *byte == 0)
+            .ok_or(DyldError::UnterminatedPath {
+                index: command.index,
+            })?;
     if terminator == 0 {
         return Err(DyldError::EmptyPath {
             index: command.index,
