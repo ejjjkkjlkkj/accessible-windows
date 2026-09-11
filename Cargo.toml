@@ -5,6 +5,8 @@ members = [
     "crates/aw-acpi",
     "crates/aw-kernel-contract",
     "crates/aw-kernel-core",
+    "crates/aw-pci",
+    "crates/aw-x86-platform",
 ]
 exclude = ["boot/uefi", "kernel/x86_64", "fuzz"]
 
