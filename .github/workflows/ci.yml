@@ -18,11 +18,11 @@ env:
 
 jobs:
   rust:
-    name: Rust (${{ matrix.os }})
+    name: Rust x64 (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-24.04, windows-2025, macos-15-intel]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -39,7 +39,15 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.toml', 'rust-toolchain.toml') }}
+          key: cargo-x64-${{ runner.os }}-${{ hashFiles('**/Cargo.toml', 'rust-toolchain.toml') }}
+
+      - name: Assert x64 runner
+        shell: bash
+        run: |
+          case "${RUNNER_ARCH}" in
+            X64|x64|X86_64|x86_64) ;;
+            *) echo "Accessible Windows is x64-only; refusing runner architecture: ${RUNNER_ARCH}" >&2; exit 1 ;;
+          esac
 
       - name: Install stable Rust
         shell: bash
@@ -80,6 +88,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Assert x64 runner
+        shell: bash
+        run: |
+          case "${RUNNER_ARCH}" in
+            X64|x64|X86_64|x86_64) ;;
+            *) echo "Bare-metal build requires an x64 runner; got: ${RUNNER_ARCH}" >&2; exit 1 ;;
+          esac
+
       - name: Cache Cargo
         uses: actions/cache@v6
         with:
@@ -89,7 +105,7 @@ jobs:
             ~/.cargo/git/db
             boot/uefi/target
             kernel/x86_64/target
-          key: baremetal-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('boot/uefi/Cargo.toml', 'kernel/x86_64/Cargo.toml', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
+          key: baremetal-x64-${{ runner.os }}-${{ hashFiles('boot/uefi/Cargo.toml', 'kernel/x86_64/Cargo.toml', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
 
       - name: Install Rust bare-metal targets
         shell: bash
@@ -233,10 +249,11 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Accessible Windows boot validation"
+            echo "## Accessible Windows x64 boot validation"
             echo
             echo "- Commit: \`${GITHUB_SHA}\`"
             echo "- Runner: \`${RUNNER_OS}/${RUNNER_ARCH}\`"
+            echo "- Target architecture: \`x86_64 only\`"
             echo "- Raw GPT/OVMF boot: see job result above"
             if [ -f SHA256SUMS.txt ]; then
               echo
