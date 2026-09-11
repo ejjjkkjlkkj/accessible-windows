@@ -225,9 +225,7 @@ mod tests {
         GenerationPlan, REQUIRED_BOOT_COMPONENTS, REQUIRED_SUCCESS_HEALTH_CHECKS,
         RuntimeHealthCheck, RuntimeHealthReport,
     };
-    use aw_recovery_contract::{
-        AccessibleRecoveryReady, RecoveryCapability, RecoveryProbeReport,
-    };
+    use aw_recovery_contract::{AccessibleRecoveryReady, RecoveryCapability, RecoveryProbeReport};
 
     fn object(seed: u8) -> ObjectId {
         ObjectId::new([seed; 32]).unwrap()
