@@ -176,16 +176,18 @@ mod tests {
             Some(0x8000_0000 | (2 << 16) | (5 << 11) | (3 << 8) | 0x08)
         );
         assert_eq!(address.mechanism1_address(0x09), None);
-        assert_eq!(PciAddress::new(1, 0, 0, 0).unwrap().mechanism1_address(0), None);
+        assert_eq!(
+            PciAddress::new(1, 0, 0, 0)
+                .unwrap()
+                .mechanism1_address(0),
+            None
+        );
     }
 
     #[test]
     fn parses_standard_configuration_registers() {
-        let identity = PciDeviceIdentity::from_config_registers(
-            0x1234_8086,
-            0x0108_0201,
-            Some(0xabcd_1043),
-        );
+        let identity =
+            PciDeviceIdentity::from_config_registers(0x1234_8086, 0x0108_0201, Some(0xabcd_1043));
         assert_eq!(identity.vendor_id, 0x8086);
         assert_eq!(identity.device_id, 0x1234);
         assert_eq!(identity.subsystem_vendor_id, Some(0x1043));
