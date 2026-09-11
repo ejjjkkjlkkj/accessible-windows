@@ -17,13 +17,14 @@ The target is a real x86-64 UEFI operating system that can eventually boot from 
 
 Bootstrap phase. The repository currently contains:
 
+- a first x86-64 UEFI executable under `boot/uefi`;
 - a `no_std` kernel/boot contract crate;
 - a `no_std` accessibility semantic model crate;
 - architecture and accessibility specifications;
 - a staged roadmap toward an installable UEFI system;
-- cross-platform CI for formatting, build, tests and Clippy.
+- cross-platform CI plus a dedicated UEFI build job.
 
-No bootable image is produced yet.
+The UEFI job produces an `aw-uefi-boot.efi` build artifact. A complete bootable USB/disk image is the next milestone.
 
 ## Initial target
 
@@ -37,6 +38,8 @@ No bootable image is produced yet.
 ## Repository layout
 
 ```text
+boot/
+  uefi/                 First UEFI executable
 crates/
   aw-kernel-contract/   Boot and kernel-facing data contracts
   aw-accessibility/     Semantic accessibility primitives and validation
@@ -47,15 +50,26 @@ docs/
   LEGAL.md
 ```
 
-## Build
-
-Install stable Rust, then run:
+## Build workspace
 
 ```bash
 cargo fmt --all -- --check
 cargo check --workspace --all-targets
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+```
+
+## Build UEFI executable
+
+```bash
+rustup target add x86_64-unknown-uefi
+cargo build --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
+```
+
+Expected output:
+
+```text
+target/x86_64-unknown-uefi/release/aw-uefi-boot.efi
 ```
 
 ## Source policy

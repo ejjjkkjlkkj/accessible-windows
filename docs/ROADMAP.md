@@ -11,8 +11,9 @@
 
 ## Phase 1 - UEFI bring-up
 
-- [ ] Build an x86-64 UEFI boot application
-- [ ] Print deterministic serial diagnostics
+- [x] Add an x86-64 UEFI boot application
+- [x] Build the `.efi` executable in CI
+- [x] Print deterministic UEFI console diagnostics
 - [ ] Read the UEFI memory map
 - [ ] Detect GOP framebuffer
 - [ ] Locate ACPI RSDP
