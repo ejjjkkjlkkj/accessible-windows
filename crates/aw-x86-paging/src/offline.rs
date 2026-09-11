@@ -1,5 +1,5 @@
 use crate::{
-    MappingError, PAGE_SIZE, PageTable, PageTableEntry, PageTableFlags, PhysicalFrame, VirtualPage,
+    MappingError, PageTable, PageTableEntry, PageTableFlags, PhysicalFrame, VirtualPage,
 };
 
 /// Supplies physical frames for page-table storage.
@@ -144,11 +144,9 @@ impl<const TABLES: usize> OfflinePageTableBuilder<TABLES> {
             .ok_or(MappingError::InvalidAddress)?;
 
         if current.is_present() {
-            let child_frame = PhysicalFrame::new(
-                current.frame_address(),
-                self.physical_address_bits,
-            )
-            .ok_or(MappingError::InvalidAddress)?;
+            let child_frame =
+                PhysicalFrame::new(current.frame_address(), self.physical_address_bits)
+                    .ok_or(MappingError::InvalidAddress)?;
             let child_index = self
                 .table_index_for_frame(child_frame)
                 .ok_or(MappingError::InvalidAddress)?;
@@ -262,7 +260,7 @@ mod tests {
             }
 
             let frame = PhysicalFrame::new(self.next, 52)?;
-            self.next = self.next.checked_add(PAGE_SIZE)?;
+            self.next = self.next.checked_add(crate::PAGE_SIZE)?;
             self.remaining -= 1;
             Some(frame)
         }
@@ -354,8 +352,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(builder.table_count(), 4);
-        assert_eq!(builder.resolve_4k(first).unwrap().frame, leaf_frame(0x2000_0000));
-        assert_eq!(builder.resolve_4k(second).unwrap().frame, leaf_frame(0x2000_1000));
+        assert_eq!(
+            builder.resolve_4k(first).unwrap().frame,
+            leaf_frame(0x2000_0000)
+        );
+        assert_eq!(
+            builder.resolve_4k(second).unwrap().frame,
+            leaf_frame(0x2000_1000)
+        );
     }
 
     #[test]
@@ -401,8 +405,7 @@ mod tests {
         assert_eq!(pd_builder.table_count(), 6);
 
         let mut pdpt_allocator = TestFrameAllocator::new(8);
-        let mut pdpt_builder =
-            OfflinePageTableBuilder::<8>::new(52, &mut pdpt_allocator).unwrap();
+        let mut pdpt_builder = OfflinePageTableBuilder::<8>::new(52, &mut pdpt_allocator).unwrap();
         pdpt_builder
             .map_4k(
                 &mut pdpt_allocator,
@@ -446,10 +449,7 @@ mod tests {
             )
             .unwrap();
 
-        let pml4_entry = builder
-            .root_table()
-            .entry(user_page.pml4_index())
-            .unwrap();
+        let pml4_entry = builder.root_table().entry(user_page.pml4_index()).unwrap();
         assert!(pml4_entry.flags().contains(PageTableFlags::USER_ACCESSIBLE));
 
         let pdpt_frame = PhysicalFrame::new(pml4_entry.frame_address(), 52).unwrap();
@@ -464,11 +464,13 @@ mod tests {
 
         let mapping = builder.resolve_4k(user_page).unwrap();
         assert!(mapping.flags.contains(PageTableFlags::USER_ACCESSIBLE));
-        assert!(!builder
-            .resolve_4k(supervisor_page)
-            .unwrap()
-            .flags
-            .contains(PageTableFlags::USER_ACCESSIBLE));
+        assert!(
+            !builder
+                .resolve_4k(supervisor_page)
+                .unwrap()
+                .flags
+                .contains(PageTableFlags::USER_ACCESSIBLE)
+        );
     }
 
     #[test]
@@ -549,7 +551,7 @@ mod tests {
         let mut allocator = TestFrameAllocator::new(4);
         let builder = OfflinePageTableBuilder::<4>::new(52, &mut allocator).unwrap();
         assert_eq!(
-            builder.resolve_4k(VirtualPage::new(PAGE_SIZE).unwrap()),
+            builder.resolve_4k(VirtualPage::new(crate::PAGE_SIZE).unwrap()),
             Err(MappingError::NotMapped)
         );
     }
