@@ -1,11 +1,10 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-/// CPU architectures intentionally supported by the public boot contract.
+/// CPU architecture intentionally supported by the public boot contract.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Architecture {
     X86_64,
-    Aarch64,
 }
 
 /// Firmware environments accepted by the project.
@@ -66,7 +65,7 @@ impl FramebufferInfo {
     }
 }
 
-/// Data passed from the future boot environment into the kernel entry path.
+/// Data passed from the boot environment into the x86-64 kernel entry path.
 ///
 /// The contract intentionally owns no allocator-backed objects so it can be
 /// consumed before the kernel heap exists.
