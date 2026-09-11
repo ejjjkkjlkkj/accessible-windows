@@ -61,25 +61,27 @@ mod tests {
         let map = [descriptor(0x20_0000, 8)];
         let protected = [PhysicalRange::new(0x20_1000, 0x20_3000).unwrap()];
         let mut pages = BootstrapPageAllocator::with_protected_ranges(&map, &protected).unwrap();
-        let mut frames = BootstrapFrameAllocator::new(&mut pages, 52).unwrap();
-        let mut builder = OfflinePageTableBuilder::<4>::new(52, &mut frames).unwrap();
 
-        builder
-            .map_4k(
-                &mut frames,
-                VirtualPage::new(0x4000_0000).unwrap(),
-                PhysicalFrame::new(0x80_0000, 52).unwrap(),
-                PageTableFlags::WRITABLE.union(PageTableFlags::NO_EXECUTE),
-            )
-            .unwrap();
+        {
+            let mut frames = BootstrapFrameAllocator::new(&mut pages, 52).unwrap();
+            let mut builder = OfflinePageTableBuilder::<4>::new(52, &mut frames).unwrap();
 
-        assert_eq!(builder.table_count(), 4);
-        assert_eq!(builder.table_frame(0).unwrap().start_address(), 0x20_0000);
-        assert_eq!(builder.table_frame(1).unwrap().start_address(), 0x20_3000);
-        assert_eq!(builder.table_frame(2).unwrap().start_address(), 0x20_4000);
-        assert_eq!(builder.table_frame(3).unwrap().start_address(), 0x20_5000);
+            builder
+                .map_4k(
+                    &mut frames,
+                    VirtualPage::new(0x4000_0000).unwrap(),
+                    PhysicalFrame::new(0x80_0000, 52).unwrap(),
+                    PageTableFlags::WRITABLE.union(PageTableFlags::NO_EXECUTE),
+                )
+                .unwrap();
 
-        drop(frames);
+            assert_eq!(builder.table_count(), 4);
+            assert_eq!(builder.table_frame(0).unwrap().start_address(), 0x20_0000);
+            assert_eq!(builder.table_frame(1).unwrap().start_address(), 0x20_3000);
+            assert_eq!(builder.table_frame(2).unwrap().start_address(), 0x20_4000);
+            assert_eq!(builder.table_frame(3).unwrap().start_address(), 0x20_5000);
+        }
+
         assert_eq!(pages.allocated_pages(), 4);
     }
 
@@ -103,10 +105,12 @@ mod tests {
     fn refuses_frames_outside_the_cpu_physical_address_width() {
         let map = [descriptor(1_u64 << 36, 1)];
         let mut pages = BootstrapPageAllocator::new(&map).unwrap();
-        let mut frames = BootstrapFrameAllocator::new(&mut pages, 36).unwrap();
 
-        assert_eq!(frames.allocate_frame(), None);
-        drop(frames);
+        {
+            let mut frames = BootstrapFrameAllocator::new(&mut pages, 36).unwrap();
+            assert_eq!(frames.allocate_frame(), None);
+        }
+
         assert_eq!(pages.allocated_pages(), 1);
     }
 }
