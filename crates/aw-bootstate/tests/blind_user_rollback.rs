@@ -7,6 +7,9 @@ use aw_recovery_contract::{
     AccessibleRecoveryReady, RecoveryAction, RecoveryCapability, RecoveryDiagnosticCode,
     RecoveryEvent, RecoveryProbeReport, RecoveryReadinessError, RecoverySeverity,
 };
+use aw_recovery_io::{
+    BrailleSink, SpeechSink, StructuredDiagnosticSink, deliver_recovery_event,
+};
 
 fn object(seed: u8) -> ObjectId {
     ObjectId::new([seed; 32]).unwrap()
@@ -70,6 +73,42 @@ fn final_trial() -> BootStateRecord {
     .unwrap()
 }
 
+#[derive(Default)]
+struct RecoveryRecorder {
+    accepted: bool,
+    seen: Option<RecoveryEvent>,
+}
+
+impl RecoveryRecorder {
+    fn accepting() -> Self {
+        Self {
+            accepted: true,
+            seen: None,
+        }
+    }
+}
+
+impl StructuredDiagnosticSink for RecoveryRecorder {
+    fn emit(&mut self, event: RecoveryEvent) -> bool {
+        self.seen = Some(event);
+        self.accepted
+    }
+}
+
+impl SpeechSink for RecoveryRecorder {
+    fn speak(&mut self, event: RecoveryEvent) -> bool {
+        self.seen = Some(event);
+        self.accepted
+    }
+}
+
+impl BrailleSink for RecoveryRecorder {
+    fn present(&mut self, event: RecoveryEvent) -> bool {
+        self.seen = Some(event);
+        self.accepted
+    }
+}
+
 #[test]
 fn speech_failure_is_nonvisual_diagnostic_and_rolls_back_known_good() {
     let plan = complete_plan();
@@ -107,6 +146,39 @@ fn speech_failure_is_nonvisual_diagnostic_and_rolls_back_known_good() {
     );
     assert_eq!(rollback.code().code(), 0x1301);
     assert_eq!(rollback.generation(), Some(41));
+}
+
+#[test]
+fn delivered_braille_failure_event_precedes_known_good_rollback() {
+    let failure = RecoveryEvent::new(
+        RecoveryDiagnosticCode::SpeechUnavailable,
+        RecoverySeverity::Critical,
+        RecoveryAction::BootPreviousGeneration,
+        Some(42),
+    );
+    let mut diagnostics = RecoveryRecorder::accepting();
+    let mut speech = RecoveryRecorder::default();
+    let mut braille = RecoveryRecorder::accepting();
+
+    let evidence = deliver_recovery_event(
+        failure,
+        &mut diagnostics,
+        &mut speech,
+        &mut braille,
+    )
+    .unwrap();
+    assert!(!evidence.speech_delivered());
+    assert!(evidence.braille_delivered());
+    assert_eq!(diagnostics.seen, Some(failure));
+    assert_eq!(speech.seen, Some(failure));
+    assert_eq!(braille.seen, Some(failure));
+
+    let rolled_back = final_trial().after_failed_trial().unwrap();
+    assert_eq!(failure.action(), RecoveryAction::BootPreviousGeneration);
+    assert_eq!(failure.generation(), Some(42));
+    assert_eq!(rolled_back.selected().generation(), 41);
+    assert_eq!(rolled_back.previous_successful().generation(), 41);
+    assert_eq!(rolled_back.state(), BootSelectionState::Successful);
 }
 
 #[test]
