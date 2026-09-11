@@ -472,9 +472,7 @@ mod tests {
     #[test]
     fn volume_modes_encode_different_trust_policies() {
         assert!(!VolumeMode::ImmutableVerifiedStore.is_mutable());
-        assert!(
-            VolumeMode::ImmutableVerifiedStore.requires_content_authentication()
-        );
+        assert!(VolumeMode::ImmutableVerifiedStore.requires_content_authentication());
         assert!(!VolumeMode::ImmutableVerifiedStore.requires_encryption());
 
         assert!(VolumeMode::EncryptedMutableState.is_mutable());
