@@ -86,7 +86,8 @@ impl PhysicalFrame {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]\pub struct PageTableFlags(u64);
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PageTableFlags(u64);
 
 impl PageTableFlags {
     pub const PRESENT: Self = Self(1 << 0);
