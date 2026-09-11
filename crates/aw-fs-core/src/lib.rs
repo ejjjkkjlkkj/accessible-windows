@@ -113,10 +113,10 @@ impl CheckpointRecord {
         if sequence == 0 {
             return None;
         }
-        if let Some(previous) = previous_root {
-            if previous == root {
-                return None;
-            }
+        if let Some(previous) = previous_root
+            && previous == root
+        {
+            return None;
         }
         Some(Self {
             format_version: AWFS_FORMAT_VERSION,
