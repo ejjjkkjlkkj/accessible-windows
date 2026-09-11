@@ -103,6 +103,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
+            ~/.cargo/bin/cargo-cyclonedx
             boot/uefi/target
             kernel/x86_64/target
           key: baremetal-x64-${{ runner.os }}-${{ hashFiles('boot/uefi/Cargo.toml', 'boot/uefi/Cargo.lock', 'kernel/x86_64/Cargo.toml', 'kernel/x86_64/Cargo.lock', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
@@ -161,6 +162,22 @@ jobs:
 
       - name: Build GPT/ESP boot disk image
         run: ./scripts/build-uefi-disk.sh
+
+      - name: Generate CycloneDX SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v cargo-cyclonedx >/dev/null 2>&1; then
+            cargo install cargo-cyclonedx --version 0.5.9 --locked
+          fi
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          cargo cyclonedx --manifest-path boot/uefi/Cargo.toml --format json
+          SBOM="$(find boot/uefi -maxdepth 1 -type f -name '*.cdx.json' -print -quit)"
+          test -n "$SBOM"
+          mkdir -p build
+          cp "$SBOM" build/accessible-windows-x64.cdx.json
+          test -s build/accessible-windows-x64.cdx.json
+          echo "AW_SBOM_OK path=build/accessible-windows-x64.cdx.json bytes=$(stat -c%s build/accessible-windows-x64.cdx.json)"
 
       - name: Raw GPT/OVMF boot smoke test
         shell: bash
@@ -221,6 +238,7 @@ jobs:
             kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64 \
             kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64.bin \
             build/accessible-windows-uefi-x86_64.img \
+            build/accessible-windows-x64.cdx.json \
             uefi-debug.log > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
@@ -230,8 +248,15 @@ jobs:
         with:
           subject-checksums: SHA256SUMS.txt
 
+      - name: Attest x64 image SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-path: build/accessible-windows-uefi-x86_64.img
+          sbom-path: build/accessible-windows-x64.cdx.json
+
       - name: Upload boot artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: accessible-windows-uefi-x86_64
           path: |
@@ -239,6 +264,7 @@ jobs:
             kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64
             kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64.bin
             build/accessible-windows-uefi-x86_64.img
+            build/accessible-windows-x64.cdx.json
             uefi-debug.log
             SHA256SUMS.txt
           if-no-files-found: error
@@ -255,6 +281,8 @@ jobs:
             echo "- Runner: \`${RUNNER_OS}/${RUNNER_ARCH}\`"
             echo "- Target architecture: \`x86_64 only\`"
             echo "- Raw GPT/OVMF boot: see job result above"
+            echo "- CycloneDX SBOM: \`build/accessible-windows-x64.cdx.json\`"
+            echo "- Provenance and SBOM attestations: generated on non-PR builds"
             if [ -f SHA256SUMS.txt ]; then
               echo
               echo '```text'
