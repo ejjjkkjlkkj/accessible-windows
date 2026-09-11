@@ -6,13 +6,15 @@ pub enum CompatibilityTarget {
     AndroidDex,
     AndroidNativeX86_64,
     AndroidNativeArm64,
+    LinuxElfX86_64,
+    LinuxElfArm64,
     DarwinMachOX86_64,
     DarwinMachOArm64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeBoundary {
-    /// Hardware-assisted VM boundary used for Android framework/runtime execution.
+    /// Hardware-assisted VM boundary used when the guest expects a Linux kernel/runtime contract.
     HardwareIsolatedVm,
     /// User-mode personality translating a foreign userspace ABI into host services.
     UserModeCompatibility,
@@ -36,10 +38,16 @@ pub enum RuntimeCapability {
     AudioBridge,
     NetworkBroker,
     ForeignIsaTranslation,
+    WindowIntegration,
+    LauncherRegistration,
+    ClipboardBridge,
+    NotificationBridge,
+    FileOpenPortal,
+    UrlIntentBridge,
 }
 
 impl RuntimeCapability {
-    const fn bit(self) -> u16 {
+    const fn bit(self) -> u32 {
         match self {
             Self::PackageIdentity => 1 << 0,
             Self::SyscallIsolation => 1 << 1,
@@ -51,6 +59,12 @@ impl RuntimeCapability {
             Self::AudioBridge => 1 << 7,
             Self::NetworkBroker => 1 << 8,
             Self::ForeignIsaTranslation => 1 << 9,
+            Self::WindowIntegration => 1 << 10,
+            Self::LauncherRegistration => 1 << 11,
+            Self::ClipboardBridge => 1 << 12,
+            Self::NotificationBridge => 1 << 13,
+            Self::FileOpenPortal => 1 << 14,
+            Self::UrlIntentBridge => 1 << 15,
         }
     }
 }
@@ -60,7 +74,7 @@ pub struct RuntimeProfile {
     target: CompatibilityTarget,
     boundary: RuntimeBoundary,
     surface: AppSurface,
-    capabilities: u16,
+    capabilities: u32,
 }
 
 impl RuntimeProfile {
@@ -106,6 +120,7 @@ impl RuntimeProfile {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeAdmissionError {
     AndroidRequiresHardwareVm,
+    LinuxRequiresHardwareVm,
     DarwinRequiresUserModeCompatibility,
     MissingCapability(RuntimeCapability),
     ForeignIsaTranslationUnavailable,
@@ -138,12 +153,21 @@ const REQUIRED_BASE: [RuntimeCapability; 6] = [
     RuntimeCapability::AccessibilityBridge,
 ];
 
-/// Validates a local compatibility runtime before applications may be launched.
+const REQUIRED_SYSTEM_INTEGRATION: [RuntimeCapability; 7] = [
+    RuntimeCapability::LauncherRegistration,
+    RuntimeCapability::ClipboardBridge,
+    RuntimeCapability::NotificationBridge,
+    RuntimeCapability::FileOpenPortal,
+    RuntimeCapability::UrlIntentBridge,
+    RuntimeCapability::AudioBridge,
+    RuntimeCapability::NetworkBroker,
+];
+
+/// Validates the execution boundary of a local compatibility runtime before applications may run.
 ///
-/// Android is deliberately required to run behind a hardware VM boundary rather than a shared
-/// host-kernel container. Darwin/macOS compatibility is a clean-room userspace personality, not a
-/// bundled or virtualized copy of macOS. Graphical applications additionally require a graphics
-/// bridge. Foreign-ISA native binaries require an explicit translation capability.
+/// Android and Linux use hardware-isolated local VMs rather than sharing the host kernel. Darwin
+/// compatibility is a clean-room userspace personality, not a bundled or virtualized copy of
+/// macOS. Foreign-ISA native binaries require an explicit translation capability.
 pub fn admit_runtime(profile: RuntimeProfile) -> Result<RuntimeReady, RuntimeAdmissionError> {
     match profile.target {
         CompatibilityTarget::AndroidDex
@@ -151,6 +175,11 @@ pub fn admit_runtime(profile: RuntimeProfile) -> Result<RuntimeReady, RuntimeAdm
         | CompatibilityTarget::AndroidNativeArm64 => {
             if profile.boundary != RuntimeBoundary::HardwareIsolatedVm {
                 return Err(RuntimeAdmissionError::AndroidRequiresHardwareVm);
+            }
+        }
+        CompatibilityTarget::LinuxElfX86_64 | CompatibilityTarget::LinuxElfArm64 => {
+            if profile.boundary != RuntimeBoundary::HardwareIsolatedVm {
+                return Err(RuntimeAdmissionError::LinuxRequiresHardwareVm);
             }
         }
         CompatibilityTarget::DarwinMachOX86_64 | CompatibilityTarget::DarwinMachOArm64 => {
@@ -174,7 +203,9 @@ pub fn admit_runtime(profile: RuntimeProfile) -> Result<RuntimeReady, RuntimeAdm
 
     if matches!(
         profile.target,
-        CompatibilityTarget::AndroidNativeArm64 | CompatibilityTarget::DarwinMachOArm64
+        CompatibilityTarget::AndroidNativeArm64
+            | CompatibilityTarget::LinuxElfArm64
+            | CompatibilityTarget::DarwinMachOArm64
     ) && !profile.has(RuntimeCapability::ForeignIsaTranslation)
     {
         return Err(RuntimeAdmissionError::ForeignIsaTranslationUnavailable);
@@ -184,6 +215,35 @@ pub fn admit_runtime(profile: RuntimeProfile) -> Result<RuntimeReady, RuntimeAdm
         target: profile.target,
         surface: profile.surface,
     })
+}
+
+/// Requires a foreign application to participate in the host desktop as a first-class app.
+///
+/// This is deliberately stricter than merely being executable. An installed Android, Linux or
+/// Darwin app is system-integrated only when it can be discovered by the launcher, exchange
+/// clipboard data, publish notifications, open user-approved files and URLs, use host audio and
+/// networking brokers, and expose accessibility semantics. Graphical apps additionally require a
+/// host-managed window bridge. Runtimes may provide more capabilities, but cannot claim integrated
+/// status with fewer.
+pub fn admit_system_integrated_app(
+    profile: RuntimeProfile,
+) -> Result<RuntimeReady, RuntimeAdmissionError> {
+    let ready = admit_runtime(profile)?;
+
+    for capability in REQUIRED_SYSTEM_INTEGRATION {
+        if !profile.has(capability) {
+            return Err(RuntimeAdmissionError::MissingCapability(capability));
+        }
+    }
+
+    if profile.surface == AppSurface::Graphical && !profile.has(RuntimeCapability::WindowIntegration)
+    {
+        return Err(RuntimeAdmissionError::MissingCapability(
+            RuntimeCapability::WindowIntegration,
+        ));
+    }
+
+    Ok(ready)
 }
 
 #[cfg(test)]
@@ -202,6 +262,22 @@ mod tests {
         profile
     }
 
+    fn fully_integrated_profile(
+        target: CompatibilityTarget,
+        boundary: RuntimeBoundary,
+        surface: AppSurface,
+    ) -> RuntimeProfile {
+        let mut profile = base_profile(target, boundary, surface);
+        for capability in REQUIRED_SYSTEM_INTEGRATION {
+            profile.mark_capability(capability);
+        }
+        if surface == AppSurface::Graphical {
+            profile.mark_capability(RuntimeCapability::GraphicsBridge);
+            profile.mark_capability(RuntimeCapability::WindowIntegration);
+        }
+        profile
+    }
+
     #[test]
     fn android_is_not_admitted_as_shared_host_userspace() {
         let profile = base_profile(
@@ -216,26 +292,51 @@ mod tests {
     }
 
     #[test]
-    fn android_x86_64_can_run_locally_in_isolated_vm() {
+    fn linux_is_not_admitted_as_shared_host_userspace() {
         let profile = base_profile(
-            CompatibilityTarget::AndroidNativeX86_64,
-            RuntimeBoundary::HardwareIsolatedVm,
-            AppSurface::CommandLine,
-        );
-        assert!(admit_runtime(profile).is_ok());
-    }
-
-    #[test]
-    fn arm_android_requires_explicit_translation() {
-        let profile = base_profile(
-            CompatibilityTarget::AndroidNativeArm64,
-            RuntimeBoundary::HardwareIsolatedVm,
+            CompatibilityTarget::LinuxElfX86_64,
+            RuntimeBoundary::UserModeCompatibility,
             AppSurface::CommandLine,
         );
         assert_eq!(
             admit_runtime(profile),
-            Err(RuntimeAdmissionError::ForeignIsaTranslationUnavailable)
+            Err(RuntimeAdmissionError::LinuxRequiresHardwareVm)
         );
+    }
+
+    #[test]
+    fn android_and_linux_x86_64_can_run_locally_in_isolated_vms() {
+        for target in [
+            CompatibilityTarget::AndroidNativeX86_64,
+            CompatibilityTarget::LinuxElfX86_64,
+        ] {
+            let profile = base_profile(
+                target,
+                RuntimeBoundary::HardwareIsolatedVm,
+                AppSurface::CommandLine,
+            );
+            assert!(admit_runtime(profile).is_ok());
+        }
+    }
+
+    #[test]
+    fn foreign_arm_binaries_require_explicit_translation() {
+        for target in [
+            CompatibilityTarget::AndroidNativeArm64,
+            CompatibilityTarget::LinuxElfArm64,
+            CompatibilityTarget::DarwinMachOArm64,
+        ] {
+            let boundary = if target == CompatibilityTarget::DarwinMachOArm64 {
+                RuntimeBoundary::UserModeCompatibility
+            } else {
+                RuntimeBoundary::HardwareIsolatedVm
+            };
+            let profile = base_profile(target, boundary, AppSurface::CommandLine);
+            assert_eq!(
+                admit_runtime(profile),
+                Err(RuntimeAdmissionError::ForeignIsaTranslationUnavailable)
+            );
+        }
     }
 
     #[test]
@@ -252,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn graphical_apps_require_graphics_and_accessibility_bridges() {
+    fn graphical_apps_require_graphics_bridge() {
         let mut profile = base_profile(
             CompatibilityTarget::DarwinMachOX86_64,
             RuntimeBoundary::UserModeCompatibility,
@@ -266,6 +367,60 @@ mod tests {
         );
         profile.mark_capability(RuntimeCapability::GraphicsBridge);
         assert!(admit_runtime(profile).is_ok());
+    }
+
+    #[test]
+    fn executable_app_is_not_automatically_system_integrated() {
+        let profile = base_profile(
+            CompatibilityTarget::AndroidDex,
+            RuntimeBoundary::HardwareIsolatedVm,
+            AppSurface::CommandLine,
+        );
+        assert_eq!(
+            admit_system_integrated_app(profile),
+            Err(RuntimeAdmissionError::MissingCapability(
+                RuntimeCapability::LauncherRegistration
+            ))
+        );
+    }
+
+    #[test]
+    fn graphical_integrated_app_requires_host_window_integration() {
+        let mut profile = fully_integrated_profile(
+            CompatibilityTarget::LinuxElfX86_64,
+            RuntimeBoundary::HardwareIsolatedVm,
+            AppSurface::Graphical,
+        );
+        profile.capabilities &= !RuntimeCapability::WindowIntegration.bit();
+        assert_eq!(
+            admit_system_integrated_app(profile),
+            Err(RuntimeAdmissionError::MissingCapability(
+                RuntimeCapability::WindowIntegration
+            ))
+        );
+    }
+
+    #[test]
+    fn android_linux_and_darwin_can_share_one_host_integration_contract() {
+        for (target, boundary) in [
+            (
+                CompatibilityTarget::AndroidDex,
+                RuntimeBoundary::HardwareIsolatedVm,
+            ),
+            (
+                CompatibilityTarget::LinuxElfX86_64,
+                RuntimeBoundary::HardwareIsolatedVm,
+            ),
+            (
+                CompatibilityTarget::DarwinMachOX86_64,
+                RuntimeBoundary::UserModeCompatibility,
+            ),
+        ] {
+            let profile = fully_integrated_profile(target, boundary, AppSurface::Graphical);
+            let ready = admit_system_integrated_app(profile).unwrap();
+            assert_eq!(ready.target(), target);
+            assert_eq!(ready.surface(), AppSurface::Graphical);
+        }
     }
 
     #[test]
