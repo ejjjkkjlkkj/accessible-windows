@@ -354,6 +354,9 @@ mod tests {
         table[MCFG_HEADER_LEN + 11] = 2;
         let table_len = table.len();
         set_checksum(&mut table, 9, table_len);
-        assert_eq!(validate_mcfg(&table), Err(McfgError::InvalidBusRange));
+        assert!(matches!(
+            validate_mcfg(&table),
+            Err(McfgError::InvalidBusRange)
+        ));
     }
 }
