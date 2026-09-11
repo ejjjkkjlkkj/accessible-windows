@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-core:
+    name: Rust core (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+
+      - name: Select Rust stable
+        run: rustup default stable
+
+      - name: Rust version
+        run: rustc -vV
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Unit tests
+        run: cargo test --workspace --all-targets
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
