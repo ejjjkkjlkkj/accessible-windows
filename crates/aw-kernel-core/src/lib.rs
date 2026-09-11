@@ -444,7 +444,7 @@ mod tests {
         assert!(!image.is_valid());
 
         image = VALID_KERNEL_IMAGE;
-        image.physical_address = u64::MAX & !(UEFI_PAGE_SIZE - 1);
+        image.physical_address = !(UEFI_PAGE_SIZE - 1);
         image.allocation_byte_len = 8192;
         assert!(!image.is_valid());
     }
