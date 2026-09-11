@@ -2,11 +2,13 @@
 #![forbid(unsafe_code)]
 
 pub const KERNEL_HANDOFF_MAGIC: u64 = 0x4157_4b48_4f46_4631;
-pub const KERNEL_HANDOFF_ABI_VERSION: u32 = 2;
+pub const KERNEL_HANDOFF_ABI_VERSION: u32 = 3;
 pub const HANDOFF_FLAG_FRAMEBUFFER_PRESENT: u64 = 1 << 0;
 pub const HANDOFF_FLAG_PCIE_ECAM_PRESENT: u64 = 1 << 1;
+pub const HANDOFF_FLAG_MEMORY_MAP_PRESENT: u64 = 1 << 2;
 pub const MAX_PCIE_ECAM_REGIONS: usize = 4;
 pub const UEFI_PAGE_SIZE: u64 = 4096;
+pub const UEFI_MEMORY_TYPE_CONVENTIONAL: u32 = 7;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,7 +53,7 @@ impl FramebufferHandoff {
 /// Architecture-neutral memory descriptor used by the kernel handoff.
 ///
 /// This intentionally does not expose the layout of `uefi-rs` or firmware
-/// descriptors. The loader will normalize the final UEFI memory map into this
+/// descriptors. The loader normalizes the final UEFI memory map into this
 /// stable representation before transferring control to the native kernel.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -167,7 +169,7 @@ pub struct KernelHandoff {
     pub struct_size: u32,
     pub flags: u64,
     pub acpi_rsdp: u64,
-    pub memory_map_entries: u64,
+    pub memory_map: MemoryMapHandoff,
     pub framebuffer: FramebufferHandoff,
     pub pcie_ecam_count: u32,
     pub reserved: u32,
@@ -178,19 +180,23 @@ impl KernelHandoff {
     #[must_use]
     pub const fn new(
         acpi_rsdp: u64,
-        memory_map_entries: u64,
+        memory_map: MemoryMapHandoff,
         framebuffer: Option<FramebufferHandoff>,
         pcie_ecam: [PciEcamHandoff; MAX_PCIE_ECAM_REGIONS],
         pcie_ecam_count: u32,
     ) -> Self {
         let framebuffer_present = framebuffer.is_some();
         let ecam_present = pcie_ecam_count != 0;
+        let memory_map_present = memory_map.entry_count != 0;
         let mut flags = 0;
         if framebuffer_present {
             flags |= HANDOFF_FLAG_FRAMEBUFFER_PRESENT;
         }
         if ecam_present {
             flags |= HANDOFF_FLAG_PCIE_ECAM_PRESENT;
+        }
+        if memory_map_present {
+            flags |= HANDOFF_FLAG_MEMORY_MAP_PRESENT;
         }
 
         Self {
@@ -199,7 +205,7 @@ impl KernelHandoff {
             struct_size: core::mem::size_of::<Self>() as u32,
             flags,
             acpi_rsdp,
-            memory_map_entries,
+            memory_map,
             framebuffer: match framebuffer {
                 Some(framebuffer) => framebuffer,
                 None => FramebufferHandoff::NONE,
@@ -226,8 +232,13 @@ impl KernelHandoff {
         if self.acpi_rsdp == 0 {
             return Err(HandoffError::MissingAcpiRsdp);
         }
-        if self.memory_map_entries == 0 {
+
+        let memory_map_present = self.flags & HANDOFF_FLAG_MEMORY_MAP_PRESENT != 0;
+        if !memory_map_present {
             return Err(HandoffError::EmptyMemoryMap);
+        }
+        if !self.memory_map.is_valid() {
+            return Err(HandoffError::InvalidMemoryMap);
         }
 
         let framebuffer_present = self.flags & HANDOFF_FLAG_FRAMEBUFFER_PRESENT != 0;
@@ -279,6 +290,7 @@ pub enum HandoffError {
     InconsistentPcieEcamFlag = 10,
     InvalidPcieEcamRegion = 11,
     UnexpectedPcieEcamRegion = 12,
+    InvalidMemoryMap = 13,
 }
 
 pub fn enter(handoff: &KernelHandoff) -> Result<(), HandoffError> {
@@ -307,7 +319,7 @@ mod tests {
     };
 
     const VALID_MEMORY_DESCRIPTOR: MemoryDescriptorHandoff = MemoryDescriptorHandoff {
-        memory_type: 7,
+        memory_type: UEFI_MEMORY_TYPE_CONVENTIONAL,
         reserved: 0,
         physical_start: 0x10_0000,
         page_count: 256,
@@ -318,10 +330,26 @@ mod tests {
         [PciEcamHandoff::NONE; MAX_PCIE_ECAM_REGIONS]
     }
 
+    fn valid_memory_map() -> MemoryMapHandoff {
+        let descriptor_size = core::mem::size_of::<MemoryDescriptorHandoff>() as u32;
+        MemoryMapHandoff {
+            buffer_address: 0x20_0000,
+            byte_len: u64::from(descriptor_size) * 127,
+            entry_count: 127,
+            descriptor_size,
+        }
+    }
+
     fn valid_handoff() -> KernelHandoff {
         let mut ecam = empty_ecam();
         ecam[0] = VALID_ECAM;
-        KernelHandoff::new(0xf000_0000, 127, Some(VALID_FRAMEBUFFER), ecam, 1)
+        KernelHandoff::new(
+            0xf000_0000,
+            valid_memory_map(),
+            Some(VALID_FRAMEBUFFER),
+            ecam,
+            1,
+        )
     }
 
     #[test]
@@ -331,7 +359,13 @@ mod tests {
 
     #[test]
     fn accepts_handoff_without_optional_devices() {
-        let handoff = KernelHandoff::new(0xf000_0000, 127, None, empty_ecam(), 0);
+        let handoff = KernelHandoff::new(
+            0xf000_0000,
+            valid_memory_map(),
+            None,
+            empty_ecam(),
+            0,
+        );
         assert_eq!(enter(&handoff), Ok(()));
     }
 
@@ -366,14 +400,7 @@ mod tests {
 
     #[test]
     fn validates_memory_map_shape() {
-        let descriptor_size = core::mem::size_of::<MemoryDescriptorHandoff>() as u32;
-        let map = MemoryMapHandoff {
-            buffer_address: 0x20_0000,
-            byte_len: u64::from(descriptor_size) * 127,
-            entry_count: 127,
-            descriptor_size,
-        };
-        assert!(map.is_valid());
+        assert!(valid_memory_map().is_valid());
     }
 
     #[test]
@@ -412,15 +439,35 @@ mod tests {
 
     #[test]
     fn rejects_empty_memory_map() {
-        let handoff = KernelHandoff::new(0xf000_0000, 0, None, empty_ecam(), 0);
+        let handoff = KernelHandoff::new(
+            0xf000_0000,
+            MemoryMapHandoff::NONE,
+            None,
+            empty_ecam(),
+            0,
+        );
         assert_eq!(enter(&handoff), Err(HandoffError::EmptyMemoryMap));
+    }
+
+    #[test]
+    fn rejects_invalid_memory_map() {
+        let mut memory_map = valid_memory_map();
+        memory_map.byte_len -= 1;
+        let handoff = KernelHandoff::new(0xf000_0000, memory_map, None, empty_ecam(), 0);
+        assert_eq!(enter(&handoff), Err(HandoffError::InvalidMemoryMap));
     }
 
     #[test]
     fn rejects_invalid_framebuffer() {
         let mut framebuffer = VALID_FRAMEBUFFER;
         framebuffer.stride_pixels = framebuffer.width - 1;
-        let handoff = KernelHandoff::new(0xf000_0000, 127, Some(framebuffer), empty_ecam(), 0);
+        let handoff = KernelHandoff::new(
+            0xf000_0000,
+            valid_memory_map(),
+            Some(framebuffer),
+            empty_ecam(),
+            0,
+        );
         assert_eq!(enter(&handoff), Err(HandoffError::InvalidFramebuffer));
     }
 
