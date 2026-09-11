@@ -5,8 +5,16 @@ on:
     branches: [main, bootstrap-v0.1]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
 
 jobs:
   rust:
@@ -19,13 +27,27 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.toml', 'rust-toolchain.toml') }}
 
       - name: Install stable Rust
         shell: bash
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
+          rustc -Vv
+          cargo -V
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -34,18 +56,40 @@ jobs:
         run: cargo check --workspace --all-targets
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --all-targets
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Documentation
+        shell: bash
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
   uefi:
     name: UEFI + native x86-64 kernel
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            boot/uefi/target
+            kernel/x86_64/target
+          key: baremetal-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('boot/uefi/Cargo.toml', 'kernel/x86_64/Cargo.toml', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
 
       - name: Install Rust bare-metal targets
         shell: bash
@@ -53,6 +97,8 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
           rustup target add x86_64-unknown-uefi x86_64-unknown-none
+          rustc -Vv
+          cargo -V
 
       - name: Build and validate relocatable flat kernel
         shell: bash
@@ -151,8 +197,25 @@ jobs:
           grep -F "AW_NATIVE_FRAMEBUFFER_WRITE_OK" uefi-debug.log
           grep -F "AW_NATIVE_KERNEL_IDLE" uefi-debug.log
 
+      - name: Generate checksums
+        shell: bash
+        run: |
+          sha256sum \
+            boot/uefi/target/x86_64-unknown-uefi/release/aw-uefi-boot.efi \
+            kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64 \
+            kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64.bin \
+            build/accessible-windows-uefi-x86_64.img \
+            uefi-debug.log > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Attest build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-checksums: SHA256SUMS.txt
+
       - name: Upload boot artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: accessible-windows-uefi-x86_64
           path: |
@@ -160,4 +223,25 @@ jobs:
             kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64
             kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64.bin
             build/accessible-windows-uefi-x86_64.img
+            uefi-debug.log
+            SHA256SUMS.txt
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Boot summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Accessible Windows boot validation"
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Runner: \`${RUNNER_OS}/${RUNNER_ARCH}\`"
+            echo "- Raw GPT/OVMF boot: see job result above"
+            if [ -f SHA256SUMS.txt ]; then
+              echo
+              echo '```text'
+              cat SHA256SUMS.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
