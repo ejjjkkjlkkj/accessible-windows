@@ -165,7 +165,7 @@ fn read_u64_le(bytes: &[u8], offset: usize) -> Result<u64, LoaderError> {
     ]))
 }
 
-fn selected_image<'a>(bytes: &'a [u8], slice: MachSlice) -> Result<&'a [u8], LoaderError> {
+fn selected_image(bytes: &[u8], slice: MachSlice) -> Result<&[u8], LoaderError> {
     let end = checked_end(slice.offset, slice.size)?;
     bytes
         .get(slice.offset..end)
