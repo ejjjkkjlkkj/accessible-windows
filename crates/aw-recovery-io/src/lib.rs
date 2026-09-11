@@ -21,15 +21,24 @@ pub enum RecoveryDeliveryError {
     NoDirectNonVisualOutput,
 }
 
-/// Evidence that one recovery event reached structured diagnostics and at least one direct
+/// Evidence that one exact recovery event reached structured diagnostics and at least one direct
 /// nonvisual output channel. A graphical renderer is deliberately absent from this trust boundary.
+///
+/// The event is stored inside the proof so callers cannot reuse output evidence for a different
+/// diagnostic identity, action or generation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RecoveryDeliveryEvidence {
+    event: RecoveryEvent,
     speech: bool,
     braille: bool,
 }
 
 impl RecoveryDeliveryEvidence {
+    #[must_use]
+    pub const fn event(self) -> RecoveryEvent {
+        self.event
+    }
+
     #[must_use]
     pub const fn speech_delivered(self) -> bool {
         self.speech
@@ -69,6 +78,7 @@ where
     }
 
     Ok(RecoveryDeliveryEvidence {
+        event,
         speech: speech_delivered,
         braille: braille_delivered,
     })
@@ -134,6 +144,7 @@ mod tests {
         let evidence =
             deliver_recovery_event(expected, &mut diagnostics, &mut speech, &mut braille).unwrap();
 
+        assert_eq!(evidence.event(), expected);
         assert!(evidence.speech_delivered());
         assert!(!evidence.braille_delivered());
         assert_eq!(diagnostics.seen, Some(expected));
@@ -151,6 +162,7 @@ mod tests {
         let evidence =
             deliver_recovery_event(expected, &mut diagnostics, &mut speech, &mut braille).unwrap();
 
+        assert_eq!(evidence.event(), expected);
         assert!(!evidence.speech_delivered());
         assert!(evidence.braille_delivered());
         assert_eq!(diagnostics.seen, Some(expected));
@@ -194,6 +206,7 @@ mod tests {
         let evidence =
             deliver_recovery_event(expected, &mut diagnostics, &mut speech, &mut braille).unwrap();
 
+        assert_eq!(evidence.event(), expected);
         assert!(evidence.speech_delivered());
         assert!(evidence.braille_delivered());
         for seen in [diagnostics.seen, speech.seen, braille.seen] {
