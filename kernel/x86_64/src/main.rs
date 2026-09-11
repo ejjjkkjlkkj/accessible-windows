@@ -3,7 +3,7 @@
 
 use aw_kernel_core::{
     HANDOFF_FLAG_FRAMEBUFFER_PRESENT, HANDOFF_FLAG_PCIE_ECAM_PRESENT, HandoffPixelFormat,
-    KernelHandoff, PciEcamHandoff,
+    KernelHandoff, MemoryDescriptorHandoff, PciEcamHandoff, UEFI_MEMORY_TYPE_CONVENTIONAL,
 };
 use aw_pci::{PciAddress, PciDeviceIdentity};
 use aw_x86_platform::{CpuFeatures, CpuIdentity, CpuSignature, CpuVendor, CpuidRegisters};
@@ -148,6 +148,49 @@ fn validate_cpu_baseline() {
     } else {
         debug_write("AW_CPU_TIMER_FALLBACK_REQUIRED\n");
     }
+}
+
+fn validate_memory_map(handoff: &KernelHandoff) -> bool {
+    let map = handoff.memory_map;
+    if !map.is_valid() || map.buffer_address > usize::MAX as u64 {
+        debug_write("AW_MEMORY_MAP_VALIDATE_FAIL reason=shape\n");
+        return false;
+    }
+
+    // SAFETY: The ABI v3 loader reserves the normalized descriptor buffer as
+    // LOADER_DATA before ExitBootServices and transfers control without freeing
+    // it. `MemoryMapHandoff::is_valid` verifies alignment, descriptor size and
+    // byte length before this slice is constructed.
+    let descriptors = unsafe {
+        core::slice::from_raw_parts(
+            map.buffer_address as usize as *const MemoryDescriptorHandoff,
+            map.entry_count as usize,
+        )
+    };
+
+    let mut conventional_pages = 0_u64;
+    for descriptor in descriptors {
+        if !descriptor.is_valid() {
+            debug_write("AW_MEMORY_MAP_VALIDATE_FAIL reason=descriptor\n");
+            return false;
+        }
+        if descriptor.memory_type == UEFI_MEMORY_TYPE_CONVENTIONAL {
+            let Some(total) = conventional_pages.checked_add(descriptor.page_count) else {
+                debug_write("AW_MEMORY_MAP_VALIDATE_FAIL reason=page_overflow\n");
+                return false;
+            };
+            conventional_pages = total;
+        }
+    }
+
+    if conventional_pages == 0 {
+        debug_write("AW_MEMORY_MAP_VALIDATE_FAIL reason=no_conventional_memory\n");
+        return false;
+    }
+
+    debug_write("AW_MEMORY_MAP_VALIDATE_OK\n");
+    debug_write("AW_MEMORY_MAP_CONVENTIONAL_OK\n");
+    true
 }
 
 fn pci_read_u32(address: PciAddress, register_offset: u8) -> Option<u32> {
@@ -410,6 +453,9 @@ pub extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
     }
 
     debug_write("AW_NATIVE_KERNEL_ENTRY_OK\n");
+    if !validate_memory_map(handoff) {
+        halt_forever();
+    }
     validate_cpu_baseline();
     scan_pci(handoff);
 
