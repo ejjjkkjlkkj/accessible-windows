@@ -1,6 +1,8 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+use aw_recovery_contract::AccessibleRecoveryReady;
+
 pub const OBJECT_DIGEST_BYTES: usize = 32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -270,9 +272,9 @@ pub const REQUIRED_SUCCESS_HEALTH_CHECKS: [RuntimeHealthCheck; 9] = [
 
 /// Semantic record of completed runtime probes.
 ///
-/// Probe execution itself belongs to platform/runtime code. This type only records explicit PASS
-/// evidence and deliberately has no implicit defaults: a check is absent until a probe marks it
-/// passed.
+/// Ordinary probes may record a PASS directly. Accessible recovery is deliberately different: it
+/// can only be recorded by presenting `AccessibleRecoveryReady`, which itself proves keyboard,
+/// structured diagnostics, rollback/reinstall/export actions and speech or braille.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct RuntimeHealthReport {
     passed: u16,
@@ -284,14 +286,30 @@ impl RuntimeHealthReport {
         Self { passed: 0 }
     }
 
-    pub fn mark_passed(&mut self, check: RuntimeHealthCheck) {
+    pub fn mark_passed(
+        &mut self,
+        check: RuntimeHealthCheck,
+    ) -> Result<(), RuntimeHealthRecordError> {
+        if check == RuntimeHealthCheck::AccessibleRecovery {
+            return Err(RuntimeHealthRecordError::RecoveryProofRequired);
+        }
         self.passed |= check.bit();
+        Ok(())
+    }
+
+    pub fn mark_accessible_recovery(&mut self, _proof: AccessibleRecoveryReady) {
+        self.passed |= RuntimeHealthCheck::AccessibleRecovery.bit();
     }
 
     #[must_use]
     pub const fn passed(self, check: RuntimeHealthCheck) -> bool {
         self.passed & check.bit() != 0
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeHealthRecordError {
+    RecoveryProofRequired,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -323,6 +341,7 @@ impl SuccessfulGeneration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aw_recovery_contract::{RecoveryCapability, RecoveryProbeReport};
 
     fn object(seed: u8) -> ObjectId {
         ObjectId::new([seed; OBJECT_DIGEST_BYTES]).unwrap()
@@ -336,10 +355,29 @@ mod tests {
         plan
     }
 
+    fn recovery_ready() -> AccessibleRecoveryReady {
+        let mut report = RecoveryProbeReport::new();
+        for capability in [
+            RecoveryCapability::KeyboardInput,
+            RecoveryCapability::StructuredDiagnostics,
+            RecoveryCapability::SpeechOutput,
+            RecoveryCapability::RollbackSelection,
+            RecoveryCapability::SignedReinstall,
+            RecoveryCapability::DiagnosticExport,
+        ] {
+            report.mark_passed(capability);
+        }
+        report.accessible_ready().unwrap()
+    }
+
     fn complete_health() -> RuntimeHealthReport {
         let mut health = RuntimeHealthReport::new();
         for check in REQUIRED_SUCCESS_HEALTH_CHECKS {
-            health.mark_passed(check);
+            if check == RuntimeHealthCheck::AccessibleRecovery {
+                health.mark_accessible_recovery(recovery_ready());
+            } else {
+                health.mark_passed(check).unwrap();
+            }
         }
         health
     }
@@ -418,6 +456,18 @@ mod tests {
                 RuntimeHealthCheck::Speech
             ))
         );
+    }
+
+    #[test]
+    fn accessible_recovery_requires_typed_recovery_proof() {
+        let mut health = RuntimeHealthReport::new();
+        assert_eq!(
+            health.mark_passed(RuntimeHealthCheck::AccessibleRecovery),
+            Err(RuntimeHealthRecordError::RecoveryProofRequired)
+        );
+        assert!(!health.passed(RuntimeHealthCheck::AccessibleRecovery));
+        health.mark_accessible_recovery(recovery_ready());
+        assert!(health.passed(RuntimeHealthCheck::AccessibleRecovery));
     }
 
     #[test]
