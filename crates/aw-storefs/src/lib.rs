@@ -1,6 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod trust;
 pub mod wire;
 
 use aw_fs_core::{AWFS_BLOCK_SIZE, AWFS_CHECKPOINT_COPIES, Digest};
