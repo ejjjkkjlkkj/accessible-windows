@@ -17,3 +17,11 @@ version = "0.1.0"
 [[package]]
 name = "aw-kernel-core"
 version = "0.1.0"
+
+[[package]]
+name = "aw-pci"
+version = "0.1.0"
+
+[[package]]
+name = "aw-x86-platform"
+version = "0.1.0"
