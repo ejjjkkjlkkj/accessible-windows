@@ -10,6 +10,7 @@ members = [
     "crates/aw-guest-vm",
     "crates/aw-kernel-contract",
     "crates/aw-kernel-core",
+    "crates/aw-macho",
     "crates/aw-memory",
     "crates/aw-pci",
     "crates/aw-recovery-contract",
