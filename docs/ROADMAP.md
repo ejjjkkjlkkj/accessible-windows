@@ -123,16 +123,94 @@
 - [ ] Power-loss fault injection at every update and boot-state persistence boundary
 - [ ] Migration fixtures for every persistent format still inside the ten-year support window
 
-## Phase 7 - Compatibility
+## Phase 7 - Unified application compatibility
+
+### Common host integration
+
+- [x] Define one host integration contract for native, Android, Linux and Darwin applications
+- [x] Require launcher, host window, clipboard, notifications, file/URL portals, audio, network and accessibility bridges before an application is called host-integrated
+- [x] Define hardware-isolated VM boundary for Linux and Android and userspace compatibility boundary for Darwin
+- [x] Require an explicit foreign-ISA translation capability for ARM64 application code on the x86-64 host
+- [x] Define complete runtime source/provenance contract in `aw-runtime-sources`
+- [x] Bind release-grade `aw-app-compat` admission to a matching complete source-family proof
+- [x] Add CI gates that reject missing source classes, false ready states and moving/unpinned release inputs
+- [x] Pin initial crosvm source baseline for the compatibility VM substrate
+- [x] Select QEMU TCG as the initial AArch64-to-x86-64 translation baseline
+- [ ] Implement host app registry with stable IDs across native/Android/Linux/Darwin origins
+- [ ] Implement capability-token broker protocol with explicit major/minor versioning
+- [ ] Implement host window broker
+- [ ] Implement file and URL portals
+- [ ] Implement clipboard and notification brokers
+- [ ] Implement audio and network brokers
+- [ ] Implement common runtime lifecycle and crash containment
+- [ ] Implement AArch64-to-x86-64 translation adapters without weakening isolation
+- [ ] Build real app conformance corpus and blind-user accessibility corpus
+
+### Linux application runtime
+
+- [x] Select real Linux-in-VM architecture instead of sharing the host kernel
+- [x] Select Linux 6.18 LTS source baseline and Debian 13.6 userspace family
+- [x] Require binary-package-to-source-package closure, licenses, SBOM and provenance for every shipped userspace binary
+- [x] Require Wayland, Xwayland compatibility, Mesa, PipeWire, D-Bus, XDG Desktop Portal and AT-SPI integration classes
+- [ ] Pin immutable Debian repository snapshot
+- [ ] Generate complete initial Debian binary-to-source closure
+- [ ] Build minimal amd64 Linux guest image reproducibly
+- [ ] Boot Linux guest under the selected compatibility VMM
+- [ ] Export one Wayland application as an ordinary host window
+- [ ] Translate AT-SPI semantics into the native accessibility tree
+- [ ] Add Linux package-manager install/export/uninstall flow
+- [ ] Validate x86-64 Linux application corpus
+- [ ] Validate ARM64 Linux application translation corpus
+
+### Android application runtime
+
+- [x] Select AOSP rather than a proprietary Android distribution
+- [x] Pin the complete Android 17 security Repo manifest baseline
+- [x] Require every project in the resolved AOSP manifest to be recorded by exact commit
+- [x] Require ART, Binder, Bionic, framework, graphics, media/audio, package/activity, permissions/security and accessibility source classes
+- [x] Explicitly exclude proprietary Google packages from the assumed open-source baseline
+- [ ] Perform complete AOSP source synchronization from the pinned manifest
+- [ ] Commit/generated-store resolved AOSP manifest containing every project commit
+- [ ] Build x86-64 Android guest image reproducibly
+- [ ] Boot Android guest under the selected compatibility VMM
+- [ ] Install APK and export individual activity as ordinary host app/window
+- [ ] Bridge Android intents to host file/URL handlers
+- [ ] Bridge Android notifications, clipboard, audio and networking
+- [ ] Translate Android accessibility nodes/events into native accessibility semantics
+- [ ] Add Android Native Bridge adapter for ARM64-only native libraries
+- [ ] Validate x86-64/DEX Android application corpus
+- [ ] Validate ARM64-native Android application corpus
+
+### Darwin/macOS application compatibility
+
+- [x] Define clean-room userspace compatibility architecture; no macOS VM/system image requirement
+- [x] Pin Apple `distribution-macOS` open-source inventory baseline
+- [x] Require walking every Apple-published project in that inventory and resolving tags to exact commits
+- [x] Select Darling, GNUstep/libobjc2 and Apple OSS components as component-level candidates/references subject to license review
+- [x] Explicitly forbid proprietary macOS frameworks/system images from satisfying source-completeness gates
+- [ ] Resolve and record every project in the pinned Apple OSS inventory
+- [ ] Complete component-level license review and source-use classification
+- [ ] Pin Darling/GNUstep/libobjc2 source revisions
+- [ ] Implement initial x86-64 Mach-O loader
+- [ ] Implement dynamic-loader and Darwin/Mach/POSIX compatibility services
+- [ ] Bring up Objective-C runtime and CLI compatibility
+- [ ] Implement Foundation/CoreFoundation compatibility coverage
+- [ ] Implement AppKit-compatible host-window integration
+- [ ] Implement graphics/audio/security compatibility surfaces
+- [ ] Implement Darwin accessibility semantic bridge
+- [ ] Validate x86-64 Mach-O application corpus
+- [ ] Validate ARM64 Mach-O translation corpus
+
+### Other compatibility
 
 - [ ] Win32 ABI/API compatibility program
 - [ ] Windows application test corpus
-- [ ] Linux subsystem/container runtime
 - [ ] Web/PWA runtime
-- [ ] Optional Android compatibility research
 
 ## Definition of success
 
 The project does not claim to exceed Windows 11 until reproducible benchmarks demonstrate improvements in selected areas such as accessibility coverage, idle resource use, recovery, update reliability, input latency and security isolation while maintaining useful application and hardware compatibility.
+
+Compatibility is not considered complete because an application launches. Android, Linux and Darwin applications must behave as first-class host applications and retain native screen-reader semantics without entering a separate guest desktop. Release-grade compatibility also requires complete immutable source closure, license/provenance records and reproducible runtime builds.
 
 Recovery is not considered better merely because it has more options: it must demonstrably survive boot/update corruption, remain independently recoverable, preserve a known-good generation, and be fully operable by a blind user without visual assistance.
