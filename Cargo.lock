@@ -45,6 +45,10 @@ name = "aw-pci"
 version = "0.1.0"
 
 [[package]]
+name = "aw-recovery-contract"
+version = "0.1.0"
+
+[[package]]
 name = "aw-storefs"
 version = "0.1.0"
 dependencies = [
