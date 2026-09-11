@@ -70,6 +70,20 @@ action are the interoperability contract.
 - Speech, braille, structured text and any visual frontend must expose the same diagnostic identity
   and action order so hidden visual state cannot surprise the user.
 
+## Acceptance matrix
+
+| Situation | Result |
+| --- | --- |
+| Desktop visible, speech unavailable | FAIL; generation remains trial |
+| Desktop visible, accessible recovery unavailable | FAIL; generation remains trial |
+| Recovery visible only on framebuffer | FAIL |
+| Recovery has speech + keyboard + structured diagnostics + rollback/reinstall/export | PASS candidate |
+| Recovery has braille instead of speech with the same controls/diagnostics | PASS candidate |
+| Neither speech nor braille works | FAIL closed |
+| Recovery proof belongs to another generation | FAIL |
+| Health rollback index is below persisted floor | FAIL |
+| Trial attempts exhausted | automatic fallback to previous known-good generation |
+
 ## Validation before release-grade claims
 
 Automated tests are necessary but insufficient. Release-grade validation must include real blind-user
