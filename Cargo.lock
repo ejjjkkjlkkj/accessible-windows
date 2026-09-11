@@ -11,6 +11,13 @@ name = "aw-acpi"
 version = "0.1.0"
 
 [[package]]
+name = "aw-bootstate"
+version = "0.1.0"
+dependencies = [
+ "aw-generation",
+]
+
+[[package]]
 name = "aw-generation"
 version = "0.1.0"
 
