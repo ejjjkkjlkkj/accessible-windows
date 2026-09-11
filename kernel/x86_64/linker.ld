@@ -1,10 +1,8 @@
 ENTRY(_start)
 
-KERNEL_LOAD_ADDRESS = 0x01000000;
-
 SECTIONS
 {
-    . = KERNEL_LOAD_ADDRESS;
+    . = 0;
 
     .text : ALIGN(0x1000)
     {
