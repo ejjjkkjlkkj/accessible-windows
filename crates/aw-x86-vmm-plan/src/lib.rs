@@ -276,9 +276,7 @@ impl<const MAPPINGS: usize> X86IdentityMappingPlan<MAPPINGS> {
         }
     }
 
-    fn preservation_policy(
-        kind: PhysicalPreservationKind,
-    ) -> (PageTableFlags, MappingHardening) {
+    fn preservation_policy(kind: PhysicalPreservationKind) -> (PageTableFlags, MappingHardening) {
         match kind {
             PhysicalPreservationKind::KernelImage => (
                 PageTableFlags::WRITABLE,
