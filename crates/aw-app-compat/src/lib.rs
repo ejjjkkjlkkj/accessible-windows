@@ -1,6 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+use aw_guest_vm::GuestVmReady;
 use aw_runtime_sources::{CompleteRuntimeSources, RuntimeFamily};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -141,6 +142,11 @@ pub enum RuntimeAdmissionError {
         expected: RuntimeFamily,
         actual: RuntimeFamily,
     },
+    GuestVmFamilyMismatch {
+        expected: RuntimeFamily,
+        actual: RuntimeFamily,
+    },
+    GuestVmNotApplicableToDarwin,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -251,10 +257,7 @@ pub fn admit_system_integrated_app(
     Ok(ready)
 }
 
-/// Release-grade admission is intentionally stricter than execution or desktop integration.
-/// The caller must first obtain `CompleteRuntimeSources` from `aw-runtime-sources`, proving that
-/// the entire Linux, Android or Darwin source family is present together with immutable pins,
-/// provenance, licensing inventory and a reproducible build recipe.
+/// Release-grade admission requires the full immutable source closure from the same runtime family.
 pub fn admit_release_integrated_app(
     profile: RuntimeProfile,
     sources: CompleteRuntimeSources,
@@ -267,9 +270,34 @@ pub fn admit_release_integrated_app(
     admit_system_integrated_app(profile)
 }
 
+/// Linux and Android release applications additionally require a successfully admitted hardware
+/// guest VM from the same family. Darwin deliberately cannot use this path because macOS is not
+/// bundled or virtualized by the compatibility architecture.
+pub fn admit_release_vm_backed_integrated_app(
+    profile: RuntimeProfile,
+    sources: CompleteRuntimeSources,
+    guest_vm: GuestVmReady,
+) -> Result<RuntimeReady, RuntimeAdmissionError> {
+    let expected = profile.target.runtime_family();
+    if expected == RuntimeFamily::Darwin {
+        return Err(RuntimeAdmissionError::GuestVmNotApplicableToDarwin);
+    }
+
+    let actual = guest_vm.family().runtime_family();
+    if expected != actual {
+        return Err(RuntimeAdmissionError::GuestVmFamilyMismatch { expected, actual });
+    }
+
+    admit_release_integrated_app(profile, sources)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aw_guest_vm::{
+        GuestFamily, GuestIsolation, GuestSurface, GuestVmProfile, admit_guest_vm,
+        base_required_capabilities, graphical_required_capabilities,
+    };
     use aw_runtime_sources::{
         RuntimeSourceSet, common_required_components, family_required_components,
         validate_complete_source_set,
@@ -312,6 +340,21 @@ mod tests {
             set.mark(*component);
         }
         validate_complete_source_set(set).unwrap()
+    }
+
+    fn guest_proof(family: GuestFamily) -> GuestVmReady {
+        let mut profile = GuestVmProfile::new(
+            family,
+            GuestSurface::Graphical,
+            GuestIsolation::HardwareVirtualMachine,
+        );
+        for capability in base_required_capabilities() {
+            profile.mark_capability(*capability);
+        }
+        for capability in graphical_required_capabilities() {
+            profile.mark_capability(*capability);
+        }
+        admit_guest_vm(profile).unwrap()
     }
 
     #[test]
@@ -420,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn every_family_can_pass_release_admission_with_matching_complete_sources() {
+    fn every_family_can_pass_release_source_admission() {
         for (target, boundary) in [
             (
                 CompatibilityTarget::AndroidDex,
@@ -455,6 +498,56 @@ mod tests {
                 expected: RuntimeFamily::Android,
                 actual: RuntimeFamily::Linux,
             })
+        );
+    }
+
+    #[test]
+    fn vm_backed_release_requires_matching_guest_family() {
+        let profile = fully_integrated_profile(
+            CompatibilityTarget::AndroidDex,
+            RuntimeBoundary::HardwareIsolatedVm,
+            AppSurface::Graphical,
+        );
+        let sources = source_proof(RuntimeFamily::Android);
+        let linux_guest = guest_proof(GuestFamily::Linux);
+        assert_eq!(
+            admit_release_vm_backed_integrated_app(profile, sources, linux_guest),
+            Err(RuntimeAdmissionError::GuestVmFamilyMismatch {
+                expected: RuntimeFamily::Android,
+                actual: RuntimeFamily::Linux,
+            })
+        );
+    }
+
+    #[test]
+    fn linux_and_android_release_require_matching_guest_vm_proof() {
+        for (target, guest_family) in [
+            (CompatibilityTarget::AndroidDex, GuestFamily::Android),
+            (CompatibilityTarget::LinuxElfX86_64, GuestFamily::Linux),
+        ] {
+            let profile = fully_integrated_profile(
+                target,
+                RuntimeBoundary::HardwareIsolatedVm,
+                AppSurface::Graphical,
+            );
+            let sources = source_proof(target.runtime_family());
+            let guest = guest_proof(guest_family);
+            assert!(admit_release_vm_backed_integrated_app(profile, sources, guest).is_ok());
+        }
+    }
+
+    #[test]
+    fn darwin_cannot_be_admitted_through_guest_vm_release_path() {
+        let profile = fully_integrated_profile(
+            CompatibilityTarget::DarwinMachOX86_64,
+            RuntimeBoundary::UserModeCompatibility,
+            AppSurface::Graphical,
+        );
+        let sources = source_proof(RuntimeFamily::Darwin);
+        let linux_guest = guest_proof(GuestFamily::Linux);
+        assert_eq!(
+            admit_release_vm_backed_integrated_app(profile, sources, linux_guest),
+            Err(RuntimeAdmissionError::GuestVmNotApplicableToDarwin)
         );
     }
 
