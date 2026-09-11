@@ -1,6 +1,8 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod wire;
+
 pub const AWFS_BLOCK_SIZE: u32 = 4096;
 pub const AWFS_DIGEST_BYTES: usize = 32;
 pub const AWFS_VOLUME_ID_BYTES: usize = 16;
