@@ -11,6 +11,10 @@ name = "aw-acpi"
 version = "0.1.0"
 
 [[package]]
+name = "aw-app-compat"
+version = "0.1.0"
+
+[[package]]
 name = "aw-bootstate"
 version = "0.1.0"
 dependencies = [
