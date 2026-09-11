@@ -10,7 +10,6 @@ pub enum RuntimeFamily {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceComponent {
-    // Linux runtime
     LinuxKernel,
     LinuxLibc,
     LinuxInitServices,
@@ -21,8 +20,6 @@ pub enum SourceComponent {
     LinuxPipewire,
     LinuxDesktopPortal,
     LinuxAccessibilityAtSpi,
-
-    // Android/AOSP runtime
     AndroidBuildSystem,
     AndroidKernelContract,
     AndroidBionic,
@@ -35,8 +32,6 @@ pub enum SourceComponent {
     AndroidPackageActivityServices,
     AndroidPermissionSecurity,
     AndroidAccessibility,
-
-    // Darwin/macOS compatibility runtime
     DarwinMachAbi,
     DarwinMachOLoader,
     DarwinDynamicLoader,
@@ -51,8 +46,6 @@ pub enum SourceComponent {
     DarwinAudioCompat,
     DarwinSecurityCompat,
     DarwinAccessibilityCompat,
-
-    // Mandatory for every family
     ImmutableSourcePins,
     LicenseInventory,
     SourceProvenance,
@@ -164,6 +157,20 @@ const DARWIN_REQUIRED: [SourceComponent; 14] = [
     SourceComponent::DarwinAccessibilityCompat,
 ];
 
+#[must_use]
+pub const fn common_required_components() -> &'static [SourceComponent] {
+    &COMMON_REQUIRED
+}
+
+#[must_use]
+pub const fn family_required_components(family: RuntimeFamily) -> &'static [SourceComponent] {
+    match family {
+        RuntimeFamily::Linux => &LINUX_REQUIRED,
+        RuntimeFamily::Android => &ANDROID_REQUIRED,
+        RuntimeFamily::Darwin => &DARWIN_REQUIRED,
+    }
+}
+
 fn require(
     set: RuntimeSourceSet,
     required: &[SourceComponent],
@@ -186,13 +193,8 @@ fn require(
 pub fn validate_complete_source_set(
     set: RuntimeSourceSet,
 ) -> Result<CompleteRuntimeSources, SourceCompletenessError> {
-    require(set, &COMMON_REQUIRED)?;
-    match set.family {
-        RuntimeFamily::Linux => require(set, &LINUX_REQUIRED)?,
-        RuntimeFamily::Android => require(set, &ANDROID_REQUIRED)?,
-        RuntimeFamily::Darwin => require(set, &DARWIN_REQUIRED)?,
-    }
-
+    require(set, common_required_components())?;
+    require(set, family_required_components(set.family))?;
     Ok(CompleteRuntimeSources { family: set.family })
 }
 
@@ -208,12 +210,8 @@ mod tests {
 
     fn complete_set(family: RuntimeFamily) -> RuntimeSourceSet {
         let mut set = RuntimeSourceSet::new(family);
-        mark_all(&mut set, &COMMON_REQUIRED);
-        match family {
-            RuntimeFamily::Linux => mark_all(&mut set, &LINUX_REQUIRED),
-            RuntimeFamily::Android => mark_all(&mut set, &ANDROID_REQUIRED),
-            RuntimeFamily::Darwin => mark_all(&mut set, &DARWIN_REQUIRED),
-        }
+        mark_all(&mut set, common_required_components());
+        mark_all(&mut set, family_required_components(family));
         set
     }
 
