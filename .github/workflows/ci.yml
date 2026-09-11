@@ -54,16 +54,30 @@ jobs:
           rustup default stable
           rustup target add x86_64-unknown-uefi x86_64-unknown-none
 
-      - name: Build native x86-64 kernel
+      - name: Build and validate PIC native kernel
         shell: bash
         run: |
           set -euo pipefail
           cargo build --manifest-path kernel/x86_64/Cargo.toml --target x86_64-unknown-none --release
           KERNEL_ELF="kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64"
           KERNEL_BIN="${KERNEL_ELF}.bin"
+
+          START_ADDRESS="$(nm -n "$KERNEL_ELF" | awk '$3 == "_start" { print $1; exit }')"
+          if [ "$START_ADDRESS" != "0000000000000000" ]; then
+            echo "Kernel _start must be linked at offset zero; got: $START_ADDRESS" >&2
+            nm -n "$KERNEL_ELF"
+            exit 1
+          fi
+
+          readelf -rW "$KERNEL_ELF" | tee kernel-relocations.txt
+          if grep -Eq 'R_X86_64_' kernel-relocations.txt; then
+            echo "Flat PIC kernel still contains runtime relocations" >&2
+            exit 1
+          fi
+
           objcopy -O binary "$KERNEL_ELF" "$KERNEL_BIN"
           test -s "$KERNEL_BIN"
-          echo "AW_NATIVE_KERNEL_BUILD_OK elf=$KERNEL_ELF bin=$KERNEL_BIN bytes=$(stat -c%s "$KERNEL_BIN")"
+          echo "AW_NATIVE_KERNEL_BUILD_OK elf=$KERNEL_ELF bin=$KERNEL_BIN bytes=$(stat -c%s "$KERNEL_BIN") start=0x$START_ADDRESS relocations=none"
 
       - name: Build UEFI executable
         run: cargo build --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
@@ -76,7 +90,7 @@ jobs:
       - name: Build GPT/ESP boot disk image
         run: ./scripts/build-uefi-disk.sh
 
-      - name: Real GPT disk boot smoke test
+      - name: Raw GPT/OVMF boot smoke test
         shell: bash
         run: |
           set -euo pipefail
@@ -112,7 +126,9 @@ jobs:
           echo "QEMU_STATUS=$QEMU_STATUS"
           cat uefi-debug.log || true
           grep -F "AW_BOOT_OK stage=uefi_init arch=x86_64" uefi-debug.log
+          grep -F "AW_KERNEL_FILE_READ_OK" uefi-debug.log
           grep -F "AW_NATIVE_KERNEL_LOAD_OK" uefi-debug.log
+          grep -F "mode=dynamic_pic" uefi-debug.log
           grep -F "AW_MEMORY_MAP_OK" uefi-debug.log
           grep -F "AW_ACPI_OK" uefi-debug.log
           grep -F "AW_ACPI_VALIDATE_OK" uefi-debug.log
