@@ -420,10 +420,7 @@ mod tests {
         assert_eq!(last_low.next(), None);
 
         let regular = VirtualPage::new(0x20_0000).unwrap();
-        assert_eq!(
-            regular.next().unwrap().start_address().value(),
-            0x20_1000
-        );
+        assert_eq!(regular.next().unwrap().start_address().value(), 0x20_1000);
     }
 
     #[test]
@@ -434,10 +431,7 @@ mod tests {
         assert_eq!(range.page_count(), 3);
         assert_eq!(range.start(), start);
         assert_eq!(range.page(0), Some(start));
-        assert_eq!(
-            range.page(2).unwrap().start_address().value(),
-            0x20_2000
-        );
+        assert_eq!(range.page(2).unwrap().start_address().value(), 0x20_2000);
         assert_eq!(range.page(3), None);
         assert_eq!(range.end_address_exclusive(), Some(0x20_3000));
         assert!(range.contains(VirtualPage::new(0x20_1000).unwrap()));
