@@ -1,6 +1,10 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+mod offline;
+
+pub use offline::{FrameAllocator, OfflinePageTableBuilder, ResolvedMapping};
+
 pub const PAGE_SIZE: u64 = 4096;
 pub const PAGE_TABLE_ENTRIES: usize = 512;
 pub const MAX_X86_64_PHYSICAL_ADDRESS_BITS: u8 = 52;
@@ -272,6 +276,7 @@ pub enum MappingError {
     Unaligned,
     OutOfFrames,
     Overflow,
+    FrameReuse,
 }
 
 #[repr(transparent)]
