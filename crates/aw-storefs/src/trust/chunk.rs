@@ -1,6 +1,6 @@
 use super::AuthenticatedManifest;
-use crate::merkle::{MerkleHasher, MerkleProof, MerkleProofError, VerifiedChunk, verify_chunk};
 use crate::ObjectDescriptor;
+use crate::merkle::{MerkleHasher, MerkleProof, MerkleProofError, VerifiedChunk, verify_chunk};
 use aw_fs_core::Digest;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -114,14 +114,9 @@ mod tests {
         let manifest = authenticated_manifest();
         let proof = MerkleProof::<0>::new(0, 1, [], 0).unwrap();
         let bytes = [7_u8; 4];
-        let chunk = verify_authenticated_chunk(
-            &manifest,
-            digest(7),
-            &bytes,
-            &proof,
-            &SingleLeafHasher,
-        )
-        .unwrap();
+        let chunk =
+            verify_authenticated_chunk(&manifest, digest(7), &bytes, &proof, &SingleLeafHasher)
+                .unwrap();
         assert_eq!(chunk.generation(), 42);
         assert_eq!(chunk.leaf_index(), 0);
         assert_eq!(chunk.bytes(), &bytes);
@@ -132,23 +127,11 @@ mod tests {
         let manifest = authenticated_manifest();
         let proof = MerkleProof::<0>::new(0, 1, [], 0).unwrap();
         assert!(matches!(
-            verify_authenticated_chunk(
-                &manifest,
-                digest(8),
-                &[7_u8; 4],
-                &proof,
-                &SingleLeafHasher
-            ),
+            verify_authenticated_chunk(&manifest, digest(8), &[7_u8; 4], &proof, &SingleLeafHasher),
             Err(AuthenticatedChunkError::UnknownObject)
         ));
         assert!(matches!(
-            verify_authenticated_chunk(
-                &manifest,
-                digest(7),
-                &[8_u8; 4],
-                &proof,
-                &SingleLeafHasher
-            ),
+            verify_authenticated_chunk(&manifest, digest(7), &[8_u8; 4], &proof, &SingleLeafHasher),
             Err(AuthenticatedChunkError::Verification(
                 MerkleProofError::RootMismatch
             ))
