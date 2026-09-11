@@ -6,6 +6,7 @@ pub const KERNEL_HANDOFF_ABI_VERSION: u32 = 2;
 pub const HANDOFF_FLAG_FRAMEBUFFER_PRESENT: u64 = 1 << 0;
 pub const HANDOFF_FLAG_PCIE_ECAM_PRESENT: u64 = 1 << 1;
 pub const MAX_PCIE_ECAM_REGIONS: usize = 4;
+pub const UEFI_PAGE_SIZE: u64 = 4096;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,6 +45,89 @@ impl FramebufferHandoff {
             && self.width != 0
             && self.height != 0
             && self.stride_pixels >= self.width
+    }
+}
+
+/// Architecture-neutral memory descriptor used by the kernel handoff.
+///
+/// This intentionally does not expose the layout of `uefi-rs` or firmware
+/// descriptors. The loader will normalize the final UEFI memory map into this
+/// stable representation before transferring control to the native kernel.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemoryDescriptorHandoff {
+    pub memory_type: u32,
+    pub reserved: u32,
+    pub physical_start: u64,
+    pub page_count: u64,
+    pub attributes: u64,
+}
+
+impl MemoryDescriptorHandoff {
+    pub const NONE: Self = Self {
+        memory_type: 0,
+        reserved: 0,
+        physical_start: 0,
+        page_count: 0,
+        attributes: 0,
+    };
+
+    #[must_use]
+    pub fn byte_len(self) -> Option<u64> {
+        self.page_count.checked_mul(UEFI_PAGE_SIZE)
+    }
+
+    #[must_use]
+    pub fn physical_end_exclusive(self) -> Option<u64> {
+        self.physical_start.checked_add(self.byte_len()?)
+    }
+
+    #[must_use]
+    pub fn is_valid(self) -> bool {
+        self.reserved == 0
+            && self.page_count != 0
+            && self.physical_start.is_multiple_of(UEFI_PAGE_SIZE)
+            && self.physical_end_exclusive().is_some()
+    }
+}
+
+/// Location and shape of a normalized memory-descriptor array.
+///
+/// `buffer_address` is the linear address valid at kernel entry. The kernel
+/// must copy or map this buffer before replacing the firmware page tables.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemoryMapHandoff {
+    pub buffer_address: u64,
+    pub byte_len: u64,
+    pub entry_count: u32,
+    pub descriptor_size: u32,
+}
+
+impl MemoryMapHandoff {
+    pub const NONE: Self = Self {
+        buffer_address: 0,
+        byte_len: 0,
+        entry_count: 0,
+        descriptor_size: 0,
+    };
+
+    #[must_use]
+    pub fn is_valid(self) -> bool {
+        let descriptor_size = core::mem::size_of::<MemoryDescriptorHandoff>() as u32;
+        if self.buffer_address == 0
+            || !self
+                .buffer_address
+                .is_multiple_of(core::mem::align_of::<MemoryDescriptorHandoff>() as u64)
+            || self.entry_count == 0
+            || self.descriptor_size != descriptor_size
+        {
+            return false;
+        }
+
+        u64::from(self.entry_count)
+            .checked_mul(u64::from(self.descriptor_size))
+            == Some(self.byte_len)
     }
 }
 
@@ -222,6 +306,14 @@ mod tests {
         reserved: 0,
     };
 
+    const VALID_MEMORY_DESCRIPTOR: MemoryDescriptorHandoff = MemoryDescriptorHandoff {
+        memory_type: 7,
+        reserved: 0,
+        physical_start: 0x10_0000,
+        page_count: 256,
+        attributes: 0,
+    };
+
     const fn empty_ecam() -> [PciEcamHandoff; MAX_PCIE_ECAM_REGIONS] {
         [PciEcamHandoff::NONE; MAX_PCIE_ECAM_REGIONS]
     }
@@ -241,6 +333,74 @@ mod tests {
     fn accepts_handoff_without_optional_devices() {
         let handoff = KernelHandoff::new(0xf000_0000, 127, None, empty_ecam(), 0);
         assert_eq!(enter(&handoff), Ok(()));
+    }
+
+    #[test]
+    fn validates_normalized_memory_descriptor() {
+        assert!(VALID_MEMORY_DESCRIPTOR.is_valid());
+        assert_eq!(VALID_MEMORY_DESCRIPTOR.byte_len(), Some(256 * UEFI_PAGE_SIZE));
+        assert_eq!(
+            VALID_MEMORY_DESCRIPTOR.physical_end_exclusive(),
+            Some(0x10_0000 + 256 * UEFI_PAGE_SIZE)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_normalized_memory_descriptors() {
+        let mut descriptor = VALID_MEMORY_DESCRIPTOR;
+        descriptor.physical_start += 1;
+        assert!(!descriptor.is_valid());
+
+        descriptor = VALID_MEMORY_DESCRIPTOR;
+        descriptor.page_count = 0;
+        assert!(!descriptor.is_valid());
+
+        descriptor = VALID_MEMORY_DESCRIPTOR;
+        descriptor.reserved = 1;
+        assert!(!descriptor.is_valid());
+
+        descriptor = VALID_MEMORY_DESCRIPTOR;
+        descriptor.page_count = u64::MAX;
+        assert!(!descriptor.is_valid());
+    }
+
+    #[test]
+    fn validates_memory_map_shape() {
+        let descriptor_size = core::mem::size_of::<MemoryDescriptorHandoff>() as u32;
+        let map = MemoryMapHandoff {
+            buffer_address: 0x20_0000,
+            byte_len: u64::from(descriptor_size) * 127,
+            entry_count: 127,
+            descriptor_size,
+        };
+        assert!(map.is_valid());
+    }
+
+    #[test]
+    fn rejects_invalid_memory_map_shape() {
+        let descriptor_size = core::mem::size_of::<MemoryDescriptorHandoff>() as u32;
+        let valid = MemoryMapHandoff {
+            buffer_address: 0x20_0000,
+            byte_len: u64::from(descriptor_size) * 4,
+            entry_count: 4,
+            descriptor_size,
+        };
+
+        let mut map = valid;
+        map.buffer_address += 1;
+        assert!(!map.is_valid());
+
+        map = valid;
+        map.entry_count = 0;
+        assert!(!map.is_valid());
+
+        map = valid;
+        map.descriptor_size = descriptor_size + 8;
+        assert!(!map.is_valid());
+
+        map = valid;
+        map.byte_len -= 1;
+        assert!(!map.is_valid());
     }
 
     #[test]
