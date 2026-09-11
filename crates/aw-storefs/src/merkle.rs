@@ -276,11 +276,8 @@ mod tests {
             })
         );
 
-        let wrong_descriptor = ObjectDescriptor::new(
-            digest(99),
-            ObjectClass::Resource,
-            descriptor.extent(),
-        );
+        let wrong_descriptor =
+            ObjectDescriptor::new(digest(99), ObjectClass::Resource, descriptor.extent());
         assert_eq!(
             verify_chunk(wrong_descriptor, &bytes, &proof, &hasher).err(),
             Some(MerkleProofError::RootMismatch)
