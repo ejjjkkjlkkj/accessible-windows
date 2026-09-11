@@ -189,11 +189,9 @@ impl<'a> BootstrapPageAllocator<'a> {
             let mut jump_to: Option<u64> = None;
             for range in self.protected_ranges {
                 if range.contains_address(candidate) {
-                    jump_to = Some(
-                        jump_to.map_or(range.end_address_exclusive(), |current| {
-                            current.max(range.end_address_exclusive())
-                        }),
-                    );
+                    jump_to = Some(jump_to.map_or(range.end_address_exclusive(), |current| {
+                        current.max(range.end_address_exclusive())
+                    }));
                 }
             }
 
@@ -343,11 +341,21 @@ mod tests {
     fn protected_range_splits_conventional_memory() {
         let map = [descriptor(UEFI_MEMORY_TYPE_CONVENTIONAL, 0x20_0000, 5)];
         let protected = [PhysicalRange::new(0x20_1000, 0x20_3000).unwrap()];
-        let mut allocator = BootstrapPageAllocator::with_protected_ranges(&map, &protected).unwrap();
+        let mut allocator =
+            BootstrapPageAllocator::with_protected_ranges(&map, &protected).unwrap();
 
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x20_0000);
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x20_3000);
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x20_4000);
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x20_0000
+        );
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x20_3000
+        );
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x20_4000
+        );
         assert_eq!(allocator.allocate_page(), None);
         assert_eq!(allocator.allocated_pages(), 3);
     }
@@ -359,11 +367,21 @@ mod tests {
             PhysicalRange::new(0x30_3000, 0x30_6000).unwrap(),
             PhysicalRange::new(0x30_1000, 0x30_4000).unwrap(),
         ];
-        let mut allocator = BootstrapPageAllocator::with_protected_ranges(&map, &protected).unwrap();
+        let mut allocator =
+            BootstrapPageAllocator::with_protected_ranges(&map, &protected).unwrap();
 
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x30_0000);
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x30_6000);
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x30_7000);
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x30_0000
+        );
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x30_6000
+        );
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x30_7000
+        );
         assert_eq!(allocator.allocate_page(), None);
     }
 
@@ -371,7 +389,8 @@ mod tests {
     fn fully_protected_conventional_memory_returns_no_page() {
         let map = [descriptor(UEFI_MEMORY_TYPE_CONVENTIONAL, 0x40_0000, 2)];
         let protected = [PhysicalRange::new(0x40_0000, 0x40_2000).unwrap()];
-        let mut allocator = BootstrapPageAllocator::with_protected_ranges(&map, &protected).unwrap();
+        let mut allocator =
+            BootstrapPageAllocator::with_protected_ranges(&map, &protected).unwrap();
 
         assert_eq!(allocator.allocate_page(), None);
         assert_eq!(allocator.allocated_pages(), 0);
