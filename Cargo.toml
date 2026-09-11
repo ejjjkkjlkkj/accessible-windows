@@ -11,6 +11,7 @@ members = [
     "crates/aw-memory",
     "crates/aw-pci",
     "crates/aw-recovery-contract",
+    "crates/aw-recovery-io",
     "crates/aw-storefs",
     "crates/aw-vmm-plan",
     "crates/aw-x86-paging",
