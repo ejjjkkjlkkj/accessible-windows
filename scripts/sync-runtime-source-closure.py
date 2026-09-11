@@ -140,6 +140,61 @@ def clone_at_tag(repo: str, tag: str, path: pathlib.Path, *, dry_run: bool) -> N
     )
 
 
+def clone_at_commit(
+    repo: str,
+    commit: str,
+    path: pathlib.Path,
+    *,
+    dry_run: bool,
+    recursive_submodules: bool,
+) -> list[str]:
+    if path.exists() and not (path / ".git").exists():
+        raise SyncError(f"refusing to reuse non-Git compatibility source directory: {path}")
+
+    fresh_clone = not path.exists()
+    if fresh_clone:
+        run(
+            ["git", "clone", "--filter=blob:none", "--no-checkout", repo, str(path)],
+            cwd=None,
+            dry_run=dry_run,
+        )
+    elif not dry_run:
+        actual_remote = subprocess.check_output(
+            ["git", "remote", "get-url", "origin"], cwd=path, text=True
+        ).strip()
+        if actual_remote != repo:
+            raise SyncError(
+                f"compatibility source origin mismatch for {path}: expected {repo}, got {actual_remote}"
+            )
+        run(["git", "fetch", "--tags", "--prune", "origin"], cwd=path, dry_run=False)
+
+    run(["git", "checkout", "--detach", commit], cwd=path, dry_run=dry_run)
+    if recursive_submodules:
+        run(
+            ["git", "submodule", "update", "--init", "--recursive"],
+            cwd=path,
+            dry_run=dry_run,
+        )
+
+    if dry_run:
+        return []
+
+    actual_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=path, text=True
+    ).strip()
+    if actual_commit != commit:
+        raise SyncError(
+            f"compatibility source commit mismatch for {path}: expected {commit}, got {actual_commit}"
+        )
+
+    if not recursive_submodules:
+        return []
+    status = subprocess.check_output(
+        ["git", "submodule", "status", "--recursive"], cwd=path, text=True
+    )
+    return [line.strip() for line in status.splitlines() if line.strip()]
+
+
 def sync_darwin_apple_oss(dest: pathlib.Path, *, dry_run: bool) -> None:
     lock = load_toml("darwin-open-source.lock.toml")
     inventory = lock["apple_open_source_inventory"]
@@ -159,6 +214,15 @@ def sync_darwin_apple_oss(dest: pathlib.Path, *, dry_run: bool) -> None:
     if dry_run:
         print("DARWIN_APPLE_OSS_COMPONENT_SYNC = requires release.json after inventory checkout")
         return
+
+    actual_inventory_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=inventory_dir, text=True
+    ).strip()
+    if actual_inventory_commit != inventory["commit"]:
+        raise SyncError(
+            "Apple OSS inventory commit mismatch: "
+            f"expected {inventory['commit']}, got {actual_inventory_commit}"
+        )
 
     release_path = inventory_dir / "release.json"
     release = json.loads(release_path.read_text(encoding="utf-8"))
@@ -186,9 +250,81 @@ def sync_darwin_apple_oss(dest: pathlib.Path, *, dry_run: bool) -> None:
     print(f"DARWIN_APPLE_OSS_PROJECTS = {len(resolved)}")
 
 
+def sync_darwin_compatibility(dest: pathlib.Path, *, dry_run: bool) -> None:
+    lock = load_toml("darwin-open-source.lock.toml")
+    compatibility = lock["compatibility_projects"]
+    require_tool("git", dry_run=dry_run)
+
+    compatibility_dir = dest / "darwin-open-source" / "compatibility"
+    compatibility_dir.mkdir(parents=True, exist_ok=True)
+    projects = (
+        (
+            "darling",
+            compatibility["darling"],
+            compatibility["darling_commit"],
+            True,
+        ),
+        (
+            "libobjc2",
+            compatibility["objc_runtime"],
+            compatibility["objc_runtime_commit"],
+            True,
+        ),
+        (
+            "gnustep-base",
+            compatibility["foundation"],
+            compatibility["foundation_commit"],
+            True,
+        ),
+        (
+            "gnustep-gui",
+            compatibility["appkit"],
+            compatibility["appkit_commit"],
+            True,
+        ),
+    )
+
+    resolved: list[dict[str, object]] = []
+    for name, repo, commit, recursive_submodules in projects:
+        target = compatibility_dir / name
+        submodules = clone_at_commit(
+            repo,
+            commit,
+            target,
+            dry_run=dry_run,
+            recursive_submodules=recursive_submodules,
+        )
+        resolved.append(
+            {
+                "project": name,
+                "repository": repo,
+                "commit": commit,
+                "submodules": submodules,
+            }
+        )
+
+    resolved_path = compatibility_dir / "resolved-compatibility-projects.json"
+    if not dry_run:
+        resolved_path.write_text(
+            json.dumps(resolved, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    print(f"DARWIN_COMPATIBILITY_RESOLVED = {resolved_path}")
+    print(f"DARWIN_COMPATIBILITY_PROJECTS = {len(projects)}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("family", choices=("android", "linux", "darwin-apple-oss", "all"))
+    parser.add_argument(
+        "family",
+        choices=(
+            "android",
+            "linux",
+            "darwin-apple-oss",
+            "darwin-compat",
+            "darwin",
+            "all",
+        ),
+    )
     parser.add_argument("--dest", type=pathlib.Path, required=True)
     parser.add_argument("--jobs", type=int, default=max(1, min(16, os.cpu_count() or 1)))
     parser.add_argument("--dry-run", action="store_true")
@@ -204,8 +340,10 @@ def main() -> None:
             sync_android(dest, dry_run=args.dry_run, jobs=args.jobs)
         if args.family in ("linux", "all"):
             sync_linux(dest, dry_run=args.dry_run)
-        if args.family in ("darwin-apple-oss", "all"):
+        if args.family in ("darwin-apple-oss", "darwin", "all"):
             sync_darwin_apple_oss(dest, dry_run=args.dry_run)
+        if args.family in ("darwin-compat", "darwin", "all"):
+            sync_darwin_compatibility(dest, dry_run=args.dry_run)
     except (OSError, subprocess.CalledProcessError, SyncError) as exc:
         print(f"RUNTIME_SOURCE_SYNC = FAIL: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
