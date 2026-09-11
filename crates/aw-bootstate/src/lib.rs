@@ -223,7 +223,10 @@ mod tests {
     use super::*;
     use aw_generation::{
         GenerationPlan, REQUIRED_BOOT_COMPONENTS, REQUIRED_SUCCESS_HEALTH_CHECKS,
-        RuntimeHealthReport,
+        RuntimeHealthCheck, RuntimeHealthReport,
+    };
+    use aw_recovery_contract::{
+        AccessibleRecoveryReady, RecoveryCapability, RecoveryProbeReport,
     };
 
     fn object(seed: u8) -> ObjectId {
@@ -245,6 +248,21 @@ mod tests {
         .unwrap()
     }
 
+    fn recovery_ready() -> AccessibleRecoveryReady {
+        let mut report = RecoveryProbeReport::new();
+        for capability in [
+            RecoveryCapability::KeyboardInput,
+            RecoveryCapability::StructuredDiagnostics,
+            RecoveryCapability::SpeechOutput,
+            RecoveryCapability::RollbackSelection,
+            RecoveryCapability::SignedReinstall,
+            RecoveryCapability::DiagnosticExport,
+        ] {
+            report.mark_passed(capability);
+        }
+        report.accessible_ready().unwrap()
+    }
+
     fn healthy_generation(generation: u64, rollback_index: u64) -> SuccessfulGeneration {
         let mut plan = GenerationPlan::<8>::new(generation, rollback_index).unwrap();
         for (index, kind) in REQUIRED_BOOT_COMPONENTS.into_iter().enumerate() {
@@ -253,7 +271,11 @@ mod tests {
         let candidate = plan.boot_candidate(rollback_index).unwrap();
         let mut health = RuntimeHealthReport::new();
         for check in REQUIRED_SUCCESS_HEALTH_CHECKS {
-            health.mark_passed(check);
+            if check == RuntimeHealthCheck::AccessibleRecovery {
+                health.mark_accessible_recovery(recovery_ready());
+            } else {
+                health.mark_passed(check).unwrap();
+            }
         }
         candidate.successful_generation(health).unwrap()
     }
