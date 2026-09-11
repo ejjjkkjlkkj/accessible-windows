@@ -97,7 +97,10 @@ mod tests {
             for index in 0..builder.table_count() {
                 let (frame, table) = builder.table_image(index).unwrap();
                 assert_eq!(frame, builder.table_frame(index).unwrap());
-                assert!(core::ptr::eq(table, builder.table_for_frame(frame).unwrap()));
+                assert!(core::ptr::eq(
+                    table,
+                    builder.table_for_frame(frame).unwrap()
+                ));
             }
             assert!(builder.table_image(builder.table_count()).is_none());
         }
