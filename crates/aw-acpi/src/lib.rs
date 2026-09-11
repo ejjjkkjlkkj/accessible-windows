@@ -114,7 +114,9 @@ impl Iterator for McfgAllocations<'_> {
     type Item = McfgAllocation;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.allocations.next().map(|entry| parse_mcfg_allocation(entry))
+        self.allocations
+            .next()
+            .map(|entry| parse_mcfg_allocation(entry))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
