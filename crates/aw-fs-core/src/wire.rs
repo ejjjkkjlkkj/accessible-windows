@@ -1,6 +1,4 @@
-use super::{
-    AWFS_FORMAT_VERSION, CheckpointRecord, Digest, RootPointer, VolumeId, VolumeMode,
-};
+use super::{AWFS_FORMAT_VERSION, CheckpointRecord, Digest, RootPointer, VolumeId, VolumeMode};
 
 pub const CHECKPOINT_PAYLOAD_BYTES: usize = 128;
 const CHECKPOINT_MAGIC: [u8; 8] = *b"AWFSCP01";
@@ -58,9 +56,7 @@ pub fn encode_checkpoint_payload(record: CheckpointRecord) -> [u8; CHECKPOINT_PA
 /// does **not** prove authenticity, freshness, or that referenced blocks hash to the encoded
 /// digests. Callers must authenticate the envelope and verify the root graph before exposing a
 /// returned record to `select_checkpoint`.
-pub fn decode_checkpoint_payload(
-    input: &[u8],
-) -> Result<CheckpointRecord, CheckpointDecodeError> {
+pub fn decode_checkpoint_payload(input: &[u8]) -> Result<CheckpointRecord, CheckpointDecodeError> {
     if input.len() != CHECKPOINT_PAYLOAD_BYTES {
         return Err(CheckpointDecodeError::InvalidLength);
     }
@@ -80,10 +76,11 @@ pub fn decode_checkpoint_payload(
     };
     let previous_flag = input[13];
     if !matches!(previous_flag, PREVIOUS_ROOT_ABSENT | PREVIOUS_ROOT_PRESENT) {
-        return Err(CheckpointDecodeError::InvalidPreviousRootFlag(previous_flag));
+        return Err(CheckpointDecodeError::InvalidPreviousRootFlag(
+            previous_flag,
+        ));
     }
-    if input[14..16].iter().any(|byte| *byte != 0)
-        || input[120..128].iter().any(|byte| *byte != 0)
+    if input[14..16].iter().any(|byte| *byte != 0) || input[120..128].iter().any(|byte| *byte != 0)
     {
         return Err(CheckpointDecodeError::NonCanonicalReservedBytes);
     }
@@ -91,16 +88,12 @@ pub fn decode_checkpoint_payload(
     let sequence = read_u64(input, 16);
     let mut volume_bytes = [0_u8; 16];
     volume_bytes.copy_from_slice(&input[24..40]);
-    let volume_id =
-        VolumeId::new(volume_bytes).ok_or(CheckpointDecodeError::InvalidVolumeId)?;
+    let volume_id = VolumeId::new(volume_bytes).ok_or(CheckpointDecodeError::InvalidVolumeId)?;
 
     let root = decode_root(input, 40, 48).ok_or(CheckpointDecodeError::InvalidRoot)?;
 
     let previous_root = if previous_flag == PREVIOUS_ROOT_PRESENT {
-        Some(
-            decode_root(input, 80, 88)
-                .ok_or(CheckpointDecodeError::InvalidPreviousRoot)?,
-        )
+        Some(decode_root(input, 80, 88).ok_or(CheckpointDecodeError::InvalidPreviousRoot)?)
     } else {
         if input[80..120].iter().any(|byte| *byte != 0) {
             return Err(CheckpointDecodeError::NonCanonicalReservedBytes);
