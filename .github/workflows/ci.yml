@@ -39,7 +39,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-x64-${{ runner.os }}-${{ hashFiles('**/Cargo.toml', 'rust-toolchain.toml') }}
+          key: cargo-x64-${{ runner.os }}-${{ hashFiles('**/Cargo.toml', '**/Cargo.lock', 'rust-toolchain.toml') }}
 
       - name: Assert x64 runner
         shell: bash
@@ -61,17 +61,17 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Check
-        run: cargo check --workspace --all-targets
+        run: cargo check --locked --workspace --all-targets
 
       - name: Test
-        run: cargo test --workspace --all-targets
+        run: cargo test --locked --workspace --all-targets
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Documentation
         shell: bash
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps
 
   uefi:
     name: UEFI + native x86-64 kernel
@@ -105,7 +105,7 @@ jobs:
             ~/.cargo/git/db
             boot/uefi/target
             kernel/x86_64/target
-          key: baremetal-x64-${{ runner.os }}-${{ hashFiles('boot/uefi/Cargo.toml', 'kernel/x86_64/Cargo.toml', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
+          key: baremetal-x64-${{ runner.os }}-${{ hashFiles('boot/uefi/Cargo.toml', 'boot/uefi/Cargo.lock', 'kernel/x86_64/Cargo.toml', 'kernel/x86_64/Cargo.lock', 'crates/**/Cargo.toml', 'rust-toolchain.toml') }}
 
       - name: Install Rust bare-metal targets
         shell: bash
@@ -120,7 +120,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --manifest-path kernel/x86_64/Cargo.toml --target x86_64-unknown-none --release
+          cargo build --locked --manifest-path kernel/x86_64/Cargo.toml --target x86_64-unknown-none --release
           KERNEL_ELF="kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64"
           KERNEL_BIN="${KERNEL_ELF}.bin"
 
@@ -152,7 +152,7 @@ jobs:
           echo "AW_NATIVE_KERNEL_BUILD_OK elf=$KERNEL_ELF bin=$KERNEL_BIN bytes=$(stat -c%s "$KERNEL_BIN") start_vma=0x$START_ADDRESS relocations=none"
 
       - name: Build UEFI executable
-        run: cargo build --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
+        run: cargo build --locked --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
 
       - name: Install image and emulator tools
         run: |
