@@ -1,13 +1,16 @@
 #![no_main]
 #![no_std]
 
+extern crate alloc;
+
+use alloc::vec;
 use aw_acpi::{RsdpError, RsdpInfo};
 use aw_kernel_core::{FramebufferHandoff, HandoffPixelFormat, KernelHandoff};
 use uefi::boot::{self, AllocateType};
-use uefi::fs::FileSystem;
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
 use uefi::prelude::*;
 use uefi::proto::console::gop::{GraphicsOutput, PixelFormat as UefiPixelFormat};
+use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::cfg::ConfigTableEntry;
 use uefi::{cstr16, system, Status};
@@ -42,7 +45,7 @@ fn validate_firmware_rsdp(address: usize, table_revision: u8) -> Result<RsdpInfo
 }
 
 fn load_native_kernel() -> Result<usize, Status> {
-    let file_system = match boot::get_image_file_system(boot::image_handle()) {
+    let mut file_system = match boot::get_image_file_system(boot::image_handle()) {
         Ok(file_system) => {
             log::info!("AW_KERNEL_FS_OK source=image_handle");
             file_system
@@ -61,14 +64,69 @@ fn load_native_kernel() -> Result<usize, Status> {
         }
     };
 
-    let mut file_system = FileSystem::new(file_system);
-    let kernel_image = file_system
-        .read(cstr16!(r"\KERNEL.BIN"))
-        .map_err(|_| Status::NOT_FOUND)?;
+    let mut root = file_system.open_volume().map_err(|error| {
+        log::error!("AW_KERNEL_VOLUME_FAIL status={:?}", error.status());
+        error.status()
+    })?;
 
-    if kernel_image.is_empty() {
+    loop {
+        match root.read_entry_boxed() {
+            Ok(Some(entry)) => log::info!(
+                "AW_ESP_ENTRY name={:?} size={} directory={}",
+                entry.file_name(),
+                entry.file_size(),
+                entry.is_directory()
+            ),
+            Ok(None) => break,
+            Err(error) => {
+                log::warn!("AW_ESP_ENUM_FAIL status={:?}", error.status());
+                break;
+            }
+        }
+    }
+
+    root.reset_entry_readout().map_err(|error| error.status())?;
+    let kernel_handle = root
+        .open(cstr16!("KERNEL.BIN"), FileMode::Read, FileAttribute::empty())
+        .map_err(|error| {
+            log::error!("AW_KERNEL_OPEN_FAIL status={:?}", error.status());
+            error.status()
+        })?;
+    let mut kernel_file = kernel_handle.into_regular_file().ok_or(Status::LOAD_ERROR)?;
+    let kernel_info = kernel_file.get_boxed_info::<FileInfo>().map_err(|error| {
+        log::error!("AW_KERNEL_INFO_FAIL status={:?}", error.status());
+        error.status()
+    })?;
+    let kernel_size = usize::try_from(kernel_info.file_size()).map_err(|_| Status::BAD_BUFFER_SIZE)?;
+    drop(kernel_info);
+
+    if kernel_size == 0 {
         return Err(Status::LOAD_ERROR);
     }
+
+    let mut kernel_image = vec![0_u8; kernel_size];
+    let mut offset = 0_usize;
+    while offset < kernel_image.len() {
+        let read = kernel_file.read(&mut kernel_image[offset..]).map_err(|error| {
+            log::error!("AW_KERNEL_READ_FAIL status={:?}", error.status());
+            error.status()
+        })?;
+        if read == 0 {
+            break;
+        }
+        offset += read;
+    }
+
+    if offset != kernel_image.len() {
+        log::error!(
+            "AW_KERNEL_READ_SHORT expected={} actual={}",
+            kernel_image.len(),
+            offset
+        );
+        return Err(Status::LOAD_ERROR);
+    }
+
+    log::info!("AW_KERNEL_FILE_READ_OK bytes={}", kernel_image.len());
 
     let pages = kernel_image.len().div_ceil(UEFI_PAGE_SIZE);
     let allocation = boot::allocate_pages(
