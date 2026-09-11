@@ -38,6 +38,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aw-guest-vm"
+version = "0.1.0"
+dependencies = [
+ "aw-runtime-sources",
+]
+
+[[package]]
 name = "aw-kernel-contract"
 version = "0.1.0"
 
