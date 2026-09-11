@@ -1,9 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use aw_kernel_core::{
-    MemoryDescriptorHandoff, UEFI_MEMORY_TYPE_CONVENTIONAL, UEFI_PAGE_SIZE,
-};
+use aw_kernel_core::{MemoryDescriptorHandoff, UEFI_MEMORY_TYPE_CONVENTIONAL, UEFI_PAGE_SIZE};
 
 pub const DEFAULT_BOOTSTRAP_MIN_ADDRESS: u64 = 0x10_0000;
 
@@ -143,11 +141,26 @@ mod tests {
         ];
         let mut allocator = BootstrapPageAllocator::new(&map).unwrap();
 
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x10_0000);
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x10_1000);
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x20_0000);
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x40_0000);
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x40_1000);
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x10_0000
+        );
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x10_1000
+        );
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x20_0000
+        );
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x40_0000
+        );
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x40_1000
+        );
         assert_eq!(allocator.allocate_page(), None);
         assert_eq!(allocator.allocated_pages(), 5);
     }
@@ -160,7 +173,10 @@ mod tests {
         ];
         let mut allocator = BootstrapPageAllocator::new(&map).unwrap();
 
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x10_0000);
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x10_0000
+        );
         assert_eq!(allocator.allocate_page(), None);
     }
 
@@ -169,8 +185,14 @@ mod tests {
         let map = [descriptor(UEFI_MEMORY_TYPE_CONVENTIONAL, 0x80_0000, 4)];
         let mut allocator = BootstrapPageAllocator::with_minimum_address(&map, 0x80_2000).unwrap();
 
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x80_2000);
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x80_3000);
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x80_2000
+        );
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x80_3000
+        );
         assert_eq!(allocator.allocate_page(), None);
     }
 
@@ -183,7 +205,10 @@ mod tests {
         ];
         let mut allocator = BootstrapPageAllocator::new(&map).unwrap();
 
-        assert_eq!(allocator.allocate_page().unwrap().start_address(), 0x30_0000);
+        assert_eq!(
+            allocator.allocate_page().unwrap().start_address(),
+            0x30_0000
+        );
         assert_eq!(allocator.allocate_page(), None);
     }
 
