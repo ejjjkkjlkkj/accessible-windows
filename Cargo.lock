@@ -18,6 +18,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aw-fs-core"
+version = "0.1.0"
+
+[[package]]
 name = "aw-generation"
 version = "0.1.0"
 
