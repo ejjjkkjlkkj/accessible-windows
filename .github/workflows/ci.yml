@@ -40,19 +40,30 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   uefi:
-    name: UEFI x86-64
+    name: UEFI + native x86-64 kernel
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust UEFI target
+      - name: Install Rust bare-metal targets
         shell: bash
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-          rustup target add x86_64-unknown-uefi
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+
+      - name: Build native x86-64 kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path kernel/x86_64/Cargo.toml --target x86_64-unknown-none --release
+          KERNEL_ELF="kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64"
+          KERNEL_BIN="${KERNEL_ELF}.bin"
+          objcopy -O binary "$KERNEL_ELF" "$KERNEL_BIN"
+          test -s "$KERNEL_BIN"
+          echo "AW_NATIVE_KERNEL_BUILD_OK elf=$KERNEL_ELF bin=$KERNEL_BIN bytes=$(stat -c%s "$KERNEL_BIN")"
 
       - name: Build UEFI executable
         run: cargo build --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
@@ -65,7 +76,7 @@ jobs:
       - name: Build GPT/ESP boot disk image
         run: ./scripts/build-uefi-disk.sh
 
-      - name: UEFI to kernel-stage smoke test
+      - name: Real GPT disk boot smoke test
         shell: bash
         run: |
           set -euo pipefail
@@ -101,6 +112,7 @@ jobs:
           echo "QEMU_STATUS=$QEMU_STATUS"
           cat uefi-debug.log || true
           grep -F "AW_BOOT_OK stage=uefi_init arch=x86_64" uefi-debug.log
+          grep -F "AW_NATIVE_KERNEL_LOAD_OK" uefi-debug.log
           grep -F "AW_MEMORY_MAP_OK" uefi-debug.log
           grep -F "AW_ACPI_OK" uefi-debug.log
           grep -F "AW_ACPI_VALIDATE_OK" uefi-debug.log
@@ -108,7 +120,10 @@ jobs:
           grep -F "AW_FRAMEBUFFER_OK" uefi-debug.log
           grep -F "AW_EXIT_BOOT_SERVICES_OK" uefi-debug.log
           grep -F "AW_KERNEL_HANDOFF_OK" uefi-debug.log
-          grep -F "AW_KERNEL_STAGE_OK" uefi-debug.log
+          grep -F "AW_NATIVE_KERNEL_TRANSFER" uefi-debug.log
+          grep -F "AW_NATIVE_KERNEL_ENTRY_OK" uefi-debug.log
+          grep -F "AW_NATIVE_FRAMEBUFFER_WRITE_OK" uefi-debug.log
+          grep -F "AW_NATIVE_KERNEL_IDLE" uefi-debug.log
 
       - name: Upload boot artifacts
         uses: actions/upload-artifact@v4
@@ -116,5 +131,7 @@ jobs:
           name: accessible-windows-uefi-x86_64
           path: |
             boot/uefi/target/x86_64-unknown-uefi/release/aw-uefi-boot.efi
+            kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64
+            kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64.bin
             build/accessible-windows-uefi-x86_64.img
           if-no-files-found: error
