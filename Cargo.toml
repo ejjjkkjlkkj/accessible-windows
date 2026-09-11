@@ -10,6 +10,7 @@ members = [
     "crates/aw-vmm-plan",
     "crates/aw-x86-paging",
     "crates/aw-x86-platform",
+    "crates/aw-x86-vmm-plan",
 ]
 exclude = ["boot/uefi", "kernel/x86_64", "fuzz"]
 

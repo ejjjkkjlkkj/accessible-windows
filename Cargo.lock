@@ -48,3 +48,12 @@ dependencies = [
 [[package]]
 name = "aw-x86-platform"
 version = "0.1.0"
+
+[[package]]
+name = "aw-x86-vmm-plan"
+version = "0.1.0"
+dependencies = [
+ "aw-kernel-core",
+ "aw-vmm-plan",
+ "aw-x86-paging",
+]

@@ -1,0 +1,283 @@
+#![no_std]
+#![forbid(unsafe_code)]
+
+use aw_vmm_plan::{PhysicalPreservationKind, PreservationPlan};
+use aw_x86_paging::{PAGE_SIZE, PageTableFlags, PhysicalFrame, VirtualPage};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MappingHardening {
+    Final,
+    KernelSectionSplitRequired,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IdentityMapping {
+    kind: PhysicalPreservationKind,
+    virtual_page: VirtualPage,
+    physical_frame: PhysicalFrame,
+    page_count: u64,
+    flags: PageTableFlags,
+    hardening: MappingHardening,
+}
+
+impl IdentityMapping {
+    #[must_use]
+    pub const fn kind(self) -> PhysicalPreservationKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub const fn virtual_page(self) -> VirtualPage {
+        self.virtual_page
+    }
+
+    #[must_use]
+    pub const fn physical_frame(self) -> PhysicalFrame {
+        self.physical_frame
+    }
+
+    #[must_use]
+    pub const fn page_count(self) -> u64 {
+        self.page_count
+    }
+
+    #[must_use]
+    pub const fn flags(self) -> PageTableFlags {
+        self.flags
+    }
+
+    #[must_use]
+    pub const fn hardening(self) -> MappingHardening {
+        self.hardening
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum X86MappingPlanError {
+    Capacity,
+    InvalidPhysicalAddress,
+    NonCanonicalIdentityMapping,
+    ArithmeticOverflow,
+}
+
+/// x86-64 identity mappings required before a future first CR3 switch.
+///
+/// This layer only translates already validated physical preservation ranges into paging policy.
+/// It neither constructs active page tables nor changes CR3. Kernel code/data are intentionally
+/// marked as requiring a later section split because the current handoff describes one allocation
+/// and cannot yet prove W^X permissions per ELF section.
+pub struct X86IdentityMappingPlan<const MAPPINGS: usize> {
+    mappings: [Option<IdentityMapping>; MAPPINGS],
+    len: usize,
+}
+
+impl<const MAPPINGS: usize> X86IdentityMappingPlan<MAPPINGS> {
+    pub fn from_preservation<const RANGES: usize>(
+        preservation: &PreservationPlan<RANGES>,
+        physical_address_bits: u8,
+    ) -> Result<Self, X86MappingPlanError> {
+        let mut result = Self {
+            mappings: [None; MAPPINGS],
+            len: 0,
+        };
+
+        let mut index = 0;
+        while index < preservation.len() {
+            let item = preservation
+                .get(index)
+                .ok_or(X86MappingPlanError::Capacity)?;
+            let range = item.range();
+            let byte_len = range
+                .end_address_exclusive()
+                .checked_sub(range.start_address())
+                .ok_or(X86MappingPlanError::ArithmeticOverflow)?;
+            let page_count = byte_len / PAGE_SIZE;
+            if page_count == 0 || !byte_len.is_multiple_of(PAGE_SIZE) {
+                return Err(X86MappingPlanError::ArithmeticOverflow);
+            }
+
+            let virtual_page = VirtualPage::new(range.start_address())
+                .ok_or(X86MappingPlanError::NonCanonicalIdentityMapping)?;
+            let physical_frame = PhysicalFrame::new(range.start_address(), physical_address_bits)
+                .ok_or(X86MappingPlanError::InvalidPhysicalAddress)?;
+            let last_start = range
+                .end_address_exclusive()
+                .checked_sub(PAGE_SIZE)
+                .ok_or(X86MappingPlanError::ArithmeticOverflow)?;
+            PhysicalFrame::new(last_start, physical_address_bits)
+                .ok_or(X86MappingPlanError::InvalidPhysicalAddress)?;
+
+            let (flags, hardening) = match item.kind() {
+                PhysicalPreservationKind::KernelImage => (
+                    PageTableFlags::WRITABLE,
+                    MappingHardening::KernelSectionSplitRequired,
+                ),
+                PhysicalPreservationKind::AcpiRsdp => {
+                    (PageTableFlags::NO_EXECUTE, MappingHardening::Final)
+                }
+                PhysicalPreservationKind::Framebuffer | PhysicalPreservationKind::PcieEcam { .. } => (
+                    PageTableFlags::WRITABLE
+                        .union(PageTableFlags::NO_EXECUTE)
+                        .union(PageTableFlags::CACHE_DISABLE),
+                    MappingHardening::Final,
+                ),
+            };
+
+            result.push(IdentityMapping {
+                kind: item.kind(),
+                virtual_page,
+                physical_frame,
+                page_count,
+                flags,
+                hardening,
+            })?;
+            index += 1;
+        }
+
+        Ok(result)
+    }
+
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<IdentityMapping> {
+        if index >= self.len {
+            return None;
+        }
+        self.mappings[index]
+    }
+
+    fn push(&mut self, mapping: IdentityMapping) -> Result<(), X86MappingPlanError> {
+        if self.len >= MAPPINGS {
+            return Err(X86MappingPlanError::Capacity);
+        }
+        self.mappings[self.len] = Some(mapping);
+        self.len += 1;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::mem::size_of;
+
+    use super::*;
+    use aw_kernel_core::{
+        FramebufferHandoff, HandoffPixelFormat, KernelHandoff, KernelImageHandoff,
+        MAX_PCIE_ECAM_REGIONS, MemoryDescriptorHandoff, MemoryMapHandoff, PciEcamHandoff,
+    };
+
+    fn handoff(ecam_base: u64) -> KernelHandoff {
+        let mut ecam = [PciEcamHandoff::NONE; MAX_PCIE_ECAM_REGIONS];
+        ecam[0] = PciEcamHandoff {
+            base_address: ecam_base,
+            segment_group: 0,
+            start_bus: 0,
+            end_bus: 1,
+            reserved: 0,
+        };
+
+        KernelHandoff::new(
+            0x7f00_0123,
+            KernelImageHandoff {
+                physical_address: 0x40_0000,
+                image_byte_len: 7000,
+                allocation_byte_len: 8192,
+            },
+            MemoryMapHandoff {
+                buffer_address: 0x1000_0000,
+                byte_len: size_of::<MemoryDescriptorHandoff>() as u64,
+                entry_count: 1,
+                descriptor_size: size_of::<MemoryDescriptorHandoff>() as u32,
+            },
+            Some(FramebufferHandoff {
+                physical_address: 0xe100_0123,
+                byte_len: 0x1fff,
+                width: 800,
+                height: 600,
+                stride_pixels: 800,
+                pixel_format: HandoffPixelFormat::Bgr,
+            }),
+            ecam,
+            1,
+        )
+    }
+
+    #[test]
+    fn translates_preservation_kinds_into_conservative_x86_flags() {
+        let preservation = PreservationPlan::<4>::from_handoff(&handoff(0xe000_0000)).unwrap();
+        let plan = X86IdentityMappingPlan::<4>::from_preservation(&preservation, 52).unwrap();
+
+        assert_eq!(plan.len(), 4);
+        assert!(!plan.is_empty());
+
+        let kernel = plan.get(0).unwrap();
+        assert_eq!(kernel.kind(), PhysicalPreservationKind::KernelImage);
+        assert_eq!(kernel.page_count(), 2);
+        assert!(kernel.flags().contains(PageTableFlags::WRITABLE));
+        assert!(!kernel.flags().contains(PageTableFlags::NO_EXECUTE));
+        assert_eq!(
+            kernel.hardening(),
+            MappingHardening::KernelSectionSplitRequired
+        );
+
+        let acpi = plan.get(1).unwrap();
+        assert_eq!(acpi.kind(), PhysicalPreservationKind::AcpiRsdp);
+        assert!(acpi.flags().contains(PageTableFlags::NO_EXECUTE));
+        assert!(!acpi.flags().contains(PageTableFlags::WRITABLE));
+        assert_eq!(acpi.hardening(), MappingHardening::Final);
+
+        let framebuffer = plan.get(2).unwrap();
+        assert_eq!(framebuffer.kind(), PhysicalPreservationKind::Framebuffer);
+        assert!(framebuffer.flags().contains(PageTableFlags::WRITABLE));
+        assert!(framebuffer.flags().contains(PageTableFlags::NO_EXECUTE));
+        assert!(framebuffer.flags().contains(PageTableFlags::CACHE_DISABLE));
+
+        let ecam = plan.get(3).unwrap();
+        assert!(matches!(
+            ecam.kind(),
+            PhysicalPreservationKind::PcieEcam { index: 0 }
+        ));
+        assert_eq!(ecam.page_count(), 512);
+        assert!(ecam.flags().contains(PageTableFlags::WRITABLE));
+        assert!(ecam.flags().contains(PageTableFlags::NO_EXECUTE));
+        assert!(ecam.flags().contains(PageTableFlags::CACHE_DISABLE));
+        assert_eq!(plan.get(4), None);
+    }
+
+    #[test]
+    fn rejects_identity_mapping_above_canonical_low_half() {
+        let preservation =
+            PreservationPlan::<4>::from_handoff(&handoff(0x0000_8000_0000_0000)).unwrap();
+        assert!(matches!(
+            X86IdentityMappingPlan::<4>::from_preservation(&preservation, 52),
+            Err(X86MappingPlanError::NonCanonicalIdentityMapping)
+        ));
+    }
+
+    #[test]
+    fn rejects_ranges_outside_reported_physical_width() {
+        let preservation = PreservationPlan::<4>::from_handoff(&handoff(0xe000_0000)).unwrap();
+        assert!(matches!(
+            X86IdentityMappingPlan::<4>::from_preservation(&preservation, 31),
+            Err(X86MappingPlanError::InvalidPhysicalAddress)
+        ));
+    }
+
+    #[test]
+    fn rejects_insufficient_mapping_capacity() {
+        let preservation = PreservationPlan::<4>::from_handoff(&handoff(0xe000_0000)).unwrap();
+        assert!(matches!(
+            X86IdentityMappingPlan::<3>::from_preservation(&preservation, 52),
+            Err(X86MappingPlanError::Capacity)
+        ));
+    }
+}
