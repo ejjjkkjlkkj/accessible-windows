@@ -1,6 +1,8 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod legacy;
+
 use aw_macho_fixups::ChainedFixups;
 
 const DYLD_CHAINED_IMPORT: u32 = 1;
