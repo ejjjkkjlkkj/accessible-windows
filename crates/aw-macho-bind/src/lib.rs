@@ -99,12 +99,12 @@ fn validated_layout(fixups: ChainedFixups<'_>) -> Result<(usize, usize, usize), 
     Ok((imports_base, symbols_base, size))
 }
 
-fn symbol_name<'a>(
-    payload: &'a [u8],
+fn symbol_name(
+    payload: &[u8],
     symbols_base: usize,
     index: u32,
     name_offset: u32,
-) -> Result<&'a [u8], BindError> {
+) -> Result<&[u8], BindError> {
     let start = symbols_base
         .checked_add(name_offset as usize)
         .ok_or(BindError::IntegerOverflow)?;
