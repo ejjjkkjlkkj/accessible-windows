@@ -288,7 +288,9 @@ fn read_u64_le(bytes: &[u8], offset: usize) -> Result<u64, FixupError> {
 
 fn selected_image(bytes: &[u8], slice: MachSlice) -> Result<&[u8], FixupError> {
     let end = checked_end(slice.offset, slice.size)?;
-    bytes.get(slice.offset..end).ok_or(FixupError::SliceOutOfBounds)
+    bytes
+        .get(slice.offset..end)
+        .ok_or(FixupError::SliceOutOfBounds)
 }
 
 fn validate_range(
@@ -327,8 +329,18 @@ fn parse_dyld_info(
 
     Ok(DyldInfo {
         command_index: index,
-        rebase: validate_range(image_len, index, read_u32_le(bytes, 8)?, read_u32_le(bytes, 12)?)?,
-        bind: validate_range(image_len, index, read_u32_le(bytes, 16)?, read_u32_le(bytes, 20)?)?,
+        rebase: validate_range(
+            image_len,
+            index,
+            read_u32_le(bytes, 8)?,
+            read_u32_le(bytes, 12)?,
+        )?,
+        bind: validate_range(
+            image_len,
+            index,
+            read_u32_le(bytes, 16)?,
+            read_u32_le(bytes, 20)?,
+        )?,
         weak_bind: validate_range(
             image_len,
             index,
@@ -366,7 +378,12 @@ fn parse_linkedit_data(
     }
     Ok(LinkeditData {
         command_index: index,
-        range: validate_range(image_len, index, read_u32_le(bytes, 8)?, read_u32_le(bytes, 12)?)?,
+        range: validate_range(
+            image_len,
+            index,
+            read_u32_le(bytes, 8)?,
+            read_u32_le(bytes, 12)?,
+        )?,
     })
 }
 
@@ -456,11 +473,13 @@ pub fn linkedit_payload<'a>(
     let image = selected_image(bytes, slice)?;
     let start = data.range.offset as usize;
     let end = checked_end(start, data.range.size as usize)?;
-    image.get(start..end).ok_or(FixupError::LinkeditRangeOutOfBounds {
-        index: data.command_index,
-        offset: data.range.offset,
-        size: data.range.size,
-    })
+    image
+        .get(start..end)
+        .ok_or(FixupError::LinkeditRangeOutOfBounds {
+            index: data.command_index,
+            offset: data.range.offset,
+            size: data.range.size,
+        })
 }
 
 pub fn dyld_payload<'a>(
@@ -472,11 +491,13 @@ pub fn dyld_payload<'a>(
     let image = selected_image(bytes, slice)?;
     let start = range.offset as usize;
     let end = checked_end(start, range.size as usize)?;
-    image.get(start..end).ok_or(FixupError::LinkeditRangeOutOfBounds {
-        index: command_index,
-        offset: range.offset,
-        size: range.size,
-    })
+    image
+        .get(start..end)
+        .ok_or(FixupError::LinkeditRangeOutOfBounds {
+            index: command_index,
+            offset: range.offset,
+            size: range.size,
+        })
 }
 
 fn import_entry_size(format: u32) -> Result<usize, FixupError> {
@@ -503,7 +524,9 @@ pub fn parse_chained_fixups<'a>(
 ) -> Result<ChainedFixups<'a>, FixupError> {
     let payload = linkedit_payload(bytes, slice, data)?;
     if payload.len() < CHAINED_FIXUPS_HEADER_SIZE {
-        return Err(FixupError::ChainedHeaderTooShort { size: payload.len() });
+        return Err(FixupError::ChainedHeaderTooShort {
+            size: payload.len(),
+        });
     }
 
     let header = ChainedFixupsHeader {
@@ -631,7 +654,8 @@ mod tests {
 
     #[test]
     fn parses_legacy_dyld_info_and_modern_linkedit_commands() {
-        let payload_start = MACH_HEADER_64_SIZE + DYLD_INFO_COMMAND_SIZE + 2 * LINKEDIT_DATA_COMMAND_SIZE;
+        let payload_start =
+            MACH_HEADER_64_SIZE + DYLD_INFO_COMMAND_SIZE + 2 * LINKEDIT_DATA_COMMAND_SIZE;
         let mut dyld = command(LC_DYLD_INFO_ONLY, DYLD_INFO_COMMAND_SIZE);
         set_u32(&mut dyld, 8, payload_start as u32);
         set_u32(&mut dyld, 12, 4);
