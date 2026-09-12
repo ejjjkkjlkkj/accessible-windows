@@ -15,24 +15,11 @@ pub enum BindError {
     UnsupportedSymbolsFormat(u32),
     ImportsTableOutOfBounds,
     ImportsOverlapSymbols,
-    ImportIndexOutOfBounds {
-        index: u32,
-        count: u32,
-    },
-    ReservedBitsNonZero {
-        index: u32,
-        bits: u16,
-    },
-    SymbolOffsetOutOfBounds {
-        index: u32,
-        offset: u32,
-    },
-    UnterminatedSymbol {
-        index: u32,
-    },
-    EmptySymbol {
-        index: u32,
-    },
+    ImportIndexOutOfBounds { index: u32, count: u32 },
+    ReservedBitsNonZero { index: u32, bits: u16 },
+    SymbolOffsetOutOfBounds { index: u32, offset: u32 },
+    UnterminatedSymbol { index: u32 },
+    EmptySymbol { index: u32 },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,7 +38,7 @@ pub struct ChainedImport<'a> {
     pub addend: ImportAddend,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ChainedImportIter<'a> {
     fixups: ChainedFixups<'a>,
     next_index: u32,
@@ -64,13 +51,17 @@ fn checked_end(offset: usize, size: usize) -> Result<usize, BindError> {
 
 fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, BindError> {
     let end = checked_end(offset, 4)?;
-    let data = bytes.get(offset..end).ok_or(BindError::ImportsTableOutOfBounds)?;
+    let data = bytes
+        .get(offset..end)
+        .ok_or(BindError::ImportsTableOutOfBounds)?;
     Ok(u32::from_le_bytes([data[0], data[1], data[2], data[3]]))
 }
 
 fn read_u64_le(bytes: &[u8], offset: usize) -> Result<u64, BindError> {
     let end = checked_end(offset, 8)?;
-    let data = bytes.get(offset..end).ok_or(BindError::ImportsTableOutOfBounds)?;
+    let data = bytes
+        .get(offset..end)
+        .ok_or(BindError::ImportsTableOutOfBounds)?;
     Ok(u64::from_le_bytes([
         data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
     ]))
@@ -194,9 +185,7 @@ pub fn chained_import<'a>(
     })
 }
 
-pub fn chained_imports(
-    fixups: ChainedFixups<'_>,
-) -> Result<ChainedImportIter<'_>, BindError> {
+pub fn chained_imports(fixups: ChainedFixups<'_>) -> Result<ChainedImportIter<'_>, BindError> {
     let _ = validated_layout(fixups)?;
     Ok(ChainedImportIter {
         fixups,
@@ -246,7 +235,12 @@ mod tests {
         bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
     }
 
-    fn image_with_fixups(format: u32, symbols_format: u32, entries: &[u8], symbols: &[u8]) -> Vec<u8> {
+    fn image_with_fixups(
+        format: u32,
+        symbols_format: u32,
+        entries: &[u8],
+        symbols: &[u8],
+    ) -> Vec<u8> {
         let starts_offset = FIXUPS_HEADER_SIZE;
         let starts_size = 4usize;
         let imports_offset = starts_offset + starts_size;
@@ -314,12 +308,7 @@ mod tests {
         let mut entry = vec![0u8; 8];
         set_u32(&mut entry, 0, raw);
         set_u32(&mut entry, 4, (-7i32) as u32);
-        let image = image_with_fixups(
-            DYLD_CHAINED_IMPORT_ADDEND,
-            0,
-            &entry,
-            b"skip\0target\0",
-        );
+        let image = image_with_fixups(DYLD_CHAINED_IMPORT_ADDEND, 0, &entry, b"skip\0target\0");
         let import = chained_import(parsed(&image), 0).unwrap();
         assert_eq!(import.lib_ordinal, 2);
         assert_eq!(import.name, b"target");
@@ -332,20 +321,12 @@ mod tests {
         let mut entry = vec![0u8; 16];
         set_u64(&mut entry, 0, raw);
         set_u64(&mut entry, 8, 0x1122_3344_5566_7788);
-        let image = image_with_fixups(
-            DYLD_CHAINED_IMPORT_ADDEND64,
-            0,
-            &entry,
-            b"symbol64\0",
-        );
+        let image = image_with_fixups(DYLD_CHAINED_IMPORT_ADDEND64, 0, &entry, b"symbol64\0");
         let import = chained_import(parsed(&image), 0).unwrap();
         assert_eq!(import.lib_ordinal, -2);
         assert!(import.weak_import);
         assert_eq!(import.name, b"symbol64");
-        assert_eq!(
-            import.addend,
-            ImportAddend::Raw64(0x1122_3344_5566_7788)
-        );
+        assert_eq!(import.addend, ImportAddend::Raw64(0x1122_3344_5566_7788));
     }
 
     #[test]
