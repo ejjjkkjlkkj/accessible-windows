@@ -182,12 +182,12 @@ fn read_symbol<'a>(
     let tail = bytes
         .get(start..)
         .ok_or(LegacyError::UnexpectedEnd { offset: start })?;
-    let length = tail
-        .iter()
-        .position(|byte| *byte == 0)
-        .ok_or(LegacyError::UnterminatedSymbol {
-            offset: opcode_offset,
-        })?;
+    let length =
+        tail.iter()
+            .position(|byte| *byte == 0)
+            .ok_or(LegacyError::UnterminatedSymbol {
+                offset: opcode_offset,
+            })?;
     if length == 0 {
         return Err(LegacyError::EmptySymbol {
             offset: opcode_offset,
@@ -246,9 +246,8 @@ impl Iterator for RebaseOpcodeIter<'_> {
                 .map(|amount| RebaseOpcode::DoRebaseAddAddress { amount }),
             REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB => {
                 match read_uleb(self.bytes, &mut self.cursor) {
-                    Ok(count) => read_uleb(self.bytes, &mut self.cursor).map(|skip| {
-                        RebaseOpcode::DoRebaseUlebTimesSkipping { count, skip }
-                    }),
+                    Ok(count) => read_uleb(self.bytes, &mut self.cursor)
+                        .map(|skip| RebaseOpcode::DoRebaseUlebTimesSkipping { count, skip }),
                     Err(error) => Err(error),
                 }
             }
@@ -281,54 +280,55 @@ impl<'a> Iterator for BindOpcodeIter<'a> {
         let opcode = byte & OPCODE_MASK;
         let immediate = byte & IMMEDIATE_MASK;
 
-        let decoded = match opcode {
-            BIND_OPCODE_DONE => Ok(BindOpcode::Done),
-            BIND_OPCODE_SET_DYLIB_ORDINAL_IMM => Ok(BindOpcode::SetDylibOrdinalImmediate {
-                ordinal: immediate,
-            }),
-            BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB => read_uleb(self.bytes, &mut self.cursor)
-                .map(|ordinal| BindOpcode::SetDylibOrdinalUleb { ordinal }),
-            BIND_OPCODE_SET_DYLIB_SPECIAL_IMM => {
-                let ordinal = if immediate == 0 {
-                    0
-                } else {
-                    (OPCODE_MASK | immediate) as i8
-                };
-                Ok(BindOpcode::SetDylibSpecialImmediate { ordinal })
-            }
-            BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM => {
-                read_symbol(self.bytes, &mut self.cursor, offset).map(|symbol| {
-                    BindOpcode::SetSymbolTrailingFlags {
-                        flags: immediate,
-                        symbol,
-                    }
-                })
-            }
-            BIND_OPCODE_SET_TYPE_IMM => Ok(BindOpcode::SetType { kind: immediate }),
-            BIND_OPCODE_SET_ADDEND_SLEB => read_sleb(self.bytes, &mut self.cursor)
-                .map(|addend| BindOpcode::SetAddend { addend }),
-            BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB => read_uleb(self.bytes, &mut self.cursor)
-                .map(|stream_offset| BindOpcode::SetSegmentAndOffset {
-                    segment: immediate,
-                    offset: stream_offset,
-                }),
-            BIND_OPCODE_ADD_ADDR_ULEB => read_uleb(self.bytes, &mut self.cursor)
-                .map(|amount| BindOpcode::AddAddress { amount }),
-            BIND_OPCODE_DO_BIND => Ok(BindOpcode::DoBind),
-            BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB => read_uleb(self.bytes, &mut self.cursor)
-                .map(|amount| BindOpcode::DoBindAddAddress { amount }),
-            BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED => {
-                Ok(BindOpcode::DoBindAddAddressScaled { scale: immediate })
-            }
-            BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB => {
-                match read_uleb(self.bytes, &mut self.cursor) {
-                    Ok(count) => read_uleb(self.bytes, &mut self.cursor)
-                        .map(|skip| BindOpcode::DoBindUlebTimesSkipping { count, skip }),
-                    Err(error) => Err(error),
+        let decoded =
+            match opcode {
+                BIND_OPCODE_DONE => Ok(BindOpcode::Done),
+                BIND_OPCODE_SET_DYLIB_ORDINAL_IMM => {
+                    Ok(BindOpcode::SetDylibOrdinalImmediate { ordinal: immediate })
                 }
-            }
-            _ => Err(LegacyError::UnknownBindOpcode { offset, opcode }),
-        };
+                BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB => read_uleb(self.bytes, &mut self.cursor)
+                    .map(|ordinal| BindOpcode::SetDylibOrdinalUleb { ordinal }),
+                BIND_OPCODE_SET_DYLIB_SPECIAL_IMM => {
+                    let ordinal = if immediate == 0 {
+                        0
+                    } else {
+                        (OPCODE_MASK | immediate) as i8
+                    };
+                    Ok(BindOpcode::SetDylibSpecialImmediate { ordinal })
+                }
+                BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM => {
+                    read_symbol(self.bytes, &mut self.cursor, offset).map(|symbol| {
+                        BindOpcode::SetSymbolTrailingFlags {
+                            flags: immediate,
+                            symbol,
+                        }
+                    })
+                }
+                BIND_OPCODE_SET_TYPE_IMM => Ok(BindOpcode::SetType { kind: immediate }),
+                BIND_OPCODE_SET_ADDEND_SLEB => read_sleb(self.bytes, &mut self.cursor)
+                    .map(|addend| BindOpcode::SetAddend { addend }),
+                BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB => read_uleb(self.bytes, &mut self.cursor)
+                    .map(|stream_offset| BindOpcode::SetSegmentAndOffset {
+                        segment: immediate,
+                        offset: stream_offset,
+                    }),
+                BIND_OPCODE_ADD_ADDR_ULEB => read_uleb(self.bytes, &mut self.cursor)
+                    .map(|amount| BindOpcode::AddAddress { amount }),
+                BIND_OPCODE_DO_BIND => Ok(BindOpcode::DoBind),
+                BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB => read_uleb(self.bytes, &mut self.cursor)
+                    .map(|amount| BindOpcode::DoBindAddAddress { amount }),
+                BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED => {
+                    Ok(BindOpcode::DoBindAddAddressScaled { scale: immediate })
+                }
+                BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB => {
+                    match read_uleb(self.bytes, &mut self.cursor) {
+                        Ok(count) => read_uleb(self.bytes, &mut self.cursor)
+                            .map(|skip| BindOpcode::DoBindUlebTimesSkipping { count, skip }),
+                        Err(error) => Err(error),
+                    }
+                }
+                _ => Err(LegacyError::UnknownBindOpcode { offset, opcode }),
+            };
 
         if decoded.is_err() {
             self.failed = true;
@@ -413,9 +413,15 @@ mod tests {
         let bytes = [0x11, 0x00, 0x12, 0x00];
         let decoded: Vec<_> = bind_opcodes(&bytes).map(Result::unwrap).collect();
         assert_eq!(decoded.len(), 4);
-        assert_eq!(decoded[0].opcode, BindOpcode::SetDylibOrdinalImmediate { ordinal: 1 });
+        assert_eq!(
+            decoded[0].opcode,
+            BindOpcode::SetDylibOrdinalImmediate { ordinal: 1 }
+        );
         assert_eq!(decoded[1].opcode, BindOpcode::Done);
-        assert_eq!(decoded[2].opcode, BindOpcode::SetDylibOrdinalImmediate { ordinal: 2 });
+        assert_eq!(
+            decoded[2].opcode,
+            BindOpcode::SetDylibOrdinalImmediate { ordinal: 2 }
+        );
         assert_eq!(decoded[3].opcode, BindOpcode::Done);
     }
 
