@@ -76,6 +76,25 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Build UEFI executable
 
+### Verify the prototype on Windows
+
+With PowerShell 7, Rust (including `llvm-tools-preview` and the
+`x86_64-unknown-none` / `x86_64-unknown-uefi` targets), and QEMU installed:
+
+```powershell
+pwsh -NoProfile -File C:\accessible-windows\scripts\verify-windows.ps1
+```
+
+The script locates the repository relative to itself, checks formatting, runs
+workspace checks/tests/Clippy, builds the UEFI loader and native kernel, and boots
+fresh files under QEMU TCG with its bundled EDK2 firmware. Use `-Qemu` to override
+the default `C:\Program Files\qemu\qemu-system-x86_64.exe` path. Every run stores
+its own firmware variables, boot files and debug log under `target/windows-verify`.
+Missing dependencies, failed commands or missing required boot markers fail the
+script. The idle kernel is stopped after 30 seconds (`-BootTimeoutSeconds` overrides
+this). This virtual-FAT smoke test does not validate the raw GPT image, installation,
+physical hardware, or completion of the operating-system roadmap.
+
 ```bash
 rustup target add x86_64-unknown-uefi
 cargo build --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
