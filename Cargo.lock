@@ -58,6 +58,14 @@ name = "aw-macho"
 version = "0.1.0"
 
 [[package]]
+name = "aw-macho-bind"
+version = "0.1.0"
+dependencies = [
+ "aw-macho",
+ "aw-macho-fixups",
+]
+
+[[package]]
 name = "aw-macho-dyld"
 version = "0.1.0"
 dependencies = [

@@ -11,6 +11,7 @@ members = [
     "crates/aw-kernel-contract",
     "crates/aw-kernel-core",
     "crates/aw-macho",
+    "crates/aw-macho-bind",
     "crates/aw-macho-dyld",
     "crates/aw-macho-fixups",
     "crates/aw-macho-loader",
