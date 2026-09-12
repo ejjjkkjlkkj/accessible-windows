@@ -465,11 +465,11 @@ pub fn metadata(bytes: &[u8], slice: MachSlice) -> Result<FixupMetadata, FixupEr
     })
 }
 
-pub fn linkedit_payload<'a>(
-    bytes: &'a [u8],
+pub fn linkedit_payload(
+    bytes: &[u8],
     slice: MachSlice,
     data: LinkeditData,
-) -> Result<&'a [u8], FixupError> {
+) -> Result<&[u8], FixupError> {
     let image = selected_image(bytes, slice)?;
     let start = data.range.offset as usize;
     let end = checked_end(start, data.range.size as usize)?;
@@ -482,12 +482,12 @@ pub fn linkedit_payload<'a>(
         })
 }
 
-pub fn dyld_payload<'a>(
-    bytes: &'a [u8],
+pub fn dyld_payload(
+    bytes: &[u8],
     slice: MachSlice,
     command_index: u32,
     range: LinkeditRange,
-) -> Result<&'a [u8], FixupError> {
+) -> Result<&[u8], FixupError> {
     let image = selected_image(bytes, slice)?;
     let start = range.offset as usize;
     let end = checked_end(start, range.size as usize)?;
