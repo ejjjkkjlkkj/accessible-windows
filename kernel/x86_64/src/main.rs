@@ -23,6 +23,7 @@ mod msi;
 #[cfg(feature = "msi-proof-device")]
 mod msi_proof;
 mod pci_config;
+mod percpu;
 mod pit;
 mod security_baseline;
 mod smp;
@@ -517,6 +518,110 @@ fn prove_memory_protections(map: &virtual_memory::ActiveMap) {
 
     if all_passed {
         debug_write("AW_MEMORY_PROTECTION_PROOF_OK\n");
+    }
+}
+
+/// Give the bootstrap processor its own GS-reachable per-CPU block before the
+/// first interrupt is taken.
+///
+/// This must run before the timer and device delivery proofs: the ISRs count
+/// into `gs:[0]`, so a block installed afterwards would leave the bootstrap
+/// processor's per-CPU counters at zero even though it ran every handler. x2APIC
+/// is enabled here only to read this CPU's APIC id; the timer proof enables it
+/// again, which is idempotent (dossier section 8, roadmap P0 step 5).
+fn install_bootstrap_per_cpu() {
+    debug_write("AW_PERCPU_BSP_BEGIN\n");
+
+    // SAFETY: CPL0 bootstrap with interrupts masked. Enabling x2APIC is
+    // idempotent and reading the APIC id MSR has no side effects.
+    let apic_id = unsafe {
+        match apic_timer::prepare_x2apic() {
+            Ok(_) => local_apic::rdmsr(local_apic::X2APIC_ID_MSR) as u32,
+            Err(_) => u32::MAX,
+        }
+    };
+
+    // SAFETY: CPL0, run once for the bootstrap processor's slot 0.
+    if unsafe { percpu::install(0, apic_id) } {
+        debug_write("AW_PERCPU_BSP_OK cpu=0 apic_id=");
+        debug_write_u64(u64::from(apic_id));
+        debug_write("\n");
+    } else {
+        debug_write("AW_PERCPU_BSP_FAIL\n");
+    }
+}
+
+/// Prove each online CPU owns a distinct GS-reachable per-CPU block, and that
+/// the bootstrap processor's interrupt counters are driven per CPU.
+///
+/// The bootstrap processor took real timer and device interrupts during their
+/// delivery proofs, so its per-CPU counters must be non-zero: a zero here would
+/// mean the ISRs counted only into the shared global counter and not into the
+/// block of the CPU that ran them. Application processors park with interrupts
+/// masked and no per-CPU timer of their own yet, so they are proved by identity
+/// (a block whose index and APIC id match what SMP bring-up recorded) rather
+/// than by ticks (dossier section 8, roadmap P0 step 5).
+fn prove_per_cpu_state() {
+    debug_write("AW_PERCPU_BEGIN\n");
+
+    let Some(bsp) = percpu::by_index(0) else {
+        debug_write("AW_PERCPU_FAIL reason=bsp_absent\n");
+        return;
+    };
+
+    debug_write("AW_PERCPU_BSP cpu=");
+    debug_write_u64(u64::from(bsp.cpu_index()));
+    debug_write(" apic_id=");
+    debug_write_u64(u64::from(bsp.apic_id()));
+    debug_write(" timer_ticks=");
+    debug_write_u64(bsp.timer_ticks());
+    debug_write(" device_ticks=");
+    debug_write_u64(bsp.device_ticks());
+    debug_write("\n");
+
+    if bsp.timer_ticks() == 0 {
+        debug_write("AW_PERCPU_FAIL reason=bsp_no_timer_ticks\n");
+        return;
+    }
+    if bsp.device_ticks() == 0 {
+        debug_write("AW_PERCPU_FAIL reason=bsp_no_device_ticks\n");
+        return;
+    }
+
+    let mut proven = 1; // the bootstrap processor
+    let mut all_ok = true;
+    for cpu in 1..interrupts::MAX_CPUS {
+        let Some(summary) = smp::ap_summary(cpu) else {
+            continue;
+        };
+        let Some(block) = percpu::by_index(cpu) else {
+            debug_write("AW_PERCPU_FAIL reason=ap_block_absent cpu=");
+            debug_write_u64(cpu as u64);
+            debug_write("\n");
+            all_ok = false;
+            continue;
+        };
+
+        debug_write("AW_PERCPU_AP cpu=");
+        debug_write_u64(u64::from(block.cpu_index()));
+        debug_write(" apic_id=");
+        debug_write_u64(u64::from(block.apic_id()));
+        debug_write("\n");
+
+        if block.cpu_index() as usize != cpu || block.apic_id() != summary.reported_apic_id {
+            debug_write("AW_PERCPU_FAIL reason=ap_identity_mismatch cpu=");
+            debug_write_u64(cpu as u64);
+            debug_write("\n");
+            all_ok = false;
+            continue;
+        }
+        proven += 1;
+    }
+
+    if all_ok {
+        debug_write("AW_PERCPU_PROOF_OK cpus=");
+        debug_write_u64(proven as u64);
+        debug_write("\n");
     }
 }
 
@@ -1162,9 +1267,11 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
             None => debug_write("AW_MEMORY_PROTECTION_SKIPPED reason=no-kernel-page-tables\n"),
         }
 
+        install_bootstrap_per_cpu();
         prove_apic_timer_delivery();
         prove_device_interrupt_routing(handoff);
         bring_up_secondary_processors(handoff);
+        prove_per_cpu_state();
         #[cfg(feature = "msi-proof-device")]
         prove_msi_delivery(handoff);
 

@@ -38,6 +38,9 @@ crate::device_interrupt_stub!(aw_ioapic_isr, ioapic_dispatch);
 
 extern "C" fn ioapic_dispatch() {
     IOAPIC_TICKS.fetch_add(1, Ordering::Relaxed);
+    // Attribute the interrupt to the CPU that ran this ISR, reached through `GS`
+    // (dossier section 8). Uncounted on any CPU without a per-CPU block yet.
+    crate::percpu::count_device_tick();
     // SAFETY: CPL0 interrupt context on a CPU whose x2APIC is enabled. EOI must
     // be signalled before `iretq` or the local APIC keeps this priority level
     // blocked and no further interrupt at this level is delivered.

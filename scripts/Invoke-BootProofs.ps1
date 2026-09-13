@@ -88,6 +88,12 @@ $configurations = @(
             # bring-up that silently did nothing.
             'AW_SMP_CPUS described=1'
             'AW_SMP_NO_APPLICATION_PROCESSORS'
+            # The bootstrap processor's GS-reachable per-CPU block exists before
+            # the first interrupt, and its per-CPU timer and device counters were
+            # driven by the ISRs that actually ran on it - not left at zero while
+            # only the shared global counter moved.
+            'AW_PERCPU_BSP_OK cpu=0 apic_id=0'
+            'AW_PERCPU_PROOF_OK cpus=1'
             # Rest of bring-up still clean.
             'AW_MEMORY_MAP_VALIDATE_OK'
             'AW_BOOTSTRAP_PAGE_ALLOC_OK'
@@ -104,6 +110,8 @@ $configurations = @(
             'AW_MEMORY_PROTECTION_SKIPPED'
             'AW_VMM_FAIL'
             'AW_GDT_SEGMENTS_FAIL'
+            'AW_PERCPU_BSP_FAIL'
+            'AW_PERCPU_FAIL'
             'AW_APIC_TIMER_NOT_FIRED'
             'AW_APIC_TIMER_MASK_INEFFECTIVE'
             'AW_APIC_TIMER_DID_NOT_RESUME'
@@ -132,6 +140,11 @@ $configurations = @(
             'AW_SMP_ONLINE online=3 started=3'
             'AW_SMP_PER_CPU_TABLES_OK cpus=3'
             'AW_SMP_ALL_ONLINE'
+            # Each online CPU owns a distinct GS-reachable per-CPU block whose
+            # index and APIC id match what SMP bring-up recorded: four blocks for
+            # the bootstrap processor plus its three application processors.
+            'AW_PERCPU_BSP_OK cpu=0 apic_id=0'
+            'AW_PERCPU_PROOF_OK cpus=4'
             # The rest of bring-up must survive having other CPUs running.
             'AW_MEMORY_PROTECTION_PROOF_OK'
             'AW_APIC_TIMER_DELIVERY_PROOF_OK'
@@ -143,6 +156,8 @@ $configurations = @(
             'AW_SMP_AP_NOT_ONLINE'
             'AW_SMP_TABLES_SHARED'
             'AW_SMP_NO_APPLICATION_PROCESSORS'
+            'AW_PERCPU_BSP_FAIL'
+            'AW_PERCPU_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )

@@ -94,6 +94,10 @@ unsafe extern "C" {
 #[unsafe(no_mangle)]
 extern "C" fn aw_apic_timer_dispatch() {
     APIC_TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
+    // Attribute the interrupt to the CPU that actually ran this ISR. Reached
+    // through `GS`, so it needs no argument saying which CPU it is; a CPU with
+    // no per-CPU block installed yet is simply not counted (dossier section 8).
+    crate::percpu::count_timer_tick();
     // SAFETY: CPL0 interrupt context on a CPU whose x2APIC was enabled before
     // the vector was unmasked. EOI must be signalled before `iretq` or the
     // Local APIC keeps this priority level blocked and no further timer

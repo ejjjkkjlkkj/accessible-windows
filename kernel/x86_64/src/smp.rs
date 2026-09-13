@@ -200,6 +200,13 @@ extern "C" fn ap_rust_entry() -> ! {
         rdmsr(X2APIC_ID_MSR) as u32
     };
 
+    // Give this AP its own GS-reachable per-CPU block, so any interrupt it later
+    // takes is attributed to it rather than to a shared counter (dossier
+    // section 8). The bootstrap processor reads it back by index once this AP is
+    // online.
+    // SAFETY: CPL0 on this AP, run once, on its own unique slot below MAX_CPUS.
+    let _ = unsafe { crate::percpu::install(cpu, apic_id) };
+
     if let Some(ApTables {
         task_register,
         gdt_base,
