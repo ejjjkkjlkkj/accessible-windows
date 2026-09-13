@@ -136,6 +136,27 @@ Expected disk image:
 build/accessible-windows-uefi-x86_64.img
 ```
 
+On Windows (or any host with only PowerShell 7, Rust and Python 3, no imaging
+tools), build a bootable GPT + FAT16 ESP image and prove it boots under
+QEMU/OVMF with:
+
+```powershell
+pwsh -NoProfile -File scripts\Build-BootableImage.ps1 -Verify
+```
+
+Expected disk image:
+
+```text
+dist/accessible-windows-uefi-x86_64.img
+```
+
+`-Verify` boots the image and requires the `AW_NATIVE_KERNEL_IDLE` marker with
+no CPU exception or panic. The FAT filesystem and GPT wrapper are assembled by
+`scripts/build_bootable_image.py` with no external tools. Boot it directly with
+`qemu-system-x86_64 ... -drive format=raw,file=dist/accessible-windows-uefi-x86_64.img`,
+or write it to a USB stick (for example Rufus in DD/image mode, or `dd`) and
+boot it through the firmware's UEFI removable-media entry.
+
 The image is intended for controlled boot testing. It is not yet an installer and must not be written over a disk containing data you need.
 
 ## Source policy

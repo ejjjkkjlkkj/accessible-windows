@@ -9,3 +9,9 @@ Thumbs.db
 /qemu-*/
 /tss-ist-results-*/
 /validation-results-*/
+
+# Generated bootable disk images and their boot logs (built by
+# scripts/Build-BootableImage.ps1). Large, regenerable, not source.
+/dist/*.img
+/dist/*.iso
+/dist/*-boot.log
