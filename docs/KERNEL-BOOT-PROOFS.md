@@ -64,7 +64,8 @@ kernel ELF for symbol-level triage.
 | Runtime map/unmap (live tables) | PASS | `AW_VMM_MAP_OK` → `AW_VMM_MAP_READBACK_OK` → `AW_VMM_MAP_TRANSLATE_OK` → `AW_VMM_UNMAP_OK` |
 | Runtime unmap negative test | PASS | `AW_VMM_UNMAP_FAULT_OK`; the unmapped address faults not-present after the TLB shootdown |
 | Kernel heap / global allocator | PASS | `AW_HEAP_PROOF_OK`; `Box`/`Vec` allocate, a vector grows and sums, a freed block is reused, over-aligned allocations align |
-| virtio-blk device read (legacy) | PASS | `AW_VIRTIO_BLK_PROOF_OK` (`virtio-blk`); one virtqueue reads sector 0 and the bytes match the disk's magic |
+| virtio-blk device read (legacy) | PASS | `AW_VIRTIO_BLK_PROOF_OK` (`virtio-blk`); one virtqueue reads sector 0 and it is a FAT boot sector |
+| FAT16 file read | PASS | `AW_FS_PROOF_OK` (`virtio-blk`); parse the BPB, find `HELLO.TXT`, follow its cluster chain, match the bytes |
 | APIC timer IRQ delivery | PASS | `AW_APIC_TIMER_FIRED`, `AW_APIC_TIMER_MONOTONIC_OK ticks>=8` |
 | APIC timer negative test | PASS | `AW_APIC_TIMER_MASKED_STOPPED` then `AW_APIC_TIMER_UNMASKED_RESUMED` |
 | MADT parse + ISA IRQ override | PASS | `AW_IOAPIC_ROUTED isa_irq=0 gsi=2` (the override, not the IRQ number) |

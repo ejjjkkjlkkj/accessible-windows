@@ -291,12 +291,24 @@ def build_gpt(fat_image, fat_sectors):
 
 
 def main():
-    if len(sys.argv) != 3:
+    # `--fat-only OUT DIR` writes a bare FAT16 filesystem image (no GPT), used as
+    # a data disk. Otherwise `OUT DIR` writes a bootable GPT + ESP disk.
+    args = sys.argv[1:]
+    fat_only = False
+    if args and args[0] == "--fat-only":
+        fat_only = True
+        args = args[1:]
+    if len(args) != 2:
         print(__doc__)
         return 2
-    out_path, esp_root = sys.argv[1], sys.argv[2]
+    out_path, esp_root = args
     root = build_tree(esp_root)
     fat_image, fat_sectors = build_fat16(root)
+    if fat_only:
+        with open(out_path, "wb") as handle:
+            handle.write(fat_image)
+        print(f"wrote {out_path}: {len(fat_image)} bytes, {fat_sectors} sectors (bare FAT16)")
+        return 0
     disk = build_gpt(fat_image, fat_sectors)
     with open(out_path, "wb") as handle:
         handle.write(disk)

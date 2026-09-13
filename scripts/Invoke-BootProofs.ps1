@@ -25,15 +25,19 @@ $ErrorActionPreference = 'Stop'
 
 $boot = Join-Path $PSScriptRoot 'Invoke-KernelBoot.ps1'
 
-# A tiny raw disk whose sector 0 carries the magic the virtio-blk proof reads
-# back. 1 MiB = 2048 sectors, so the device also reports capacity=2048.
+# A FAT16 data disk carrying HELLO.TXT, for the virtio-blk and filesystem
+# proofs. Built with the same pure-Python imager as the bootable image.
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $vblkDisk = Join-Path $repoRoot 'target/virtio-test.img'
-New-Item -ItemType Directory -Path (Split-Path $vblkDisk -Parent) -Force | Out-Null
-$vblkBytes = New-Object byte[] (1MB)
-$vblkMagic = [System.Text.Encoding]::ASCII.GetBytes('AWVBLK01')
-[Array]::Copy($vblkMagic, $vblkBytes, $vblkMagic.Length)
-[System.IO.File]::WriteAllBytes($vblkDisk, $vblkBytes)
+$fatStage = Join-Path $repoRoot 'target/fat-stage'
+if (Test-Path -LiteralPath $fatStage) { Remove-Item -LiteralPath $fatStage -Recurse -Force }
+New-Item -ItemType Directory -Path $fatStage -Force | Out-Null
+[System.IO.File]::WriteAllBytes(
+    (Join-Path $fatStage 'HELLO.TXT'),
+    [System.Text.Encoding]::ASCII.GetBytes("ACCESSIBLE-WINDOWS-FS-OK`n"))
+$python = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction Stop)
+& $python.Source (Join-Path $PSScriptRoot 'build_bootable_image.py') '--fat-only' $vblkDisk $fatStage
+if ($LASTEXITCODE -ne 0) { throw 'building the FAT16 test disk failed' }
 
 $configurations = @(
     @{
@@ -255,14 +259,21 @@ $configurations = @(
         )
         Required = @(
             'AW_VIRTIO_BLK_FOUND'
-            'AW_VIRTIO_BLK_CAPACITY sectors=2048'
+            'AW_VIRTIO_BLK_CAPACITY sectors='
             'AW_VIRTIO_BLK_READ_OK sector=0'
             'AW_VIRTIO_BLK_PROOF_OK'
+            # The filesystem, read from that same device: parse the FAT16 BPB,
+            # find HELLO.TXT in the root directory, follow its cluster chain, and
+            # match the bytes it was written with.
+            'AW_FS_FILE_FOUND size=25'
+            'AW_FS_READ_OK'
+            'AW_FS_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
             'AW_VIRTIO_BLK_FAIL'
             'AW_VIRTIO_BLK_UNAVAILABLE'
+            'AW_FS_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )

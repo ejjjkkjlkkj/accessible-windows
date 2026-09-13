@@ -160,7 +160,7 @@ const VRING_DESC_WRITE: u16 = 2;
 const VIRTIO_BLK_T_IN: u32 = 0;
 const VIRTIO_BLK_S_OK: u8 = 0;
 
-const SECTOR_SIZE: usize = 512;
+pub const SECTOR_SIZE: usize = 512;
 /// Largest queue this driver's static ring can describe.
 const MAX_QUEUE: usize = 256;
 const QUEUE_ALIGN: usize = 4096;
@@ -188,8 +188,12 @@ static mut REQUEST: BlkRequestHeader = BlkRequestHeader {
 static mut DATA: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
 static mut STATUS_BYTE: [u8; 1] = [0xff];
 
-/// The magic the test disk carries in the first bytes of sector 0.
-const DISK_MAGIC: &[u8; 8] = b"AWVBLK01";
+/// A brought-up virtio-block device: its I/O BAR base and negotiated queue size.
+#[derive(Clone, Copy)]
+pub struct BlkDevice {
+    base: u16,
+    queue_size: usize,
+}
 
 fn align_up(value: usize, align: usize) -> usize {
     (value + align - 1) & !(align - 1)
@@ -203,10 +207,104 @@ fn used_offset(queue_size: usize) -> usize {
     align_up(avail_offset(queue_size) + 6 + 2 * queue_size, QUEUE_ALIGN)
 }
 
-/// Read sector 0 through a legacy virtio-blk device and verify its magic.
-fn read_and_verify(base: u16) -> Result<(), &'static str> {
-    // Reset, then acknowledge and claim the device.
-    // SAFETY: `base` is this device's I/O BAR; the register offsets are fixed.
+impl BlkDevice {
+    /// Read one 512-byte sector `lba` into `out` through the virtqueue.
+    ///
+    /// Requests are issued and awaited one at a time, so the single static ring
+    /// and buffers are reused for every call.
+    pub fn read_sector(&self, lba: u64, out: &mut [u8; SECTOR_SIZE]) -> Result<(), &'static str> {
+        let base = self.base;
+        let ring = core::ptr::addr_of_mut!(VRING) as *mut u8;
+        let request_ptr = core::ptr::addr_of_mut!(REQUEST);
+        let data_ptr = core::ptr::addr_of_mut!(DATA) as *mut u8;
+        let status_ptr = core::ptr::addr_of_mut!(STATUS_BYTE) as *mut u8;
+
+        // SAFETY: the request/status statics are live and correctly aligned.
+        unsafe {
+            request_ptr.write(BlkRequestHeader {
+                request_type: VIRTIO_BLK_T_IN,
+                reserved: 0,
+                sector: lba,
+            });
+            status_ptr.write_volatile(0xff);
+        }
+
+        // Header (device reads), data (device writes), status (device writes).
+        // SAFETY: descriptor indices 0..2 are inside the ring.
+        unsafe {
+            write_desc(ring, 0, request_ptr as u64, 16, VRING_DESC_NEXT, 1);
+            write_desc(
+                ring,
+                1,
+                data_ptr as u64,
+                SECTOR_SIZE as u32,
+                VRING_DESC_NEXT | VRING_DESC_WRITE,
+                2,
+            );
+            write_desc(ring, 2, status_ptr as u64, 1, VRING_DESC_WRITE, 0);
+        }
+
+        let avail = avail_offset(self.queue_size);
+        let used = used_offset(self.queue_size);
+        // SAFETY: `avail`/`used` are inside the ring; single outstanding request.
+        let used_before = unsafe {
+            let idx = read_u16(ring, avail + 2);
+            write_u16(ring, avail, 0);
+            write_u16(ring, avail + 4 + (usize::from(idx) % self.queue_size) * 2, 0);
+            let before = read_u16(ring, used + 2);
+            compiler_fence(Ordering::SeqCst);
+            write_u16(ring, avail + 2, idx.wrapping_add(1));
+            before
+        };
+
+        // SAFETY: barrier then notify queue 0.
+        unsafe {
+            core::arch::asm!("mfence", options(nostack, preserves_flags));
+            outw(base + VIRTIO_QUEUE_NOTIFY, 0);
+        }
+
+        let mut budget = 200_000_000u32;
+        loop {
+            // SAFETY: reading used.idx from the ring.
+            if unsafe { read_u16(ring, used + 2) } != used_before {
+                break;
+            }
+            budget -= 1;
+            if budget == 0 {
+                return Err("no_completion");
+            }
+            core::hint::spin_loop();
+        }
+        compiler_fence(Ordering::SeqCst);
+
+        // SAFETY: the device wrote the status byte and the data buffer.
+        unsafe {
+            if status_ptr.read_volatile() != VIRTIO_BLK_S_OK {
+                return Err("device_status");
+            }
+            for (index, slot) in out.iter_mut().enumerate() {
+                *slot = data_ptr.add(index).read_volatile();
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Find a legacy virtio-block device and bring it up: handshake and one
+/// virtqueue, ready for [`BlkDevice::read_sector`].
+pub fn init() -> Option<BlkDevice> {
+    let location = find_virtio_blk()?;
+    debug_write("AW_VIRTIO_BLK_FOUND bus=");
+    debug_write_u64(u64::from(location.bus));
+    debug_write(" device=");
+    debug_write_u64(u64::from(location.device));
+    debug_write(" function=");
+    debug_write_u64(u64::from(location.function));
+    debug_write("\n");
+    let base = prepare(location)?;
+
+    // Reset, acknowledge, claim, accept no optional features.
+    // SAFETY: `base` is this device's I/O BAR; register offsets are fixed.
     unsafe {
         outb(base + VIRTIO_STATUS, 0);
         while inb(base + VIRTIO_STATUS) != 0 {
@@ -214,119 +312,32 @@ fn read_and_verify(base: u16) -> Result<(), &'static str> {
         }
         outb(base + VIRTIO_STATUS, STATUS_ACKNOWLEDGE);
         outb(base + VIRTIO_STATUS, STATUS_ACKNOWLEDGE | STATUS_DRIVER);
-        // Accept no optional features: a plain read needs none.
         let _features = inl(base + VIRTIO_DEVICE_FEATURES);
         outl(base + VIRTIO_GUEST_FEATURES, 0);
     }
 
-    // Select queue 0 and read its size.
-    // SAFETY: legacy queue selection is a word write then a word read.
+    // SAFETY: select queue 0 and read its size.
     let queue_size = unsafe {
         outw(base + VIRTIO_QUEUE_SELECT, 0);
         inw(base + VIRTIO_QUEUE_SIZE) as usize
     };
     if queue_size == 0 || queue_size > MAX_QUEUE || !queue_size.is_power_of_two() {
-        // Signal failure to the device and give up.
-        // SAFETY: writing the status byte is always valid.
+        // SAFETY: mark the device failed and give up.
         unsafe { outb(base + VIRTIO_STATUS, STATUS_FAILED) };
-        return Err("queue_size");
+        return None;
     }
 
-    let ring = core::ptr::addr_of_mut!(VRING) as *mut u8;
-    let ring_phys = ring as u64;
-    let request_ptr = core::ptr::addr_of_mut!(REQUEST);
-    let data_ptr = core::ptr::addr_of_mut!(DATA) as *mut u8;
-    let status_ptr = core::ptr::addr_of_mut!(STATUS_BYTE) as *mut u8;
-
-    // Fill the read request header.
-    // SAFETY: `request_ptr` is a live, correctly aligned static.
-    unsafe {
-        request_ptr.write(BlkRequestHeader {
-            request_type: VIRTIO_BLK_T_IN,
-            reserved: 0,
-            sector: 0,
-        });
-        status_ptr.write_volatile(0xff);
-    }
-
-    // Three chained descriptors: header (device reads), data (device writes),
-    // status (device writes).
-    // SAFETY: offsets stay inside the 16 KiB ring; each field is written once.
-    unsafe {
-        write_desc(ring, 0, request_ptr as u64, 16, VRING_DESC_NEXT, 1);
-        write_desc(
-            ring,
-            1,
-            data_ptr as u64,
-            SECTOR_SIZE as u32,
-            VRING_DESC_NEXT | VRING_DESC_WRITE,
-            2,
-        );
-        write_desc(ring, 2, status_ptr as u64, 1, VRING_DESC_WRITE, 0);
-    }
-
-    // Publish descriptor 0 as the head of one available buffer.
-    let avail = avail_offset(queue_size);
-    let used = used_offset(queue_size);
-    // SAFETY: `avail`/`used` are inside the ring; single-core, no concurrent use.
-    unsafe {
-        // avail.flags = 0, avail.ring[0] = 0 (head), then bump avail.idx.
-        write_u16(ring, avail, 0);
-        write_u16(ring, avail + 4, 0);
-        compiler_fence(Ordering::SeqCst);
-        write_u16(ring, avail + 2, 1);
-    }
-
-    // Hand the ring to the device and go live.
-    // SAFETY: PFN is the ring's physical frame; the ring is page aligned.
+    let ring_phys = core::ptr::addr_of!(VRING) as u64;
+    // SAFETY: hand the page-aligned ring to the device and go live.
     unsafe {
         outl(base + VIRTIO_QUEUE_PFN, (ring_phys >> 12) as u32);
         outb(
             base + VIRTIO_STATUS,
             STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_DRIVER_OK,
         );
-        // Full barrier so the ring writes are visible before the notify.
-        core::arch::asm!("mfence", options(nostack, preserves_flags));
-        outw(base + VIRTIO_QUEUE_NOTIFY, 0);
     }
 
-    // Poll the used ring for completion, bounded so a dead device gives up.
-    let mut budget = 200_000_000u32;
-    loop {
-        // SAFETY: reading used.idx from the ring.
-        let used_idx = unsafe { read_u16(ring, used + 2) };
-        if used_idx != 0 {
-            break;
-        }
-        budget -= 1;
-        if budget == 0 {
-            return Err("no_completion");
-        }
-        core::hint::spin_loop();
-    }
-    compiler_fence(Ordering::SeqCst);
-
-    // SAFETY: the device wrote the status byte and the data buffer.
-    let status = unsafe { status_ptr.read_volatile() };
-    if status != VIRTIO_BLK_S_OK {
-        return Err("device_status");
-    }
-
-    // SAFETY: DATA holds sector 0; compare the leading magic.
-    let ok = unsafe {
-        let mut matched = true;
-        for (index, expected) in DISK_MAGIC.iter().enumerate() {
-            if data_ptr.add(index).read_volatile() != *expected {
-                matched = false;
-                break;
-            }
-        }
-        matched
-    };
-    if !ok {
-        return Err("bad_magic");
-    }
-    Ok(())
+    Some(BlkDevice { base, queue_size })
 }
 
 unsafe fn write_desc(ring: *mut u8, index: usize, addr: u64, len: u32, flags: u16, next: u16) {
@@ -370,44 +381,35 @@ fn prepare(location: PciLocation) -> Option<u16> {
     }
 }
 
-/// Bring up virtio-blk and prove a real sector read.
-pub fn prove() {
-    debug_write("AW_VIRTIO_BLK_BEGIN\n");
-
-    let Some(location) = find_virtio_blk() else {
-        debug_write("AW_VIRTIO_BLK_UNAVAILABLE reason=no_device\n");
-        return;
-    };
-    debug_write("AW_VIRTIO_BLK_FOUND bus=");
-    debug_write_u64(u64::from(location.bus));
-    debug_write(" device=");
-    debug_write_u64(u64::from(location.device));
-    debug_write(" function=");
-    debug_write_u64(u64::from(location.function));
-    debug_write("\n");
-
-    let Some(base) = prepare(location) else {
-        debug_write("AW_VIRTIO_BLK_UNAVAILABLE reason=not_legacy_io_bar\n");
-        return;
+/// Prove a real sector read: read sector 0 and confirm it is a FAT boot sector
+/// (the disk is a FAT16 filesystem), which is content the device actually
+/// returned, not a status bit.
+pub fn prove(device: &BlkDevice) {
+    // SAFETY: the config block is readable over this device's I/O BAR.
+    let capacity = unsafe {
+        u64::from(inl(device.base + VIRTIO_CONFIG))
+            | (u64::from(inl(device.base + VIRTIO_CONFIG + 4)) << 32)
     };
     debug_write("AW_VIRTIO_BLK_IO_BASE base=");
-    debug_write_hex_u64(u64::from(base));
+    debug_write_hex_u64(u64::from(device.base));
     debug_write("\n");
-
-    // The block device advertises its capacity (in 512-byte sectors) in its
-    // device-specific config, readable over the I/O BAR.
-    // SAFETY: `base + VIRTIO_CONFIG` is this device's config register block.
-    let capacity = unsafe {
-        u64::from(inl(base + VIRTIO_CONFIG)) | (u64::from(inl(base + VIRTIO_CONFIG + 4)) << 32)
-    };
     debug_write("AW_VIRTIO_BLK_CAPACITY sectors=");
     debug_write_u64(capacity);
     debug_write("\n");
 
-    match read_and_verify(base) {
+    let mut sector = [0u8; SECTOR_SIZE];
+    match device.read_sector(0, &mut sector) {
         Ok(()) => {
-            debug_write("AW_VIRTIO_BLK_READ_OK sector=0\n");
-            debug_write("AW_VIRTIO_BLK_PROOF_OK\n");
+            // A FAT boot sector begins with a jump (0xEB or 0xE9) and ends with
+            // the 0x55AA signature.
+            let is_boot_sector =
+                (sector[0] == 0xEB || sector[0] == 0xE9) && sector[510] == 0x55 && sector[511] == 0xAA;
+            if is_boot_sector {
+                debug_write("AW_VIRTIO_BLK_READ_OK sector=0\n");
+                debug_write("AW_VIRTIO_BLK_PROOF_OK\n");
+            } else {
+                debug_write("AW_VIRTIO_BLK_FAIL reason=not_boot_sector\n");
+            }
         }
         Err(reason) => {
             debug_write("AW_VIRTIO_BLK_FAIL reason=");

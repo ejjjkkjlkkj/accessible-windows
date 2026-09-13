@@ -13,6 +13,7 @@ extern crate alloc;
 mod acpi;
 mod apic_timer;
 mod device_irq;
+mod fat16;
 mod frame_allocator;
 mod heap;
 mod interrupt_vectors;
@@ -1433,7 +1434,14 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         prove_device_interrupt_routing(handoff);
         bring_up_secondary_processors(handoff);
         prove_per_cpu_state();
-        virtio_blk::prove();
+        debug_write("AW_VIRTIO_BLK_BEGIN\n");
+        match virtio_blk::init() {
+            Some(device) => {
+                virtio_blk::prove(&device);
+                fat16::prove(&device);
+            }
+            None => debug_write("AW_VIRTIO_BLK_UNAVAILABLE reason=no_device\n"),
+        }
         #[cfg(feature = "msi-proof-device")]
         prove_msi_delivery(handoff);
 
