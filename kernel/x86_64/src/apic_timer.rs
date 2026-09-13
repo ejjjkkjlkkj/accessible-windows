@@ -214,6 +214,26 @@ pub unsafe fn arm_periodic_after_idt() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Program this CPU's Local APIC timer periodic and unmask it, leaving it live.
+///
+/// Unlike [`arm_periodic_after_idt`], this installs no gate and enables no
+/// interrupts: the caller (an application processor) shares the bootstrap
+/// processor's IDT, in which the timer gate is already installed, and decides
+/// itself when to set `IF`. It then idles taking its own timer interrupts,
+/// which is what proves a per-CPU timer on that CPU (dossier section 8, roadmap
+/// P0 step 5).
+///
+/// # Safety
+/// CPL0 on a CPU whose x2APIC is enabled and whose per-CPU block is installed,
+/// after the shared IDT already holds the [`APIC_TIMER_VECTOR`] gate.
+pub unsafe fn start_periodic_running() -> Result<(), &'static str> {
+    unsafe {
+        program_periodic(APIC_TIMER_PERIODIC_COUNT)?;
+        set_timer_masked(false);
+    }
+    Ok(())
+}
+
 /// The periodic timer as the delivery proof sees it. It runs free once armed,
 /// so there is nothing to poke.
 struct LocalApicTimerSource;

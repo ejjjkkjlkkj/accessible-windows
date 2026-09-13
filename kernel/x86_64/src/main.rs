@@ -551,16 +551,27 @@ fn install_bootstrap_per_cpu() {
     }
 }
 
+/// Per-CPU timer interrupts an application processor must take on its own Local
+/// APIC before the proof accepts that a per-CPU timer delivers on it. More than
+/// one, so a single spurious entry cannot pass it.
+const PER_CPU_AP_REQUIRED_TICKS: u64 = 4;
+
+/// Bound on how long the bootstrap processor samples an AP's per-CPU timer
+/// counter. A spin count, because this runs before any calibrated time source;
+/// an AP that reaches [`PER_CPU_AP_REQUIRED_TICKS`] exits the wait at once, so
+/// this only caps the failure path of a timer that never delivers.
+const PER_CPU_AP_TIMER_SPIN_BUDGET: u32 = 500_000_000;
+
 /// Prove each online CPU owns a distinct GS-reachable per-CPU block, and that
 /// the bootstrap processor's interrupt counters are driven per CPU.
 ///
 /// The bootstrap processor took real timer and device interrupts during their
 /// delivery proofs, so its per-CPU counters must be non-zero: a zero here would
 /// mean the ISRs counted only into the shared global counter and not into the
-/// block of the CPU that ran them. Application processors park with interrupts
-/// masked and no per-CPU timer of their own yet, so they are proved by identity
-/// (a block whose index and APIC id match what SMP bring-up recorded) rather
-/// than by ticks (dossier section 8, roadmap P0 step 5).
+/// block of the CPU that ran them. Each application processor armed its own
+/// Local APIC timer and idles under interrupts, so its per-CPU timer counter
+/// must advance too - proving a per-CPU timer really delivers on that CPU, not
+/// only on the bootstrap processor (dossier section 8, roadmap P0 step 5).
 fn prove_per_cpu_state() {
     debug_write("AW_PERCPU_BEGIN\n");
 
@@ -589,6 +600,7 @@ fn prove_per_cpu_state() {
     }
 
     let mut proven = 1; // the bootstrap processor
+    let mut aps_with_timer = 0;
     let mut all_ok = true;
     for cpu in 1..interrupts::MAX_CPUS {
         let Some(summary) = smp::ap_summary(cpu) else {
@@ -602,10 +614,24 @@ fn prove_per_cpu_state() {
             continue;
         };
 
+        // The AP idles under its own Local APIC timer, so its per-CPU counter
+        // advances on its own. Sample it until it reaches the bar or a bounded
+        // budget runs out, so a CPU whose timer never delivers fails here rather
+        // than hanging bring-up.
+        let mut ap_timer_ticks = block.timer_ticks();
+        let mut budget = PER_CPU_AP_TIMER_SPIN_BUDGET;
+        while ap_timer_ticks < PER_CPU_AP_REQUIRED_TICKS && budget > 0 {
+            core::hint::spin_loop();
+            budget -= 1;
+            ap_timer_ticks = block.timer_ticks();
+        }
+
         debug_write("AW_PERCPU_AP cpu=");
         debug_write_u64(u64::from(block.cpu_index()));
         debug_write(" apic_id=");
         debug_write_u64(u64::from(block.apic_id()));
+        debug_write(" timer_ticks=");
+        debug_write_u64(ap_timer_ticks);
         debug_write("\n");
 
         if block.cpu_index() as usize != cpu || block.apic_id() != summary.reported_apic_id {
@@ -615,13 +641,26 @@ fn prove_per_cpu_state() {
             all_ok = false;
             continue;
         }
+        if ap_timer_ticks < PER_CPU_AP_REQUIRED_TICKS {
+            debug_write("AW_PERCPU_FAIL reason=ap_no_timer_ticks cpu=");
+            debug_write_u64(cpu as u64);
+            debug_write("\n");
+            all_ok = false;
+            continue;
+        }
         proven += 1;
+        aps_with_timer += 1;
     }
 
     if all_ok {
         debug_write("AW_PERCPU_PROOF_OK cpus=");
         debug_write_u64(proven as u64);
         debug_write("\n");
+        if aps_with_timer > 0 {
+            debug_write("AW_PERCPU_AP_TIMER_OK aps=");
+            debug_write_u64(aps_with_timer as u64);
+            debug_write("\n");
+        }
     }
 }
 

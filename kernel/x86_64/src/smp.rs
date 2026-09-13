@@ -227,11 +227,27 @@ extern "C" fn ap_rust_entry() -> ! {
         // Published last: the bootstrap processor reads the rest only after it
         // observes this.
         report.online.store(true, Ordering::Release);
+
+        // With this AP online and its per-CPU block installed, bring its own
+        // Local APIC timer up and idle under interrupts. The timer gate lives in
+        // the shared IDT the bootstrap processor already installed, and every
+        // other interrupt source is routed to the bootstrap processor, so the
+        // only vector this AP can take is its own timer - counted into this AP's
+        // per-CPU block, which is what proves a per-CPU timer on an application
+        // processor (dossier section 8, roadmap P0 step 5).
+        //
+        // SAFETY: CPL0 on this AP; x2APIC and the per-CPU block are set up above
+        // and the timer gate is present in the shared IDT.
+        unsafe {
+            if crate::apic_timer::start_periodic_running().is_ok() {
+                core::arch::asm!("sti", options(nomem, nostack, preserves_flags));
+            }
+        }
     }
 
     loop {
-        // SAFETY: interrupts are masked on this CPU and it has nothing to do
-        // until there is a scheduler.
+        // SAFETY: this AP services only its own Local APIC timer if it armed one;
+        // otherwise interrupts stay masked. `hlt` parks until the next one.
         unsafe { core::arch::asm!("hlt", options(nomem, nostack, preserves_flags)) };
     }
 }

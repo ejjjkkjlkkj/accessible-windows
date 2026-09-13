@@ -74,7 +74,7 @@ kernel ELF for symbol-level triage.
 | AP identity | PASS | `AW_SMP_AP_ONLINE apic_id=N requested=N`, read by the AP from its own APIC |
 | Per-CPU state via `GS` | PASS | `AW_PERCPU_PROOF_OK cpus=4` (`smp`); each CPU's block reached through `gs:[0]`, index/APIC id distinct per CPU |
 | Per-CPU interrupt counters | PASS | `AW_PERCPU_BSP ... timer_ticks>=8 device_ticks>=8`, counted into the block of the CPU that ran the ISR |
-| Per-CPU timer armed on an AP | TO PROVE | APs park with interrupts masked; only the bootstrap processor's per-CPU counters advance |
+| Per-CPU timer armed on an AP | PASS | `AW_PERCPU_AP_TIMER_OK aps=3` (`smp`); each AP arms its own Local APIC timer, idles under `sti`/`hlt`, and its own block's `timer_ticks` advances |
 | Per-CPU #DF on an AP's IST | TO PROVE | only the bootstrap processor's IST is proved by a real fault |
 | Scheduler / anything running on an AP | TO BUILD | APs park in `hlt` |
 | SMP / per-CPU GDT-TSS-IST | TO BUILD | - |

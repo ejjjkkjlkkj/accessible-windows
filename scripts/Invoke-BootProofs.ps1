@@ -145,6 +145,9 @@ $configurations = @(
             # the bootstrap processor plus its three application processors.
             'AW_PERCPU_BSP_OK cpu=0 apic_id=0'
             'AW_PERCPU_PROOF_OK cpus=4'
+            # Each application processor armed its own Local APIC timer and took
+            # real interrupts on it, counted into its own per-CPU block.
+            'AW_PERCPU_AP_TIMER_OK aps=3'
             # The rest of bring-up must survive having other CPUs running.
             'AW_MEMORY_PROTECTION_PROOF_OK'
             'AW_APIC_TIMER_DELIVERY_PROOF_OK'
