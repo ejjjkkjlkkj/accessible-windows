@@ -39,6 +39,10 @@ $python = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command pyt
 & $python.Source (Join-Path $PSScriptRoot 'build_bootable_image.py') '--fat-only' $vblkDisk $fatStage
 if ($LASTEXITCODE -ne 0) { throw 'building the FAT16 test disk failed' }
 
+# Where the serial config routes COM1, so its banner can be checked host-side.
+$serialFile = Join-Path $repoRoot 'target/serial-com1.log'
+if (Test-Path -LiteralPath $serialFile) { Remove-Item -LiteralPath $serialFile -Force }
+
 $configurations = @(
     @{
         Name     = 'normal'
@@ -279,6 +283,27 @@ $configurations = @(
         )
     }
     @{
+        # A real 16550 UART console on COM1: an internal loopback test proves the
+        # device, then a banner is emitted on the real line and checked in the
+        # host-side serial log - output that actually left the guest.
+        Name           = 'serial'
+        Features       = @()
+        Serial         = "file:$serialFile"
+        Required       = @(
+            'AW_SERIAL_LOOPBACK_OK byte=0xae'
+            'AW_SERIAL_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden      = @(
+            'AW_SERIAL_UNAVAILABLE'
+            'AW_SERIAL_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+        SerialFile     = $serialFile
+        SerialContains = 'AW-SERIAL-CONSOLE-OK'
+    }
+    @{
         Name     = 'exception-smoke'
         Features = @('exception-smoke-test')
         Required = @(
@@ -309,11 +334,24 @@ foreach ($configuration in $configurations) {
     # it as an extra disk image.
     [string[]]$qemuArgs = @()
     if ($configuration.ContainsKey('QemuArgs')) { $qemuArgs = $configuration.QemuArgs }
+    $serial = 'none'
+    if ($configuration.ContainsKey('Serial')) { $serial = $configuration.Serial }
     $result = & $boot -Name $configuration.Name -Features $configuration.Features `
-        -QemuArgs $qemuArgs -Qemu $Qemu -TimeoutSeconds $TimeoutSeconds
+        -QemuArgs $qemuArgs -Serial $serial -Qemu $Qemu -TimeoutSeconds $TimeoutSeconds
 
     $missing = @($configuration.Required | Where-Object { -not $result.Text.Contains($_) })
     $present = @($configuration.Forbidden | Where-Object { $result.Text.Contains($_) })
+
+    # A config may also assert on the host-side serial log: output the guest
+    # actually pushed out of COM1, not just a debug-console marker.
+    if ($configuration.ContainsKey('SerialFile')) {
+        $serialText = if (Test-Path -LiteralPath $configuration.SerialFile) {
+            Get-Content -LiteralPath $configuration.SerialFile -Raw
+        } else { '' }
+        if (-not $serialText.Contains($configuration.SerialContains)) {
+            $missing += "serial:$($configuration.SerialContains)"
+        }
+    }
 
     foreach ($marker in $missing) {
         $failures += "$($configuration.Name): missing '$marker'"

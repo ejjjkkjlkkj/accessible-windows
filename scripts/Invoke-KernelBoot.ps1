@@ -27,7 +27,11 @@ param(
     [switch]$NoBuild,
 
     # Extra QEMU arguments (e.g. -smp 2).
-    [string[]]$QemuArgs = @()
+    [string[]]$QemuArgs = @(),
+
+    # COM1 backend for QEMU's `-serial` (default 'none'). Set to e.g.
+    # "file:C:\path\com1.log" to route the serial console to a file.
+    [string]$Serial = 'none'
 )
 
 Set-StrictMode -Version Latest
@@ -97,7 +101,7 @@ try {
     $start.RedirectStandardError = $true
     $baseArgs = @(
         '-machine', 'q35', '-accel', 'tcg', '-cpu', 'max', '-m', '256M',
-        '-display', 'none', '-serial', 'none', '-monitor', 'none',
+        '-display', 'none', '-serial', $Serial, '-monitor', 'none',
         '-no-reboot', '-net', 'none',
         '-debugcon', "file:$log",
         '-drive', "if=pflash,format=raw,readonly=on,file=$code",

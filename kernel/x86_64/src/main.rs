@@ -33,6 +33,7 @@ mod percpu;
 mod pit;
 mod ring3;
 mod security_baseline;
+mod serial;
 mod smp;
 mod virtio_blk;
 mod virtual_memory;
@@ -1414,6 +1415,10 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
 
     #[cfg(not(any(feature = "exception-smoke-test", feature = "double-fault-smoke-test")))]
     {
+        // Bring up the serial console first: it is the real-hardware diagnostic
+        // channel the dossier asks for early in boot (section 4).
+        serial::prove();
+
         // Take over paging from the firmware before anything else in the
         // normal boot path, so the remaining bring-up runs on kernel-owned,
         // W^X page tables. Identity-mapped, so a failure here is non-fatal:
