@@ -33,6 +33,7 @@ mod pit;
 mod ring3;
 mod security_baseline;
 mod smp;
+mod virtio_blk;
 mod virtual_memory;
 
 use irq_proof::DeliveryProof;
@@ -1432,6 +1433,7 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         prove_device_interrupt_routing(handoff);
         bring_up_secondary_processors(handoff);
         prove_per_cpu_state();
+        virtio_blk::prove();
         #[cfg(feature = "msi-proof-device")]
         prove_msi_delivery(handoff);
 

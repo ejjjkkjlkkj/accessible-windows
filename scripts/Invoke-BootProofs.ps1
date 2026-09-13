@@ -25,6 +25,16 @@ $ErrorActionPreference = 'Stop'
 
 $boot = Join-Path $PSScriptRoot 'Invoke-KernelBoot.ps1'
 
+# A tiny raw disk whose sector 0 carries the magic the virtio-blk proof reads
+# back. 1 MiB = 2048 sectors, so the device also reports capacity=2048.
+$repoRoot = Split-Path $PSScriptRoot -Parent
+$vblkDisk = Join-Path $repoRoot 'target/virtio-test.img'
+New-Item -ItemType Directory -Path (Split-Path $vblkDisk -Parent) -Force | Out-Null
+$vblkBytes = New-Object byte[] (1MB)
+$vblkMagic = [System.Text.Encoding]::ASCII.GetBytes('AWVBLK01')
+[Array]::Copy($vblkMagic, $vblkBytes, $vblkMagic.Length)
+[System.IO.File]::WriteAllBytes($vblkDisk, $vblkBytes)
+
 $configurations = @(
     @{
         Name     = 'normal'
@@ -229,6 +239,30 @@ $configurations = @(
             'AW_MSI_DID_NOT_RESUME'
             # Nothing may arrive on a vector this kernel did not install, which
             # is what an INTx fallback slipping through would look like.
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
+        # A real device driver: bring up legacy virtio-blk, read sector 0 through
+        # one virtqueue, and check the bytes against the magic the test disk was
+        # built with. The proof is the sector content, not a status register.
+        Name     = 'virtio-blk'
+        Features = @()
+        QemuArgs = @(
+            '-drive', "file=$vblkDisk,if=none,id=vblk,format=raw",
+            '-device', 'virtio-blk-pci,drive=vblk,disable-modern=on'
+        )
+        Required = @(
+            'AW_VIRTIO_BLK_FOUND'
+            'AW_VIRTIO_BLK_CAPACITY sectors=2048'
+            'AW_VIRTIO_BLK_READ_OK sector=0'
+            'AW_VIRTIO_BLK_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_VIRTIO_BLK_FAIL'
+            'AW_VIRTIO_BLK_UNAVAILABLE'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )
