@@ -99,8 +99,12 @@ $configurations = @(
             # address lands inside the user code page - it came from CPL3, not
             # from anywhere in the kernel.
             'AW_RING3_MAP_OK code_va=0x0000000200000000'
-            'AW_SYSCALL_RECEIVED nr=0x0000000000000101 arg=0x000000005a11c0de'
+            # A versioned syscall ABI over sysret: add returns 5, and a validated
+            # user pointer is copied into the kernel (SMAP-guarded) - 13 bytes.
+            'AW_SYSCALL_ADD result=5'
+            'AW_SYSCALL_WRITE copied=13'
             'AW_RING3_PROOF_OK'
+            'AW_SYSCALL_ABI_PROOF_OK version=1'
             # Cooperative round-robin scheduler: three kernel threads context
             # switch and take exactly ten turns each over thirty yields.
             'AW_SCHED_THREAD id=0 count=10'
@@ -214,6 +218,7 @@ $configurations = @(
             'AW_VMM_RUNTIME_MAP_PROOF_OK'
             'AW_HEAP_PROOF_OK'
             'AW_RING3_PROOF_OK'
+            'AW_SYSCALL_ABI_PROOF_OK version=1'
             'AW_SCHED_PROOF_OK threads=3 switches=29'
             'AW_APIC_TIMER_DELIVERY_PROOF_OK'
             'AW_IOAPIC_DELIVERY_PROOF_OK'

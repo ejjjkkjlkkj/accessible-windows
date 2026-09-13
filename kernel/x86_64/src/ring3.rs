@@ -1,65 +1,74 @@
-//! First transition to Ring 3 and back through a syscall (dossier section 9,
-//! roadmap P0 step 4).
+//! Ring 3, a versioned syscall ABI, and validated user-pointer copies (dossier
+//! sections 9 and 10, roadmap P0 step 4).
 //!
-//! This is the smallest honest proof that the kernel can drop to user privilege
-//! and be re-entered under control:
+//! A tiny user routine is written into a fresh frame and mapped user/executable/
+//! read-only above the identity window. The SYSCALL MSRs are programmed, the
+//! kernel drops to CPL 3 with `iretq`, and the routine makes a sequence of real
+//! syscalls that each return through `sysret`:
 //!
-//! 1. a tiny user routine is written into a fresh frame and mapped
-//!    user-accessible, executable, read-only, above the identity window;
-//! 2. the SYSCALL MSRs are programmed (kernel entry in `LSTAR`, selector bases
-//!    in `STAR`, `EFER.SCE` set);
-//! 3. the kernel builds an `iretq` frame with the Ring 3 selectors and drops to
-//!    CPL 3 at the user routine;
-//! 4. the routine executes `syscall` with a known number and argument; the
-//!    entry stub switches to the kernel stack, records what it received, and
-//!    returns into the kernel rather than back to user - this is a one-shot
-//!    proof, not a scheduler.
+//! - `SYS_VERSION` returns the ABI version;
+//! - `SYS_ADD` returns the sum of two arguments;
+//! - `SYS_WRITE` passes a user pointer and length that the kernel validates
+//!   (canonical, inside the user page, bounded) and copies in with `stac`/`clac`
+//!   around the access so SMAP is honoured;
+//! - `SYS_EXIT` returns control to the kernel to report.
 //!
-//! Interrupts are masked throughout (the whole bootstrap runs with `IF` clear),
-//! so no asynchronous entry from CPL 3 happens here and `GS` is never touched by
-//! user code. `swapgs` and a real user `GS` base belong with the scheduler; the
-//! entry stub here does not trust or swap `GS`, it only records and returns.
+//! Interrupts stay masked throughout, so no asynchronous entry from CPL 3
+//! happens and `GS` is never user-controlled; `swapgs` and a real user `GS` base
+//! come with preemptive user scheduling.
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
 use aw_x86_paging::PageTableFlags;
 
 use crate::interrupts::{USER_CODE_SELECTOR_RAW, USER_DATA_SELECTOR_RAW};
 use crate::local_apic::{rdmsr, wrmsr};
-use crate::{debug_write, debug_write_hex_u64, frame_allocator, interrupts, page_mapper};
+use crate::{debug_write, debug_write_hex_u64, debug_write_u64, frame_allocator, interrupts, page_mapper};
 
 const IA32_EFER: u32 = 0xc000_0080;
 const IA32_STAR: u32 = 0xc000_0081;
 const IA32_LSTAR: u32 = 0xc000_0082;
 const IA32_FMASK: u32 = 0xc000_0084;
-/// `EFER.SCE`: enables `syscall`/`sysret`.
 const EFER_SYSCALL_ENABLE: u64 = 1 << 0;
 
-/// First page of the Ring 3 window, well above the 4 GiB identity map so the
-/// runtime mapper only meets interior tables on the way to it.
 const USER_CODE_VA: u64 = 0x2_0000_0000;
 const USER_STACK_VA: u64 = 0x2_0000_2000;
 const USER_STACK_TOP: u64 = USER_STACK_VA + 0x1000;
+const USER_PAGE_END: u64 = USER_CODE_VA + 0x1000;
 
-/// The syscall the user routine makes, and the argument it carries. Both are
-/// checked on return, so a stray or spurious entry cannot pass the proof.
-const SYSCALL_NR: u64 = 0x101;
-const SYSCALL_MAGIC: u64 = 0x5a11_c0de;
+/// Syscall numbers - the start of a stable, versioned ABI (dossier section 9).
+const SYS_VERSION: u64 = 0;
+const SYS_ADD: u64 = 1;
+const SYS_WRITE: u64 = 2;
+const SYS_EXIT: u64 = 0xff;
+const ABI_VERSION: u64 = 1;
 
-/// The user routine, hand-assembled and position independent:
-/// `mov rax, SYSCALL_NR; mov rdi, SYSCALL_MAGIC; syscall; jmp .`
-const USER_CODE: [u8; 18] = [
-    0x48, 0xc7, 0xc0, 0x01, 0x01, 0x00, 0x00, // mov rax, 0x101
-    0x48, 0xc7, 0xc7, 0xde, 0xc0, 0x11, 0x5a, // mov rdi, 0x5a11c0de
-    0x0f, 0x05, // syscall
-    0xeb, 0xfe, // jmp . (never reached: the handler returns to the kernel)
+/// Largest user->kernel copy this proof accepts.
+const MAX_WRITE: usize = 64;
+
+/// The user routine, hand-assembled, position independent:
+/// SYS_ADD(2,3); SYS_WRITE(USER_CODE_VA+60, 13); SYS_EXIT; then a parking loop;
+/// then the 13-byte message "HELLO-SYSCALL".
+const USER_CODE: [u8; 73] = [
+    0x48, 0xc7, 0xc0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1  (SYS_ADD)
+    0x48, 0xc7, 0xc7, 0x02, 0x00, 0x00, 0x00, // mov rdi, 2
+    0x48, 0xc7, 0xc6, 0x03, 0x00, 0x00, 0x00, // mov rsi, 3
+    0x0f, 0x05, // syscall -> rax = 5
+    0x48, 0xc7, 0xc0, 0x02, 0x00, 0x00, 0x00, // mov rax, 2  (SYS_WRITE)
+    0x48, 0xbf, 0x3c, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, // mov rdi, USER_CODE_VA+60
+    0x48, 0xc7, 0xc6, 0x0d, 0x00, 0x00, 0x00, // mov rsi, 13
+    0x0f, 0x05, // syscall -> rax = 13
+    0x48, 0xc7, 0xc0, 0xff, 0x00, 0x00, 0x00, // mov rax, 0xff (SYS_EXIT)
+    0x0f, 0x05, // syscall (does not return to user)
+    0xeb, 0xfe, // jmp . (parking, never reached)
+    0x48, 0x45, 0x4c, 0x4c, 0x4f, 0x2d, 0x53, 0x59, 0x53, 0x43, 0x41, 0x4c, 0x4c, // "HELLO-SYSCALL"
 ];
 
-/// A dedicated Ring 0 stack for `TSS.rsp0`, used by any privilege change from
-/// Ring 3 into the kernel (a fault taken while user code runs).
+/// What SYS_WRITE must deliver, for the proof.
+const EXPECTED_WRITE: &[u8] = b"HELLO-SYSCALL";
+
 #[repr(C, align(16))]
 struct KernelStack([u8; 16 * 1024]);
-
 static mut RING0_STACK: KernelStack = KernelStack([0; 16 * 1024]);
 
 fn ring0_stack_top() -> u64 {
@@ -67,23 +76,31 @@ fn ring0_stack_top() -> u64 {
     (base + 16 * 1024) & !0xf_u64
 }
 
-// Shared with the assembly below. `SAVED_*` carry the kernel resume point across
-// the excursion to Ring 3; `SYSCALL_SEEN_*` record what the syscall delivered.
+// Shared with the assembly. SAVED_KERNEL_* return control to the kernel on exit;
+// SAVED_USER_* let the entry stub sysret back to the user for a normal syscall.
 #[used]
 static SAVED_KERNEL_RSP: AtomicU64 = AtomicU64::new(0);
 #[used]
 static SAVED_KERNEL_RESUME: AtomicU64 = AtomicU64::new(0);
 #[used]
-static SYSCALL_SEEN_NR: AtomicU64 = AtomicU64::new(0);
+static KERNEL_SYSCALL_RSP: AtomicU64 = AtomicU64::new(0);
 #[used]
-static SYSCALL_SEEN_ARG: AtomicU64 = AtomicU64::new(0);
+static SAVED_USER_RSP: AtomicU64 = AtomicU64::new(0);
 #[used]
-static SYSCALL_SEEN_RIP: AtomicU64 = AtomicU64::new(0);
+static SAVED_USER_RIP: AtomicU64 = AtomicU64::new(0);
+#[used]
+static SAVED_USER_RFLAGS: AtomicU64 = AtomicU64::new(0);
+#[used]
+static SYSCALL_EXIT: AtomicU8 = AtomicU8::new(0);
+
+// Results captured for the proof.
+static ADD_RESULT: AtomicU64 = AtomicU64::new(0);
+static ADD_SEEN: AtomicBool = AtomicBool::new(false);
+static WRITE_COPIED: AtomicU64 = AtomicU64::new(u64::MAX);
+static mut WRITE_BUFFER: [u8; MAX_WRITE] = [0; MAX_WRITE];
 
 const USER_DATA_SELECTOR: u64 = USER_DATA_SELECTOR_RAW as u64;
 const USER_CODE_SELECTOR: u64 = USER_CODE_SELECTOR_RAW as u64;
-/// The `RFLAGS` Ring 3 starts with: only the always-set reserved bit 1. `IF` is
-/// clear, so no interrupt is taken while at CPL 3.
 const USER_RFLAGS: u64 = 0x2;
 
 core::arch::global_asm!(
@@ -94,7 +111,6 @@ core::arch::global_asm!(
     "    lea rax, [rip + aw_ring3_resume]",
     "    mov [rip + {saved_resume}], rax",
     "    mov [rip + {saved_rsp}], rsp",
-    // iretq frame, high to low: SS, RSP, RFLAGS, CS, RIP.
     "    push {user_ss}",
     "    push rsi",
     "    push {user_flags}",
@@ -103,19 +119,35 @@ core::arch::global_asm!(
     "    iretq",
     "aw_ring3_resume:",
     "    ret",
-    // syscall entry: rax = number, rdi = argument, rcx = user RIP, r11 = user
-    // RFLAGS, RSP still the user stack. No stack is used before the switch.
+    // syscall entry: rax = number, rdi/rsi = args, rcx = user rip, r11 = rflags.
     "aw_syscall_entry:",
-    "    mov [rip + {seen_nr}], rax",
-    "    mov [rip + {seen_arg}], rdi",
-    "    mov [rip + {seen_rip}], rcx",
+    "    mov [rip + {user_rsp}], rsp",
+    "    mov [rip + {user_rip}], rcx",
+    "    mov [rip + {user_rflags}], r11",
+    "    mov rsp, [rip + {kernel_rsp}]",
+    // Marshal to the System V dispatch(nr, a0, a1).
+    "    mov rdx, rsi",
+    "    mov rsi, rdi",
+    "    mov rdi, rax",
+    "    call {dispatch}",
+    // rax holds the result. Exit returns to the kernel; otherwise sysret back.
+    "    cmp byte ptr [rip + {exit_flag}], 0",
+    "    jne 2f",
+    "    mov rcx, [rip + {user_rip}]",
+    "    mov r11, [rip + {user_rflags}]",
+    "    mov rsp, [rip + {user_rsp}]",
+    "    sysretq",
+    "2:",
     "    mov rsp, [rip + {saved_rsp}]",
     "    jmp [rip + {saved_resume}]",
     saved_resume = sym SAVED_KERNEL_RESUME,
     saved_rsp = sym SAVED_KERNEL_RSP,
-    seen_nr = sym SYSCALL_SEEN_NR,
-    seen_arg = sym SYSCALL_SEEN_ARG,
-    seen_rip = sym SYSCALL_SEEN_RIP,
+    kernel_rsp = sym KERNEL_SYSCALL_RSP,
+    user_rsp = sym SAVED_USER_RSP,
+    user_rip = sym SAVED_USER_RIP,
+    user_rflags = sym SAVED_USER_RFLAGS,
+    exit_flag = sym SYSCALL_EXIT,
+    dispatch = sym aw_syscall_dispatch,
     user_ss = const USER_DATA_SELECTOR,
     user_cs = const USER_CODE_SELECTOR,
     user_flags = const USER_RFLAGS,
@@ -126,33 +158,95 @@ unsafe extern "C" {
     fn aw_syscall_entry();
 }
 
-/// Program the SYSCALL MSRs so a `syscall` from Ring 3 lands in
-/// [`aw_syscall_entry`] at CPL 0.
+fn smap_enabled() -> bool {
+    let cr4: u64;
+    // SAFETY: reading CR4 at CPL0 has no side effects.
+    unsafe { core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags)) };
+    cr4 & (1 << 21) != 0
+}
+
+/// Copy `len` bytes from a validated user address into the kernel buffer,
+/// honouring SMAP with `stac`/`clac`. Returns the number of bytes copied.
 ///
 /// # Safety
-/// CPL0. Must run before Ring 3 is entered.
+/// `user_ptr..user_ptr+len` must be a readable user page (validated by the
+/// caller) and `len <= MAX_WRITE`.
+unsafe fn copy_from_user(user_ptr: u64, len: usize) -> usize {
+    let smap = smap_enabled();
+    if smap {
+        // SAFETY: permit supervisor access to user pages for this copy only.
+        unsafe { core::arch::asm!("stac", options(nomem, nostack)) };
+    }
+    // SAFETY: the range was validated as an in-bounds user page.
+    unsafe {
+        let dst = core::ptr::addr_of_mut!(WRITE_BUFFER) as *mut u8;
+        for index in 0..len {
+            dst.add(index)
+                .write_volatile((user_ptr as *const u8).add(index).read_volatile());
+        }
+    }
+    if smap {
+        // SAFETY: re-arm SMAP.
+        unsafe { core::arch::asm!("clac", options(nomem, nostack)) };
+    }
+    len
+}
+
+/// The syscall dispatcher. Returns the value the user receives in `rax`.
+#[unsafe(no_mangle)]
+extern "C" fn aw_syscall_dispatch(number: u64, arg0: u64, arg1: u64) -> u64 {
+    match number {
+        SYS_VERSION => ABI_VERSION,
+        SYS_ADD => {
+            let sum = arg0.wrapping_add(arg1);
+            ADD_RESULT.store(sum, Ordering::Relaxed);
+            ADD_SEEN.store(true, Ordering::Relaxed);
+            sum
+        }
+        SYS_WRITE => {
+            let len = arg1 as usize;
+            // Validate the user pointer: bounded length, and the whole range
+            // inside the user code page (dossier section 9).
+            let end = arg0.checked_add(arg1);
+            if len > MAX_WRITE
+                || arg0 < USER_CODE_VA
+                || end.is_none_or(|e| e > USER_PAGE_END)
+            {
+                return u64::MAX;
+            }
+            // SAFETY: range validated above; copy honours SMAP.
+            let copied = unsafe { copy_from_user(arg0, len) };
+            WRITE_COPIED.store(copied as u64, Ordering::Relaxed);
+            copied as u64
+        }
+        SYS_EXIT => {
+            SYSCALL_EXIT.store(1, Ordering::Relaxed);
+            0
+        }
+        _ => u64::MAX,
+    }
+}
+
+/// Program the SYSCALL MSRs.
+///
+/// # Safety
+/// CPL0, before Ring 3 is entered.
 unsafe fn enable_syscall() {
-    // SAFETY: EFER already carries LME/LMA/NXE from bring-up; this only adds SCE.
+    // SAFETY: EFER already carries LME/LMA/NXE; add SCE.
     let efer = unsafe { rdmsr(IA32_EFER) };
     unsafe { wrmsr(IA32_EFER, efer | EFER_SYSCALL_ENABLE) };
-
-    // STAR: syscall loads kernel CS from bits [47:32] (0x08, SS becomes 0x10);
-    // sysret would derive the user selectors from bits [63:48] (0x20 -> SS 0x28,
-    // CS 0x30). sysret is not used here, but the field is set correctly for it.
+    // syscall: kernel CS 0x08 (SS 0x10). sysret base 0x20 -> user SS 0x28, CS 0x30.
     let star = (0x0020_u64 << 48) | (0x0008_u64 << 32);
     unsafe { wrmsr(IA32_STAR, star) };
     unsafe { wrmsr(IA32_LSTAR, aw_syscall_entry as *const () as u64) };
-    // Clear IF, DF, TF and AC on entry, so the handler runs with interrupts off
-    // and a sane string direction regardless of the user's RFLAGS.
-    let fmask = (1_u64 << 9) | (1 << 10) | (1 << 8) | (1 << 18);
-    unsafe { wrmsr(IA32_FMASK, fmask) };
+    // Clear IF, DF, TF, AC on entry.
+    unsafe { wrmsr(IA32_FMASK, (1 << 9) | (1 << 10) | (1 << 8) | (1 << 18)) };
 }
 
-/// Enter Ring 3, run one syscall, and prove the round trip.
+/// Enter Ring 3, run the syscall sequence, and prove the ABI.
 pub fn prove() {
     debug_write("AW_RING3_BEGIN\n");
 
-    // User stack: writable, never executable, user-accessible.
     let Some(stack_frame) = frame_allocator::allocate() else {
         debug_write("AW_RING3_FAIL reason=no_stack_frame\n");
         return;
@@ -161,38 +255,31 @@ pub fn prove() {
         .union(PageTableFlags::WRITABLE)
         .union(PageTableFlags::NO_EXECUTE);
     // SAFETY: CPL0; USER_STACK_VA is unused and the frame was just allocated.
-    if let Err(error) = unsafe { page_mapper::map_page(USER_STACK_VA, stack_frame, stack_flags) } {
-        debug_write("AW_RING3_FAIL reason=map_stack_");
-        debug_write(error.name());
-        debug_write("\n");
+    if unsafe { page_mapper::map_page(USER_STACK_VA, stack_frame, stack_flags) }.is_err() {
+        debug_write("AW_RING3_FAIL reason=map_stack\n");
         return;
     }
 
-    // User code: written through the frame's identity address, then mapped
-    // user-accessible, executable and read-only.
     let Some(code_frame) = frame_allocator::allocate() else {
         debug_write("AW_RING3_FAIL reason=no_code_frame\n");
         return;
     };
-    // SAFETY: the frame is in the identity window, writable there; we copy the
-    // routine in before mapping it read-only-executable for user.
+    // SAFETY: write the routine through the frame's identity address, then map
+    // it user/executable/read-only.
     unsafe {
         core::ptr::copy_nonoverlapping(USER_CODE.as_ptr(), code_frame as *mut u8, USER_CODE.len());
     }
-    let code_flags = PageTableFlags::USER_ACCESSIBLE;
-    // SAFETY: CPL0; USER_CODE_VA is unused and the frame holds the routine.
-    if let Err(error) = unsafe { page_mapper::map_page(USER_CODE_VA, code_frame, code_flags) } {
-        debug_write("AW_RING3_FAIL reason=map_code_");
-        debug_write(error.name());
-        debug_write("\n");
+    if unsafe { page_mapper::map_page(USER_CODE_VA, code_frame, PageTableFlags::USER_ACCESSIBLE) }
+        .is_err()
+    {
+        debug_write("AW_RING3_FAIL reason=map_code\n");
         return;
     }
 
-    // A Ring 0 stack for any privilege change out of Ring 3, then the SYSCALL
-    // MSRs.
     // SAFETY: CPL0, single core, before Ring 3 is entered.
     unsafe {
         interrupts::set_bootstrap_rsp0(ring0_stack_top());
+        KERNEL_SYSCALL_RSP.store(ring0_stack_top(), Ordering::Relaxed);
         enable_syscall();
     }
 
@@ -202,30 +289,31 @@ pub fn prove() {
     debug_write_hex_u64(USER_STACK_VA);
     debug_write("\n");
 
-    // Drop to Ring 3 at the user routine. Returns here once the routine's
-    // syscall has been serviced.
-    // SAFETY: the user page is mapped executable at CPL3, the stack is mapped
-    // writable, the SYSCALL MSRs and rsp0 are set, and interrupts are masked.
+    // SAFETY: user pages mapped, MSRs and rsp0 set, interrupts masked.
     unsafe { aw_enter_ring3(USER_CODE_VA, USER_STACK_TOP) };
 
-    let nr = SYSCALL_SEEN_NR.load(Ordering::Acquire);
-    let arg = SYSCALL_SEEN_ARG.load(Ordering::Relaxed);
-    let rip = SYSCALL_SEEN_RIP.load(Ordering::Relaxed);
-    debug_write("AW_SYSCALL_RECEIVED nr=");
-    debug_write_hex_u64(nr);
-    debug_write(" arg=");
-    debug_write_hex_u64(arg);
-    debug_write(" rip=");
-    debug_write_hex_u64(rip);
+    // Control is back in the kernel after SYS_EXIT. Check the ABI results.
+    let add_ok = ADD_SEEN.load(Ordering::Relaxed) && ADD_RESULT.load(Ordering::Relaxed) == 5;
+    debug_write("AW_SYSCALL_ADD result=");
+    debug_write_u64(ADD_RESULT.load(Ordering::Relaxed));
     debug_write("\n");
 
-    // The syscall must carry the number and argument the user routine set, and
-    // its return address must land inside the user code page - proof the call
-    // came from CPL 3 at the address we mapped, not from anywhere in the kernel.
-    let rip_in_user_page = (USER_CODE_VA..USER_CODE_VA + 0x1000).contains(&rip);
-    if nr == SYSCALL_NR && arg == SYSCALL_MAGIC && rip_in_user_page {
+    let copied = WRITE_COPIED.load(Ordering::Relaxed);
+    // SAFETY: the dispatcher filled WRITE_BUFFER with `copied` bytes.
+    let write_ok = copied == EXPECTED_WRITE.len() as u64 && unsafe {
+        let buffer = core::ptr::addr_of!(WRITE_BUFFER) as *const u8;
+        (0..EXPECTED_WRITE.len()).all(|i| buffer.add(i).read() == EXPECTED_WRITE[i])
+    };
+    debug_write("AW_SYSCALL_WRITE copied=");
+    debug_write_u64(copied);
+    debug_write("\n");
+
+    if add_ok && write_ok {
         debug_write("AW_RING3_PROOF_OK\n");
+        debug_write("AW_SYSCALL_ABI_PROOF_OK version=");
+        debug_write_u64(ABI_VERSION);
+        debug_write("\n");
     } else {
-        debug_write("AW_RING3_FAIL reason=bad_syscall\n");
+        debug_write("AW_RING3_FAIL reason=abi\n");
     }
 }
