@@ -101,6 +101,12 @@ $configurations = @(
             'AW_RING3_MAP_OK code_va=0x0000000200000000'
             'AW_SYSCALL_RECEIVED nr=0x0000000000000101 arg=0x000000005a11c0de'
             'AW_RING3_PROOF_OK'
+            # Cooperative round-robin scheduler: three kernel threads context
+            # switch and take exactly ten turns each over thirty yields.
+            'AW_SCHED_THREAD id=0 count=10'
+            'AW_SCHED_THREAD id=1 count=10'
+            'AW_SCHED_THREAD id=2 count=10'
+            'AW_SCHED_PROOF_OK threads=3 switches=29'
             # CPU protection bits actually latched.
             'AW_SECURITY_ENFORCED wp=1 nx=1'
             'AW_SECURITY_BASELINE_OK'
@@ -157,6 +163,7 @@ $configurations = @(
             'AW_VMM_RUNTIME_MAP_FAIL'
             'AW_HEAP_FAIL'
             'AW_RING3_FAIL'
+            'AW_SCHED_FAIL'
             'AW_GDT_SEGMENTS_FAIL'
             'AW_PERCPU_BSP_FAIL'
             'AW_PERCPU_FAIL'
@@ -201,6 +208,7 @@ $configurations = @(
             'AW_VMM_RUNTIME_MAP_PROOF_OK'
             'AW_HEAP_PROOF_OK'
             'AW_RING3_PROOF_OK'
+            'AW_SCHED_PROOF_OK threads=3 switches=29'
             'AW_APIC_TIMER_DELIVERY_PROOF_OK'
             'AW_IOAPIC_DELIVERY_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
@@ -215,6 +223,7 @@ $configurations = @(
             'AW_VMM_RUNTIME_MAP_FAIL'
             'AW_HEAP_FAIL'
             'AW_RING3_FAIL'
+            'AW_SCHED_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )
