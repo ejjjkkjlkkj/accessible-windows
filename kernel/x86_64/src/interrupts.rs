@@ -672,6 +672,17 @@ extern "sysv64" fn handle_exception(frame: *mut ExceptionFrame) {
     debug_write_hex_u64(frame.rflags);
     debug_write("\n");
 
+    // Dossier section 5.4: a fatal fault must journal RSP/CR2/CR3 too. CR2 is
+    // only meaningful for a page fault, but printing it always keeps the fatal
+    // record uniform.
+    debug_write("AW_NATIVE_EXCEPTION_STATE rsp=");
+    debug_write_hex_u64(frame.rsp);
+    debug_write(" cr2=");
+    debug_write_hex_u64(read_cr2());
+    debug_write(" cr3=");
+    debug_write_hex_u64(crate::virtual_memory::current_cr3());
+    debug_write("\n");
+
     if vector == 6 {
         debug_write("AW_INVALID_OPCODE_HANDLER_OK\n");
     }

@@ -335,29 +335,48 @@ fn build_map<F: FnMut() -> Option<u64>>(
         address += TWO_MIB;
     }
 
-    // The image itself, one 4 KiB leaf at a time, with the guard page skipped.
-    for (range, flags) in [
-        (layout.header, RO_NX),
-        (layout.text, RO_EXEC),
-        (layout.rodata, RO_NX),
-        (layout.data, RW_NX),
-    ] {
-        let (start, end) = range;
-        let mut page = start;
-        while page < end {
-            if page != guard_page {
-                let virtual_page = VirtualPage::new(page).ok_or(VmmError::BuildFailed)?;
-                let frame = PhysicalFrame::new(page, MAX_X86_64_PHYSICAL_ADDRESS_BITS)
-                    .ok_or(VmmError::BuildFailed)?;
-                builder
-                    .map_4k(frames, virtual_page, frame, flags)
-                    .map_err(|error| frame_error(error, frames.escaped_window))?;
-            }
-            page += PAGE_SIZE;
+    // The 2 MiB region(s) the image lands in, one 4 KiB leaf at a time. Every
+    // page in the span is mapped, not only the image's own sections: the tail
+    // between the image and the 2 MiB boundary (and any gap between sections) is
+    // conventional RAM the frame allocator will hand out, so it must be part of
+    // the identity map or a table frame placed there would fault when zeroed.
+    // Image sections keep their W^X permissions; the filler is RW, never
+    // executable. The guard page is skipped so it stays unmapped.
+    let region_start = image_start & !(TWO_MIB - 1);
+    let region_end = image_end
+        .checked_add(TWO_MIB - 1)
+        .ok_or(VmmError::BuildFailed)?
+        & !(TWO_MIB - 1);
+    let mut page = region_start;
+    while page < region_end {
+        if page != guard_page {
+            let flags = image_page_flags(page, layout);
+            let virtual_page = VirtualPage::new(page).ok_or(VmmError::BuildFailed)?;
+            let frame = PhysicalFrame::new(page, MAX_X86_64_PHYSICAL_ADDRESS_BITS)
+                .ok_or(VmmError::BuildFailed)?;
+            builder
+                .map_4k(frames, virtual_page, frame, flags)
+                .map_err(|error| frame_error(error, frames.escaped_window))?;
         }
+        page += PAGE_SIZE;
     }
 
     Ok(())
+}
+
+/// Permissions for one 4 KiB page of the image's 2 MiB region: `.text` stays
+/// executable and read-only, `.awhdr`/`.rodata` read-only, and everything else -
+/// `.data`/`.bss`, section gaps and the tail up to the 2 MiB boundary - is
+/// writable and never executable. Never writable-and-executable (W^X).
+fn image_page_flags(page: u64, layout: KernelImageLayout) -> PageTableFlags {
+    let in_range = |range: (u64, u64)| range.0 <= page && page < range.1;
+    if in_range(layout.text) {
+        RO_EXEC
+    } else if in_range(layout.header) || in_range(layout.rodata) {
+        RO_NX
+    } else {
+        RW_NX
+    }
 }
 
 fn map_huge<F: FnMut() -> Option<u64>>(
