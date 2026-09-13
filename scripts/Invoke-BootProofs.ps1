@@ -145,6 +145,10 @@ $configurations = @(
             # only the shared global counter moved.
             'AW_PERCPU_BSP_OK cpu=0 apic_id=0'
             'AW_PERCPU_PROOF_OK cpus=1'
+            # Monotonic TSC clock, calibrated against the PIT.
+            'AW_CLOCK_MONOTONIC_OK'
+            'AW_CLOCK_CALIBRATED_OK khz='
+            'AW_CLOCK_PROOF_OK'
             # Rest of bring-up still clean.
             'AW_MEMORY_MAP_VALIDATE_OK'
             'AW_BOOTSTRAP_PAGE_ALLOC_OK'
@@ -164,6 +168,7 @@ $configurations = @(
             'AW_HEAP_FAIL'
             'AW_RING3_FAIL'
             'AW_SCHED_FAIL'
+            'AW_CLOCK_FAIL'
             'AW_GDT_SEGMENTS_FAIL'
             'AW_PERCPU_BSP_FAIL'
             'AW_PERCPU_FAIL'
@@ -200,6 +205,7 @@ $configurations = @(
             # the bootstrap processor plus its three application processors.
             'AW_PERCPU_BSP_OK cpu=0 apic_id=0'
             'AW_PERCPU_PROOF_OK cpus=4'
+            'AW_CLOCK_PROOF_OK'
             # Each application processor armed its own Local APIC timer and took
             # real interrupts on it, counted into its own per-CPU block.
             'AW_PERCPU_AP_TIMER_OK aps=3'
@@ -224,6 +230,7 @@ $configurations = @(
             'AW_HEAP_FAIL'
             'AW_RING3_FAIL'
             'AW_SCHED_FAIL'
+            'AW_CLOCK_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )

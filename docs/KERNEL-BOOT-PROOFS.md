@@ -87,6 +87,7 @@ kernel ELF for symbol-level triage.
 | Ring 3 entry (`iretq` to CPL3) | PASS | `AW_RING3_PROOF_OK`; a mapped user page runs at CPL3, its syscall's saved RIP lands inside the user page |
 | `syscall` from Ring 3 | PASS | `AW_SYSCALL_RECEIVED nr=0x101 arg=0x5a11c0de`; `LSTAR` entry runs at CPL0 with the number/argument the user set |
 | Cooperative scheduler / threads | PASS | `AW_SCHED_PROOF_OK threads=3 switches=29`; three kernel threads context switch and take ten turns each |
+| Monotonic TSC clock | PASS | `AW_CLOCK_PROOF_OK`; TSC monotonic, frequency calibrated against a PIT channel-2 one-shot |
 | Preemptive scheduling | TO BUILD | cooperative for now; wiring the switch into the timer interrupt makes it preemptive |
 | Ring 3 preemption / user scheduler | TO BUILD | one-shot proof: the handler returns to the kernel, it does not schedule user threads |
 | User-page `swapgs` on entry | TO BUILD | entry masks interrupts instead; a real user `GS` base needs `swapgs` |

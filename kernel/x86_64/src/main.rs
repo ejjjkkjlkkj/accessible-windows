@@ -12,6 +12,7 @@ extern crate alloc;
 
 mod acpi;
 mod apic_timer;
+mod clock;
 mod device_irq;
 mod fat16;
 mod frame_allocator;
@@ -1441,6 +1442,7 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         prove_device_interrupt_routing(handoff);
         bring_up_secondary_processors(handoff);
         prove_per_cpu_state();
+        clock::prove();
         debug_write("AW_VIRTIO_BLK_BEGIN\n");
         match virtio_blk::init() {
             Some(device) => {
