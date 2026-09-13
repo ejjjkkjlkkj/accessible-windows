@@ -11,6 +11,7 @@ use core::arch::{asm, global_asm};
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::interrupt_vectors::APIC_TIMER_VECTOR;
+use crate::irq_proof::{self, DeliveryProof};
 use crate::local_apic::{
     x2apic_eoi, x2apic_read, x2apic_write, ApicBase, X2APIC_LVT_TIMER_MSR, X2APIC_SIVR_MSR,
     X2APIC_TIMER_DIVIDE_MSR, X2APIC_TIMER_INITIAL_COUNT_MSR,
@@ -209,120 +210,22 @@ pub unsafe fn arm_periodic_after_idt() -> Result<(), &'static str> {
     Ok(())
 }
 
-/// # Safety
-/// The caller must ensure the rest of the kernel is ready for maskable IRQs.
-pub unsafe fn enable_interrupts() {
-    unsafe { asm!("sti", options(nomem, nostack, preserves_flags)) };
-}
-
-/// # Safety
-/// CPL0 only.
-pub unsafe fn disable_interrupts() {
-    unsafe { asm!("cli", options(nomem, nostack, preserves_flags)) };
-}
-
-/// Bounded busy-wait budget for one phase of the delivery proof. Large enough
-/// for several periods under QEMU/TCG, small enough that a dead timer fails the
-/// proof in seconds rather than hanging the boot.
-const PROOF_SPIN_BUDGET: u32 = 200_000_000;
-
-/// Outcome of [`run_delivery_proof`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DeliveryProof {
-    /// The ISR ran at least `required_ticks` times, stopped while masked and
-    /// resumed once unmasked.
-    Passed {
-        ticks_after_run: u64,
-        ticks_while_masked: u64,
-        ticks_after_unmask: u64,
-    },
-    /// The vector was unmasked but the ISR never reached `required_ticks`.
-    NotDelivered { ticks: u64 },
-    /// The counter kept advancing while `LVT_TIMER.MASK` was set, so the
-    /// increments are not attributable to real interrupt delivery.
-    MaskIneffective { before: u64, after: u64 },
-    /// Delivery did not resume after clearing the mask.
-    DidNotResume { ticks: u64 },
-}
-
-fn spin_until(budget: u32, mut done: impl FnMut() -> bool) -> bool {
-    let mut spins = 0;
-    while spins < budget {
-        if done() {
-            return true;
-        }
-        spins += 1;
-        core::hint::spin_loop();
-    }
-    done()
-}
-
 /// Prove real interrupt delivery, then prove the counter is driven by it.
 ///
-/// A monotonically increasing counter on its own does not distinguish a real
-/// ISR from a polling artefact, so the proof includes the dossier's required
-/// negative test: with `LVT_TIMER.MASK` set the counter must be frozen, and it
-/// must start moving again when the mask is cleared.
+/// The sequence, including the negative test that masking `LVT_TIMER` freezes
+/// the counter, is [`crate::irq_proof::run`] - the same one every other
+/// interrupt source in this kernel has to pass.
 ///
 /// # Safety
 /// CPL0 only, after [`arm_periodic_after_idt`]. Returns with interrupts
 /// disabled and the timer masked, whatever the outcome.
 pub unsafe fn run_delivery_proof(required_ticks: u64) -> DeliveryProof {
-    unsafe {
-        set_timer_masked(false);
-        enable_interrupts();
-    }
+    let set_masked = |masked: bool| {
+        // SAFETY: CPL0 after `program_periodic`, as the caller guarantees.
+        unsafe { set_timer_masked(masked) };
+    };
 
-    let delivered = spin_until(PROOF_SPIN_BUDGET, || timer_ticks() >= required_ticks);
-    let ticks_after_run = timer_ticks();
-    if !delivered {
-        unsafe {
-            disable_interrupts();
-            set_timer_masked(true);
-        }
-        return DeliveryProof::NotDelivered {
-            ticks: ticks_after_run,
-        };
-    }
-
-    // Negative test: mask the vector with IF still set. Real deliveries stop.
-    unsafe { set_timer_masked(true) };
-    let before = timer_ticks();
-    // One in-flight interrupt may already have been accepted when the mask was
-    // written, so settle first, then require a strictly frozen window.
-    spin_until(PROOF_SPIN_BUDGET / 20, || false);
-    let settled = timer_ticks();
-    spin_until(PROOF_SPIN_BUDGET / 20, || false);
-    let ticks_while_masked = timer_ticks();
-    if ticks_while_masked != settled {
-        unsafe {
-            disable_interrupts();
-        }
-        return DeliveryProof::MaskIneffective {
-            before,
-            after: ticks_while_masked,
-        };
-    }
-
-    // Unmask and require delivery to resume.
-    unsafe { set_timer_masked(false) };
-    let resumed = spin_until(PROOF_SPIN_BUDGET, || timer_ticks() > ticks_while_masked);
-    let ticks_after_unmask = timer_ticks();
-
-    unsafe {
-        disable_interrupts();
-        set_timer_masked(true);
-    }
-
-    if !resumed {
-        return DeliveryProof::DidNotResume {
-            ticks: ticks_after_unmask,
-        };
-    }
-
-    DeliveryProof::Passed {
-        ticks_after_run,
-        ticks_while_masked,
-        ticks_after_unmask,
-    }
+    // SAFETY: the caller guarantees the timer vector is installed in the live
+    // IDT and the LVT is programmed.
+    unsafe { irq_proof::run(required_ticks, timer_ticks, set_masked) }
 }

@@ -6,6 +6,7 @@ publish = false
 build = "build.rs"
 
 [dependencies]
+aw-acpi = { path = "../../crates/aw-acpi" }
 aw-kernel-core = { path = "../../crates/aw-kernel-core" }
 aw-memory = { path = "../../crates/aw-memory" }
 aw-pci = { path = "../../crates/aw-pci" }

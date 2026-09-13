@@ -72,6 +72,17 @@ $configurations = @(
             'AW_APIC_TIMER_MASKED_STOPPED'
             'AW_APIC_TIMER_UNMASKED_RESUMED'
             'AW_APIC_TIMER_DELIVERY_PROOF_OK'
+            # A real device interrupt, routed by the MADT through an I/O APIC.
+            # gsi=2 for isa_irq=0 is the point: the interrupt source override
+            # was applied, not the IRQ number assumed to be the GSI number.
+            'AW_MADT_OK'
+            'AW_IOAPIC_FOUND id=0 madt_id=0 base=0x00000000fec00000 entries=24'
+            'AW_IOAPIC_ROUTED isa_irq=0 gsi=2 index=2 vector=0x0000000000000050'
+            'AW_IOAPIC_IRQ_FIRED'
+            'AW_IOAPIC_IRQ_MONOTONIC_OK'
+            'AW_IOAPIC_MASKED_STOPPED'
+            'AW_IOAPIC_UNMASKED_RESUMED'
+            'AW_IOAPIC_DELIVERY_PROOF_OK'
             # Rest of bring-up still clean.
             'AW_MEMORY_MAP_VALIDATE_OK'
             'AW_BOOTSTRAP_PAGE_ALLOC_OK'
@@ -91,6 +102,10 @@ $configurations = @(
             'AW_APIC_TIMER_NOT_FIRED'
             'AW_APIC_TIMER_MASK_INEFFECTIVE'
             'AW_APIC_TIMER_DID_NOT_RESUME'
+            'AW_IOAPIC_UNAVAILABLE'
+            'AW_IOAPIC_IRQ_NOT_FIRED'
+            'AW_IOAPIC_MASK_INEFFECTIVE'
+            'AW_IOAPIC_DID_NOT_RESUME'
             'AW_SECURITY_BASELINE_GAP'
         )
     }

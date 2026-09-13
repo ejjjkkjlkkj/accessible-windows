@@ -8,15 +8,21 @@
     allow(dead_code)
 )]
 
+mod acpi;
 mod apic_timer;
+mod device_irq;
 mod interrupt_vectors;
 mod interrupts;
+mod ioapic;
+mod irq_proof;
 mod legacy_pic;
 mod local_apic;
 mod memory_protection;
+mod pit;
 mod security_baseline;
 mod virtual_memory;
 
+use irq_proof::DeliveryProof;
 use memory_protection::{ProofOutcome, ProtectionProof};
 
 use aw_kernel_core::{
@@ -541,7 +547,7 @@ fn prove_apic_timer_delivery() {
     let proof = unsafe { apic_timer::run_delivery_proof(APIC_TIMER_REQUIRED_TICKS) };
 
     match proof {
-        apic_timer::DeliveryProof::Passed {
+        DeliveryProof::Passed {
             ticks_after_run,
             ticks_while_masked,
             ticks_after_unmask,
@@ -560,12 +566,12 @@ fn prove_apic_timer_delivery() {
             debug_write("\n");
             debug_write("AW_APIC_TIMER_DELIVERY_PROOF_OK\n");
         }
-        apic_timer::DeliveryProof::NotDelivered { ticks } => {
+        DeliveryProof::NotDelivered { ticks } => {
             debug_write("AW_APIC_TIMER_NOT_FIRED ticks=");
             debug_write_u64(ticks);
             debug_write("\n");
         }
-        apic_timer::DeliveryProof::MaskIneffective { before, after } => {
+        DeliveryProof::MaskIneffective { before, after } => {
             // The counter moved with the vector masked, so the increments are
             // not attributable to real interrupt delivery.
             debug_write("AW_APIC_TIMER_MASK_INEFFECTIVE before=");
@@ -574,8 +580,110 @@ fn prove_apic_timer_delivery() {
             debug_write_u64(after);
             debug_write("\n");
         }
-        apic_timer::DeliveryProof::DidNotResume { ticks } => {
+        DeliveryProof::DidNotResume { ticks } => {
             debug_write("AW_APIC_TIMER_DID_NOT_RESUME ticks=");
+            debug_write_u64(ticks);
+            debug_write("\n");
+        }
+    }
+}
+
+/// Route a real device interrupt through an I/O APIC and prove it arrives.
+///
+/// Unlike the local APIC timer, nothing on this path is internal to the CPU:
+/// the 8254 drives an interrupt pin, the I/O APIC translates that pin into the
+/// vector its redirection entry names, and only then does the CPU see anything.
+/// Which pin is not guessed - the MADT's interrupt source overrides decide it,
+/// and on most platforms ISA IRQ 0 is not global system interrupt 0.
+fn prove_device_interrupt_routing(handoff: &KernelHandoff) {
+    debug_write("AW_IOAPIC_BEGIN\n");
+
+    // SAFETY: the identity map is active and the RSDP address comes from the
+    // handoff the loader already validated.
+    let madt = match unsafe { acpi::find_madt(handoff.acpi_rsdp) } {
+        Ok(madt) => madt,
+        Err(error) => {
+            debug_write("AW_IOAPIC_UNAVAILABLE reason=madt_");
+            debug_write(error.name());
+            debug_write("\n");
+            return;
+        }
+    };
+
+    debug_write("AW_MADT_OK local_apic=");
+    debug_write_hex_u64(u64::from(madt.local_apic_address()));
+    debug_write(" dual_8259=");
+    debug_write_u8(u8::from(madt.dual_8259_present()));
+    debug_write("\n");
+
+    // SAFETY: CPL0 with interrupts disabled, after the IDT is installed and the
+    // local APIC is running in x2APIC mode.
+    let routed = match unsafe { device_irq::route_pit_through_ioapic(madt) } {
+        Ok(routed) => routed,
+        Err(reason) => {
+            debug_write("AW_IOAPIC_UNAVAILABLE reason=");
+            debug_write(reason);
+            debug_write("\n");
+            return;
+        }
+    };
+
+    let routing = routed.routing;
+    debug_write("AW_IOAPIC_FOUND id=");
+    debug_write_u8(routing.io_apic_id);
+    debug_write(" madt_id=");
+    debug_write_u8(routing.madt_id);
+    debug_write(" base=");
+    debug_write_hex_u64(routing.base);
+    debug_write(" entries=");
+    debug_write_u64(u64::from(routing.entry_count));
+    debug_write("\n");
+    debug_write("AW_IOAPIC_ROUTED isa_irq=");
+    debug_write_u8(device_irq::PIT_ISA_IRQ);
+    debug_write(" gsi=");
+    debug_write_u64(u64::from(routing.global_system_interrupt));
+    debug_write(" index=");
+    debug_write_u64(u64::from(routing.redirection_index));
+    debug_write(" vector=");
+    debug_write_hex_u64(u64::from(routing.vector));
+    debug_write("\n");
+
+    // SAFETY: CPL0 on a route this function just programmed, with the legacy
+    // PIC already remapped and fully masked by the APIC timer proof.
+    match unsafe { device_irq::prove_routed_delivery(&routed) } {
+        DeliveryProof::Passed {
+            ticks_after_run,
+            ticks_while_masked,
+            ticks_after_unmask,
+        } => {
+            debug_write("AW_IOAPIC_IRQ_FIRED\n");
+            debug_write("AW_IOAPIC_IRQ_MONOTONIC_OK ticks=");
+            debug_write_u64(ticks_after_run);
+            debug_write(" required=");
+            debug_write_u64(device_irq::REQUIRED_TICKS);
+            debug_write("\n");
+            debug_write("AW_IOAPIC_MASKED_STOPPED ticks=");
+            debug_write_u64(ticks_while_masked);
+            debug_write("\n");
+            debug_write("AW_IOAPIC_UNMASKED_RESUMED ticks=");
+            debug_write_u64(ticks_after_unmask);
+            debug_write("\n");
+            debug_write("AW_IOAPIC_DELIVERY_PROOF_OK\n");
+        }
+        DeliveryProof::NotDelivered { ticks } => {
+            debug_write("AW_IOAPIC_IRQ_NOT_FIRED ticks=");
+            debug_write_u64(ticks);
+            debug_write("\n");
+        }
+        DeliveryProof::MaskIneffective { before, after } => {
+            debug_write("AW_IOAPIC_MASK_INEFFECTIVE before=");
+            debug_write_u64(before);
+            debug_write(" after=");
+            debug_write_u64(after);
+            debug_write("\n");
+        }
+        DeliveryProof::DidNotResume { ticks } => {
+            debug_write("AW_IOAPIC_DID_NOT_RESUME ticks=");
             debug_write_u64(ticks);
             debug_write("\n");
         }
@@ -894,6 +1002,7 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         }
 
         prove_apic_timer_delivery();
+        prove_device_interrupt_routing(handoff);
 
         if !validate_memory_map(handoff) {
             halt_forever();

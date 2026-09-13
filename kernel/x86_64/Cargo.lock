@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "aw-acpi"
+version = "0.1.0"
+
+[[package]]
 name = "aw-kernel-core"
 version = "0.1.0"
 
@@ -10,6 +14,7 @@ version = "0.1.0"
 name = "aw-kernel-x86_64"
 version = "0.1.0"
 dependencies = [
+ "aw-acpi",
  "aw-kernel-core",
  "aw-memory",
  "aw-pci",
