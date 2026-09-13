@@ -20,13 +20,28 @@ use crate::{debug_write, debug_write_hex_u64, halt_forever};
 
 const CODE_DESCRIPTOR: u64 = GdtEntry::code64(PrivilegeLevel::Ring0).raw();
 const DATA_DESCRIPTOR: u64 = GdtEntry::data64(PrivilegeLevel::Ring0).raw();
+const USER_DATA_DESCRIPTOR: u64 = GdtEntry::data64(PrivilegeLevel::Ring3).raw();
+const USER_CODE_DESCRIPTOR: u64 = GdtEntry::code64(PrivilegeLevel::Ring3).raw();
 
 const CODE_SELECTOR_INDEX: u16 = 1;
 const DATA_SELECTOR_INDEX: u16 = 2;
 const TSS_SELECTOR_INDEX: u16 = 3;
+// User segments follow the TSS descriptor (which occupies indices 3 and 4), so
+// the TSS selector stays 0x18 and every existing GDT/TSS/SMP proof is untouched.
+// The order - data at 5, code at 6 - is what a later `sysret` needs: with
+// `IA32_STAR[63:48] = 0x20`, `sysret` derives user SS from 0x20+8 = 0x28 and
+// user CS from 0x20+16 = 0x30.
+const USER_DATA_SELECTOR_INDEX: u16 = 5;
+const USER_CODE_SELECTOR_INDEX: u16 = 6;
 const CODE_SELECTOR_RAW: u16 = CODE_SELECTOR_INDEX << 3;
 const DATA_SELECTOR_RAW: u16 = DATA_SELECTOR_INDEX << 3;
 const TSS_SELECTOR_RAW: u16 = TSS_SELECTOR_INDEX << 3;
+/// Ring 3 selectors carry RPL 3 (the low two bits).
+pub(crate) const USER_DATA_SELECTOR_RAW: u16 = (USER_DATA_SELECTOR_INDEX << 3) | 3;
+pub(crate) const USER_CODE_SELECTOR_RAW: u16 = (USER_CODE_SELECTOR_INDEX << 3) | 3;
+/// Number of 8-byte slots in the GDT: null, kernel code/data, the TSS
+/// descriptor (two slots) and the user data/code segments.
+const GDT_ENTRY_COUNT: usize = 7;
 
 /// Number of CPU-reserved exception vectors that get a dedicated stub.
 const EXCEPTION_IDT_ENTRY_COUNT: usize = 32;
@@ -116,7 +131,15 @@ const _: () = assert!(DOUBLE_FAULT_IST_STACK_SIZE.is_multiple_of(PAGE_SIZE));
 
 #[used]
 #[unsafe(link_section = ".data.gdt")]
-static mut GDT: [u64; 5] = [0, CODE_DESCRIPTOR, DATA_DESCRIPTOR, 0, 0];
+static mut GDT: [u64; GDT_ENTRY_COUNT] = [
+    0,
+    CODE_DESCRIPTOR,
+    DATA_DESCRIPTOR,
+    0,
+    0,
+    USER_DATA_DESCRIPTOR,
+    USER_CODE_DESCRIPTOR,
+];
 
 #[used]
 #[unsafe(link_section = ".data.tss")]
@@ -151,7 +174,7 @@ struct ApIstStack {
     stack: [u8; AP_IST_STACK_SIZE],
 }
 
-static mut AP_GDTS: [[u64; 5]; MAX_CPUS] = [[0; 5]; MAX_CPUS];
+static mut AP_GDTS: [[u64; GDT_ENTRY_COUNT]; MAX_CPUS] = [[0; GDT_ENTRY_COUNT]; MAX_CPUS];
 static mut AP_TSSES: [TaskStateSegment; MAX_CPUS] = [TaskStateSegment::EMPTY; MAX_CPUS];
 static mut AP_IST_STACKS: [ApIstStack; MAX_CPUS] = [const {
     ApIstStack {
@@ -190,7 +213,9 @@ pub(crate) unsafe fn install_for_ap(cpu: usize) -> Option<ApTables> {
     // SAFETY: `cpu` indexes this AP's own slot, which no other CPU touches.
     let (gdt, tss, ist) = unsafe {
         (
-            core::ptr::addr_of_mut!(AP_GDTS).cast::<[u64; 5]>().add(cpu),
+            core::ptr::addr_of_mut!(AP_GDTS)
+                .cast::<[u64; GDT_ENTRY_COUNT]>()
+                .add(cpu),
             core::ptr::addr_of_mut!(AP_TSSES)
                 .cast::<TaskStateSegment>()
                 .add(cpu),
@@ -212,10 +237,13 @@ pub(crate) unsafe fn install_for_ap(cpu: usize) -> Option<ApTables> {
         entries.add(2).write(DATA_DESCRIPTOR);
         entries.add(3).write(tss_low);
         entries.add(4).write(tss_high);
+        entries.add(5).write(USER_DATA_DESCRIPTOR);
+        entries.add(6).write(USER_CODE_DESCRIPTOR);
     }
 
     let gdt_pointer =
-        DescriptorTablePointer::new(gdt as u64, 5, core::mem::size_of::<u64>()).ok()?;
+        DescriptorTablePointer::new(gdt as u64, GDT_ENTRY_COUNT, core::mem::size_of::<u64>())
+            .ok()?;
     let idt_pointer = DescriptorTablePointer::new(
         core::ptr::addr_of!(IDT) as u64,
         IDT_ENTRY_COUNT,
@@ -675,7 +703,7 @@ extern "sysv64" fn handle_exception(frame: *mut ExceptionFrame) {
 /// `lgdt` only swaps the table; the CPU keeps using the descriptor caches
 /// loaded by the firmware. Leaving them stale works by accident right up to the
 /// first `iretq`, which re-validates the saved `CS`/`SS` **selectors** against
-/// the live GDT: a firmware selector such as `0x38` is past the five-entry
+/// the live GDT: a firmware selector such as `0x38` is past the seven-entry
 /// kernel table, so the return from the very first hardware interrupt raises
 /// `#GP(0x38)` instead of resuming. A far return through the kernel code
 /// selector, followed by explicit data-segment loads, makes the visible
@@ -776,11 +804,13 @@ fn prepare_tss_and_gdt() -> (DescriptorTablePointer, u64) {
         gdt.add(2).write(DATA_DESCRIPTOR);
         gdt.add(3).write(tss_low);
         gdt.add(4).write(tss_high);
+        gdt.add(5).write(USER_DATA_DESCRIPTOR);
+        gdt.add(6).write(USER_CODE_DESCRIPTOR);
     }
 
     let gdt_pointer = match DescriptorTablePointer::new(
         core::ptr::addr_of!(GDT) as u64,
-        5,
+        GDT_ENTRY_COUNT,
         core::mem::size_of::<u64>(),
     ) {
         Ok(pointer) => pointer,
@@ -788,6 +818,23 @@ fn prepare_tss_and_gdt() -> (DescriptorTablePointer, u64) {
     };
 
     (gdt_pointer, stack_top)
+}
+
+/// Set the bootstrap processor's `TSS.rsp0`: the kernel stack the CPU switches
+/// to on a privilege change into Ring 0 (an interrupt or exception taken while
+/// running Ring 3 code). Ring 3 must not be entered before this is set, or such
+/// a transition would push its frame through a null stack pointer.
+///
+/// # Safety
+///
+/// CPL0, single core. `rsp0` must be the 16-byte-aligned top of a writable
+/// kernel stack that stays valid for as long as Ring 3 can run.
+pub(crate) unsafe fn set_bootstrap_rsp0(rsp0: u64) {
+    // SAFETY: single core; the TSS is not mid-task-switch, so writing rsp0 is a
+    // plain memory store the CPU reads only on the next privilege change.
+    unsafe {
+        (*core::ptr::addr_of_mut!(TSS)).rsp0 = rsp0;
+    }
 }
 
 /// Install the GDT, TSS/IST and exception-only IDT.

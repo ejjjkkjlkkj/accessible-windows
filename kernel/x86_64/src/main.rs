@@ -27,6 +27,7 @@ mod page_mapper;
 mod pci_config;
 mod percpu;
 mod pit;
+mod ring3;
 mod security_baseline;
 mod smp;
 mod virtual_memory;
@@ -1417,6 +1418,7 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
             Some(map) => {
                 prove_memory_protections(&map);
                 prove_runtime_mapping();
+                ring3::prove();
             }
             None => debug_write("AW_MEMORY_PROTECTION_SKIPPED reason=no-kernel-page-tables\n"),
         }

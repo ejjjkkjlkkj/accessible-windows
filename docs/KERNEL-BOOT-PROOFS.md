@@ -80,8 +80,10 @@ kernel ELF for symbol-level triage.
 | Per-CPU timer armed on an AP | PASS | `AW_PERCPU_AP_TIMER_OK aps=3` (`smp`); each AP arms its own Local APIC timer, idles under `sti`/`hlt`, and its own block's `timer_ticks` advances |
 | Per-CPU #DF on an AP's IST | TO PROVE | only the bootstrap processor's IST is proved by a real fault |
 | Scheduler / anything running on an AP | TO BUILD | APs park in `hlt` |
-| SMP / per-CPU GDT-TSS-IST | TO BUILD | - |
-| Ring 3 + syscalls | TO BUILD | - |
+| Ring 3 entry (`iretq` to CPL3) | PASS | `AW_RING3_PROOF_OK`; a mapped user page runs at CPL3, its syscall's saved RIP lands inside the user page |
+| `syscall` from Ring 3 | PASS | `AW_SYSCALL_RECEIVED nr=0x101 arg=0x5a11c0de`; `LSTAR` entry runs at CPL0 with the number/argument the user set |
+| Ring 3 preemption / user scheduler | TO BUILD | one-shot proof: the handler returns to the kernel, it does not schedule user threads |
+| User-page `swapgs` on entry | TO BUILD | entry masks interrupts instead; a real user `GS` base needs `swapgs` |
 | Physical hardware boot | TO PROVE | never run on real hardware from this tree |
 
 Error codes above are `#PF` error codes (Intel SDM 4.7): bit 0 present, bit 1

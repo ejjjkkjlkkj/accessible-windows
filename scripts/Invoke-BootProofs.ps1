@@ -67,6 +67,13 @@ $configurations = @(
             'AW_VMM_UNMAP_OK'
             'AW_VMM_UNMAP_FAULT_OK'
             'AW_VMM_RUNTIME_MAP_PROOF_OK'
+            # A real drop to Ring 3 and back: the user routine ran at CPL3 and
+            # made a syscall carrying a known number and argument, and its return
+            # address lands inside the user code page - it came from CPL3, not
+            # from anywhere in the kernel.
+            'AW_RING3_MAP_OK code_va=0x0000000200000000'
+            'AW_SYSCALL_RECEIVED nr=0x0000000000000101 arg=0x000000005a11c0de'
+            'AW_RING3_PROOF_OK'
             # CPU protection bits actually latched.
             'AW_SECURITY_ENFORCED wp=1 nx=1'
             'AW_SECURITY_BASELINE_OK'
@@ -121,6 +128,7 @@ $configurations = @(
             'AW_MEMORY_PROTECTION_SKIPPED'
             'AW_VMM_FAIL'
             'AW_VMM_RUNTIME_MAP_FAIL'
+            'AW_RING3_FAIL'
             'AW_GDT_SEGMENTS_FAIL'
             'AW_PERCPU_BSP_FAIL'
             'AW_PERCPU_FAIL'
@@ -163,6 +171,7 @@ $configurations = @(
             # The rest of bring-up must survive having other CPUs running.
             'AW_MEMORY_PROTECTION_PROOF_OK'
             'AW_VMM_RUNTIME_MAP_PROOF_OK'
+            'AW_RING3_PROOF_OK'
             'AW_APIC_TIMER_DELIVERY_PROOF_OK'
             'AW_IOAPIC_DELIVERY_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
@@ -175,6 +184,7 @@ $configurations = @(
             'AW_PERCPU_BSP_FAIL'
             'AW_PERCPU_FAIL'
             'AW_VMM_RUNTIME_MAP_FAIL'
+            'AW_RING3_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )
