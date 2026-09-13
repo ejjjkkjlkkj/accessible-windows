@@ -8,10 +8,13 @@
     allow(dead_code)
 )]
 
+extern crate alloc;
+
 mod acpi;
 mod apic_timer;
 mod device_irq;
 mod frame_allocator;
+mod heap;
 mod interrupt_vectors;
 mod interrupts;
 mod ioapic;
@@ -1418,6 +1421,7 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
             Some(map) => {
                 prove_memory_protections(&map);
                 prove_runtime_mapping();
+                heap::prove();
                 ring3::prove();
             }
             None => debug_write("AW_MEMORY_PROTECTION_SKIPPED reason=no-kernel-page-tables\n"),

@@ -67,6 +67,15 @@ $configurations = @(
             'AW_VMM_UNMAP_OK'
             'AW_VMM_UNMAP_FAULT_OK'
             'AW_VMM_RUNTIME_MAP_PROOF_OK'
+            # A kernel heap behind the global allocator: Box/Vec allocate, a
+            # vector grows and sums, a freed block is reused, and an over-aligned
+            # allocation comes back aligned.
+            'AW_HEAP_MAP_OK pages=512'
+            'AW_HEAP_BOX_OK'
+            'AW_HEAP_VEC_OK sum=499500'
+            'AW_HEAP_REUSE_OK'
+            'AW_HEAP_ALIGN_OK'
+            'AW_HEAP_PROOF_OK'
             # A real drop to Ring 3 and back: the user routine ran at CPL3 and
             # made a syscall carrying a known number and argument, and its return
             # address lands inside the user code page - it came from CPL3, not
@@ -128,6 +137,7 @@ $configurations = @(
             'AW_MEMORY_PROTECTION_SKIPPED'
             'AW_VMM_FAIL'
             'AW_VMM_RUNTIME_MAP_FAIL'
+            'AW_HEAP_FAIL'
             'AW_RING3_FAIL'
             'AW_GDT_SEGMENTS_FAIL'
             'AW_PERCPU_BSP_FAIL'
@@ -171,6 +181,7 @@ $configurations = @(
             # The rest of bring-up must survive having other CPUs running.
             'AW_MEMORY_PROTECTION_PROOF_OK'
             'AW_VMM_RUNTIME_MAP_PROOF_OK'
+            'AW_HEAP_PROOF_OK'
             'AW_RING3_PROOF_OK'
             'AW_APIC_TIMER_DELIVERY_PROOF_OK'
             'AW_IOAPIC_DELIVERY_PROOF_OK'
@@ -184,6 +195,7 @@ $configurations = @(
             'AW_PERCPU_BSP_FAIL'
             'AW_PERCPU_FAIL'
             'AW_VMM_RUNTIME_MAP_FAIL'
+            'AW_HEAP_FAIL'
             'AW_RING3_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
