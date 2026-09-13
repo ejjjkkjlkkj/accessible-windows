@@ -24,8 +24,10 @@ SECTORS_PER_CLUSTER = 4  # 2 KiB clusters
 RESERVED_SECTORS = 1
 NUM_FATS = 2
 ROOT_ENTRIES = 512
-# Cluster count kept comfortably inside the FAT16 range (4085..65524).
-DATA_CLUSTERS = 20000
+# Cluster count kept comfortably inside the FAT16 range (4085..65524). At 2 KiB
+# per cluster this is a ~10 MiB ESP - far more than the loader and kernel need,
+# small enough to write to USB quickly.
+DATA_CLUSTERS = 5000
 
 FAT16_EOC = 0xFFFF
 # A fixed, valid FAT date/time (2026-01-01 00:00:00) so entries are not zero.
