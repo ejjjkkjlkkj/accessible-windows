@@ -17,7 +17,12 @@ mod ioapic;
 mod irq_proof;
 mod legacy_pic;
 mod local_apic;
+mod interrupt_stub;
 mod memory_protection;
+mod msi;
+#[cfg(feature = "msi-proof-device")]
+mod msi_proof;
+mod pci_config;
 mod pit;
 mod security_baseline;
 mod virtual_memory;
@@ -27,7 +32,7 @@ use memory_protection::{ProofOutcome, ProtectionProof};
 
 use aw_kernel_core::{
     HANDOFF_FLAG_FRAMEBUFFER_PRESENT, HANDOFF_FLAG_PCIE_ECAM_PRESENT, HandoffPixelFormat,
-    KernelHandoff, MemoryDescriptorHandoff, PciEcamHandoff, UEFI_MEMORY_TYPE_CONVENTIONAL,
+    KernelHandoff, MemoryDescriptorHandoff, UEFI_MEMORY_TYPE_CONVENTIONAL,
 };
 use aw_memory::{BootstrapPageAllocator, PhysicalRange};
 use aw_pci::{PciAddress, PciDeviceIdentity};
@@ -700,40 +705,81 @@ fn pci_read_u32(address: PciAddress, register_offset: u8) -> Option<u32> {
     }
 }
 
-fn pcie_ecam_read_u32(
-    region: PciEcamHandoff,
-    bus: u8,
-    device: u8,
-    function: u8,
-    register_offset: u16,
-) -> Option<u32> {
-    if !region.is_valid()
-        || bus < region.start_bus
-        || bus > region.end_bus
-        || device > 31
-        || function > 7
-        || register_offset > 0x0ffc
-        || register_offset & 3 != 0
-    {
-        return None;
-    }
+/// Prove an MSI arrives: the device writes the interrupt into the local APIC
+/// itself, with no pin and no I/O APIC anywhere in the path.
+///
+/// Only built with `msi-proof-device`, which also pulls in the driver for the
+/// emulator test device this drives.
+#[cfg(feature = "msi-proof-device")]
+fn prove_msi_delivery(handoff: &KernelHandoff) {
+    debug_write("AW_MSI_BEGIN\n");
 
-    let relative_bus = u64::from(bus - region.start_bus);
-    let offset = (relative_bus << 20)
-        | (u64::from(device) << 15)
-        | (u64::from(function) << 12)
-        | u64::from(register_offset);
-    let address = region.base_address.checked_add(offset)?;
-    if address > usize::MAX as u64 {
-        return None;
-    }
+    // SAFETY: CPL0 with interrupts disabled, after the IDT is installed and the
+    // local APIC is running in x2APIC mode.
+    let device = match unsafe { msi_proof::program_msi_device(handoff) } {
+        Ok(device) => device,
+        Err(reason) => {
+            debug_write("AW_MSI_UNAVAILABLE reason=");
+            debug_write(reason);
+            debug_write("\n");
+            return;
+        }
+    };
 
-    // SAFETY: The region was validated from ACPI MCFG before ExitBootServices.
-    // ECAM configuration registers are MMIO and are read using volatile access.
-    // The bootstrap kernel is still executing with the firmware-established
-    // physical-address mappings; the future VMM must explicitly preserve/map
-    // these regions before replacing those page tables.
-    Some(unsafe { core::ptr::read_volatile(address as usize as *const u32) })
+    debug_write("AW_MSI_DEVICE_FOUND bus=");
+    debug_write_u8(device.bus);
+    debug_write(" device=");
+    debug_write_u8(device.device);
+    debug_write(" function=");
+    debug_write_u8(device.function);
+    debug_write("\n");
+    debug_write("AW_MSI_PROGRAMMED vector=");
+    debug_write_hex_u64(u64::from(device.vector));
+    debug_write(" address=");
+    debug_write_hex_u64(u64::from(device.message.address));
+    debug_write(" data=");
+    debug_write_hex_u64(u64::from(device.message.data));
+    debug_write("\n");
+
+    // SAFETY: CPL0 on a device this function just programmed.
+    match unsafe { msi_proof::prove_msi_delivery(&device) } {
+        DeliveryProof::Passed {
+            ticks_after_run,
+            ticks_while_masked,
+            ticks_after_unmask,
+        } => {
+            debug_write("AW_MSI_FIRED\n");
+            debug_write("AW_MSI_MONOTONIC_OK ticks=");
+            debug_write_u64(ticks_after_run);
+            debug_write(" required=");
+            debug_write_u64(msi_proof::REQUIRED_TICKS);
+            debug_write("\n");
+            debug_write("AW_MSI_MASKED_STOPPED ticks=");
+            debug_write_u64(ticks_while_masked);
+            debug_write("\n");
+            debug_write("AW_MSI_UNMASKED_RESUMED ticks=");
+            debug_write_u64(ticks_after_unmask);
+            debug_write("\n");
+            debug_write("AW_MSI_DELIVERY_PROOF_OK\n");
+        }
+        DeliveryProof::NotDelivered { ticks } => {
+            debug_write("AW_MSI_NOT_FIRED ticks=");
+            debug_write_u64(ticks);
+            debug_write("\n");
+        }
+        DeliveryProof::MaskIneffective { before, after } => {
+            debug_write("AW_MSI_MASK_INEFFECTIVE before=");
+            debug_write_u64(before);
+            debug_write(" after=");
+            debug_write_u64(after);
+            debug_write("\n");
+        }
+        DeliveryProof::DidNotResume { ticks } => {
+            debug_write("AW_MSI_DID_NOT_RESUME ticks=");
+            debug_write_u64(ticks);
+            debug_write("\n");
+        }
+    }
 }
 
 fn classify_pci_device(identity: PciDeviceIdentity, found: &mut [bool; 4]) {
@@ -784,25 +830,25 @@ fn scan_pcie_ecam(handoff: &KernelHandoff) -> bool {
         for bus in region.start_bus..=region.end_bus {
             for device in 0_u8..32 {
                 let vendor_device0 =
-                    pcie_ecam_read_u32(region, bus, device, 0, 0x00).unwrap_or(u32::MAX);
+                    pci_config::read_u32(region, bus, device, 0, 0x00).unwrap_or(u32::MAX);
                 if vendor_device0 as u16 == 0xffff {
                     continue;
                 }
 
-                let header_register = pcie_ecam_read_u32(region, bus, device, 0, 0x0c).unwrap_or(0);
+                let header_register = pci_config::read_u32(region, bus, device, 0, 0x0c).unwrap_or(0);
                 let header_type = ((header_register >> 16) & 0xff) as u8;
                 let function_count = if header_type & 0x80 != 0 { 8 } else { 1 };
 
                 for function in 0_u8..function_count {
                     let vendor_device =
-                        pcie_ecam_read_u32(region, bus, device, function, 0x00).unwrap_or(u32::MAX);
+                        pci_config::read_u32(region, bus, device, function, 0x00).unwrap_or(u32::MAX);
                     if vendor_device as u16 == 0xffff {
                         continue;
                     }
 
                     let class_revision =
-                        pcie_ecam_read_u32(region, bus, device, function, 0x08).unwrap_or(0);
-                    let subsystem = pcie_ecam_read_u32(region, bus, device, function, 0x2c);
+                        pci_config::read_u32(region, bus, device, function, 0x08).unwrap_or(0);
+                    let subsystem = pci_config::read_u32(region, bus, device, function, 0x2c);
                     let identity = PciDeviceIdentity::from_config_registers(
                         vendor_device,
                         class_revision,
@@ -1003,6 +1049,8 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
 
         prove_apic_timer_delivery();
         prove_device_interrupt_routing(handoff);
+        #[cfg(feature = "msi-proof-device")]
+        prove_msi_delivery(handoff);
 
         if !validate_memory_map(handoff) {
             halt_forever();

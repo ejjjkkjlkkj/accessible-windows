@@ -62,7 +62,13 @@ kernel ELF for symbol-level triage.
 | Guard page below #DF stack | PASS | `AW_MEMORY_PROTECTION_OK name=guard-page error_code=0x00` |
 | APIC timer IRQ delivery | PASS | `AW_APIC_TIMER_FIRED`, `AW_APIC_TIMER_MONOTONIC_OK ticks>=8` |
 | APIC timer negative test | PASS | `AW_APIC_TIMER_MASKED_STOPPED` then `AW_APIC_TIMER_UNMASKED_RESUMED` |
-| IOAPIC / MSI device IRQs | TO BUILD | - |
+| MADT parse + ISA IRQ override | PASS | `AW_IOAPIC_ROUTED isa_irq=0 gsi=2` (the override, not the IRQ number) |
+| I/O APIC device IRQ delivery | PASS | `AW_IOAPIC_IRQ_FIRED`, `AW_IOAPIC_IRQ_MONOTONIC_OK ticks>=8` |
+| I/O APIC negative test | PASS | `AW_IOAPIC_MASKED_STOPPED` then `AW_IOAPIC_UNMASKED_RESUMED` |
+| MSI delivery | PASS | `AW_MSI_FIRED`, `AW_MSI_MONOTONIC_OK ticks>=8` (`msi-smoke`) |
+| MSI negative test | PASS | `AW_MSI_MASKED_STOPPED` then `AW_MSI_UNMASKED_RESUMED` |
+| MSI-X | TO BUILD | - |
+| INTx routing through ACPI `_PRT` | TO BUILD | - |
 | SMP / per-CPU GDT-TSS-IST | TO BUILD | - |
 | Ring 3 + syscalls | TO BUILD | - |
 | Physical hardware boot | TO PROVE | never run on real hardware from this tree |
@@ -80,6 +86,29 @@ monotonically increasing counter on its own does not distinguish a real ISR from
 a polling artefact. The proof requires several deliveries, then masks
 `LVT_TIMER` and requires the counter to freeze, then unmasks it and requires it
 to move again.
+
+**A device interrupt is proved on a device, not on the local APIC.** The timer
+proof shows the CPU taking an interrupt the CPU itself generated, which says
+nothing about the path a peripheral uses. The I/O APIC proof drives the 8254,
+so the interrupt has to leave a device, cross a redirection entry, and arrive on
+the vector that entry names. The pin is not assumed either: the MADT's interrupt
+source overrides are applied, and the log records `isa_irq=0 gsi=2` - the case
+where taking the IRQ number for the global system interrupt number would have
+silently programmed the wrong pin.
+
+**The MSI proof pokes the device throughout the masked window.** A periodic
+timer keeps firing on its own, so masking it and watching the counter freeze is
+enough. A device only fires when asked, so a frozen counter would prove nothing
+if nobody were asking. The proof therefore keeps requesting interrupts for the
+whole masked window: the counter staying still means the device's own MSI enable
+bit suppressed interrupts that were actively being requested.
+
+The `msi-smoke` configuration is the only one that builds a driver for QEMU's
+`edu` device, behind the `msi-proof-device` feature. It exists because `edu` can
+be asked to raise an interrupt without first implementing a real controller's
+command protocol; everything it exercises - the capability walk, the message
+encoding, bus mastering, the vector plumbing - is what an NVMe or xHCI driver
+will use unchanged.
 
 **The memory protections fault on purpose.** Page-table flags describe an
 intention; only a `#PF` with the right error code shows the CPU enforcing it.
@@ -102,6 +131,10 @@ work, and user-mode fault handling will need exactly the same machinery.
 - Only the #DF emergency stack has a guard page. The bootstrap kernel still runs
   on the stack the UEFI loader handed over; guarding it requires the kernel to
   allocate and switch to its own stack first.
+- MSI is proved on one emulated device with one vector. MSI-X, multiple
+  vectors per device, and per-vector masking are untouched, as is INTx routing
+  through the ACPI `_PRT` - which needs an AML interpreter, so a device without
+  MSI cannot currently be routed at all.
 - The kernel image is linked non-relocatable at 2 MiB. If firmware ever owns
   that range the loader fails the boot loudly (`reason=fixed_base_unavailable`)
   rather than misloading; a relocatable or higher-half image is the long-term

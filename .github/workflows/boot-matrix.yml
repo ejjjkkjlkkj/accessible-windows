@@ -204,6 +204,16 @@ jobs:
           grep -F "AW_PCI_AHCI_FOUND" "$LOG"
           grep -F "AW_PCI_XHCI_FOUND" "$LOG"
           grep -F "AW_PCI_HDA_FOUND" "$LOG"
+          # Device interrupt routing needs x2APIC, which not every CPU model in
+          # this matrix reports. Where it is available the proof must pass; a
+          # failed mask test is never acceptable, on any model.
+          if grep -qF "AW_CPU_X2APIC_AVAILABLE" "$LOG"; then
+            grep -F "AW_MADT_OK" "$LOG"
+            grep -F "AW_IOAPIC_DELIVERY_PROOF_OK" "$LOG"
+          fi
+          ! grep -qF "AW_IOAPIC_IRQ_NOT_FIRED" "$LOG"
+          ! grep -qF "AW_IOAPIC_MASK_INEFFECTIVE" "$LOG"
+          ! grep -qF "AW_IOAPIC_DID_NOT_RESUME" "$LOG"
           grep -F "AW_NATIVE_FRAMEBUFFER_WRITE_OK" "$LOG"
           grep -F "AW_NATIVE_KERNEL_IDLE" "$LOG"
           if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 124 ]; then

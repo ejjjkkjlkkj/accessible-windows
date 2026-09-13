@@ -56,7 +56,9 @@
       faults and a real #DF on IST1
 - [x] APIC timer interrupts: periodic delivery, monotonic tick counter, EOI, and
       the negative test that masking the vector stops it
-- [ ] IOAPIC/MSI routing for device interrupts
+- [x] IOAPIC/MSI routing for device interrupts: a real device IRQ routed by the
+      MADT's interrupt source overrides through an I/O APIC, and an MSI written
+      straight into the local APIC, each proved by delivery plus a mask test
 - [ ] SMP bring-up on both AMD and Intel test profiles
 - [ ] Scheduler
 - [ ] User/kernel privilege separation

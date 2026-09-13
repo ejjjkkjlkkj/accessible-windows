@@ -34,67 +34,7 @@ pub const REQUIRED_TICKS: u64 = 8;
 
 static IOAPIC_TICKS: AtomicU64 = AtomicU64::new(0);
 
-/// Define a bare interrupt entry point that preserves every register, calls a
-/// Rust dispatch function, and returns with `iretq`.
-///
-/// External interrupts push no error code, so the frame the CPU builds is what
-/// `iretq` expects as-is; the only requirement is that nothing the handler runs
-/// is visible to the interrupted context.
-macro_rules! device_interrupt_stub {
-    ($stub:ident, $dispatch:path) => {
-        core::arch::global_asm!(
-            concat!(".global ", stringify!($stub)),
-            concat!(".type ", stringify!($stub), ",@function"),
-            concat!(stringify!($stub), ":"),
-            "push rax",
-            "push rcx",
-            "push rdx",
-            "push rsi",
-            "push rdi",
-            "push r8",
-            "push r9",
-            "push r10",
-            "push r11",
-            "push rbx",
-            "push rbp",
-            "push r12",
-            "push r13",
-            "push r14",
-            "push r15",
-            "cld",
-            // Keep the exact frame position in RBX while the System V ABI's
-            // 16-byte stack alignment is forced for the call.
-            "mov rbx, rsp",
-            "and rsp, -16",
-            "call {dispatch}",
-            "mov rsp, rbx",
-            "pop r15",
-            "pop r14",
-            "pop r13",
-            "pop r12",
-            "pop rbp",
-            "pop rbx",
-            "pop r11",
-            "pop r10",
-            "pop r9",
-            "pop r8",
-            "pop rdi",
-            "pop rsi",
-            "pop rdx",
-            "pop rcx",
-            "pop rax",
-            "iretq",
-            concat!(".size ", stringify!($stub), ", .-", stringify!($stub)),
-            dispatch = sym $dispatch,
-        );
-
-        unsafe extern "C" {
-            fn $stub();
-        }
-    };
-}
-
-device_interrupt_stub!(aw_ioapic_isr, ioapic_dispatch);
+crate::device_interrupt_stub!(aw_ioapic_isr, ioapic_dispatch);
 
 extern "C" fn ioapic_dispatch() {
     IOAPIC_TICKS.fetch_add(1, Ordering::Relaxed);
@@ -232,22 +172,28 @@ pub unsafe fn route_pit_through_ioapic(madt: Madt<'static>) -> Result<RoutedIrq,
 /// through the 8259 and the proof could not attribute what it counted. Returns
 /// with interrupts disabled and the redirection entry masked.
 pub unsafe fn prove_routed_delivery(routed: &RoutedIrq) -> DeliveryProof {
-    let io_apic = routed.io_apic;
-    let index = routed.routing.redirection_index;
-
     // Start the source only once the route is programmed and masked, so no edge
     // can arrive before the vector exists.
     // SAFETY: CPL0; ISA IRQ 0 is routed and masked at the I/O APIC.
     unsafe { pit::program_rate_generator(pit::divisor_for_hz(PIT_PROOF_HZ)) };
 
-    let set_masked = |masked: bool| {
+    // SAFETY: CPL0 after the vector is installed and the entry programmed.
+    unsafe { irq_proof::run(REQUIRED_TICKS, routed) }
+}
+
+impl irq_proof::InterruptSource for RoutedIrq {
+    fn ticks(&self) -> u64 {
+        ioapic_ticks()
+    }
+
+    fn set_masked(&self, masked: bool) {
         // SAFETY: CPL0, single core; this touches only the mask bit of the
         // entry this route owns. A failed write must not be papered over: an
         // unmask that fails simply stops delivery, and the proof then fails
         // honestly instead of reporting a route that was never live.
-        let _ = unsafe { io_apic.set_masked(index, masked) };
-    };
-
-    // SAFETY: CPL0 after the vector is installed and the entry programmed.
-    unsafe { irq_proof::run(REQUIRED_TICKS, ioapic_ticks, set_masked) }
+        let _ = unsafe {
+            self.io_apic
+                .set_masked(self.routing.redirection_index, masked)
+        };
+    }
 }

@@ -210,6 +210,22 @@ pub unsafe fn arm_periodic_after_idt() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The periodic timer as the delivery proof sees it. It runs free once armed,
+/// so there is nothing to poke.
+struct LocalApicTimerSource;
+
+impl irq_proof::InterruptSource for LocalApicTimerSource {
+    fn ticks(&self) -> u64 {
+        timer_ticks()
+    }
+
+    fn set_masked(&self, masked: bool) {
+        // SAFETY: the proof only runs at CPL0 after `program_periodic`, which
+        // is what `set_timer_masked` requires.
+        unsafe { set_timer_masked(masked) };
+    }
+}
+
 /// Prove real interrupt delivery, then prove the counter is driven by it.
 ///
 /// The sequence, including the negative test that masking `LVT_TIMER` freezes
@@ -220,12 +236,7 @@ pub unsafe fn arm_periodic_after_idt() -> Result<(), &'static str> {
 /// CPL0 only, after [`arm_periodic_after_idt`]. Returns with interrupts
 /// disabled and the timer masked, whatever the outcome.
 pub unsafe fn run_delivery_proof(required_ticks: u64) -> DeliveryProof {
-    let set_masked = |masked: bool| {
-        // SAFETY: CPL0 after `program_periodic`, as the caller guarantees.
-        unsafe { set_timer_masked(masked) };
-    };
-
     // SAFETY: the caller guarantees the timer vector is installed in the live
     // IDT and the LVT is programmed.
-    unsafe { irq_proof::run(required_ticks, timer_ticks, set_masked) }
+    unsafe { irq_proof::run(required_ticks, &LocalApicTimerSource) }
 }

@@ -110,6 +110,38 @@ $configurations = @(
         )
     }
     @{
+        # MSI has no pin and no I/O APIC in the path: the device writes the
+        # interrupt straight into the local APIC's message window. QEMU's `edu`
+        # device is the only thing here that can be asked to send one without
+        # first implementing a real controller's command protocol, so this
+        # configuration - and only this one - builds the driver for it.
+        Name     = 'msi-smoke'
+        Features = @('msi-proof-device')
+        QemuArgs = @('-device', 'edu')
+        Required = @(
+            'AW_MSI_DEVICE_FOUND'
+            'AW_MSI_PROGRAMMED vector=0x0000000000000051 address=0x00000000fee00000 data=0x0000000000000051'
+            'AW_MSI_FIRED'
+            'AW_MSI_MONOTONIC_OK'
+            'AW_MSI_MASKED_STOPPED'
+            'AW_MSI_UNMASKED_RESUMED'
+            'AW_MSI_DELIVERY_PROOF_OK'
+            # The I/O APIC path must keep working with the device present.
+            'AW_IOAPIC_DELIVERY_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_MSI_UNAVAILABLE'
+            'AW_MSI_NOT_FIRED'
+            'AW_MSI_MASK_INEFFECTIVE'
+            'AW_MSI_DID_NOT_RESUME'
+            # Nothing may arrive on a vector this kernel did not install, which
+            # is what an INTx fallback slipping through would look like.
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
         Name     = 'exception-smoke'
         Features = @('exception-smoke-test')
         Required = @(
@@ -135,8 +167,13 @@ $failures = @()
 
 foreach ($configuration in $configurations) {
     Write-Host "== $($configuration.Name) =="
+    # Assigned explicitly: `$x = if (...) { ... } else { @() }` yields $null,
+    # which binds to [string[]] as a single empty argument and makes QEMU treat
+    # it as an extra disk image.
+    [string[]]$qemuArgs = @()
+    if ($configuration.ContainsKey('QemuArgs')) { $qemuArgs = $configuration.QemuArgs }
     $result = & $boot -Name $configuration.Name -Features $configuration.Features `
-        -Qemu $Qemu -TimeoutSeconds $TimeoutSeconds
+        -QemuArgs $qemuArgs -Qemu $Qemu -TimeoutSeconds $TimeoutSeconds
 
     $missing = @($configuration.Required | Where-Object { -not $result.Text.Contains($_) })
     $present = @($configuration.Forbidden | Where-Object { $result.Text.Contains($_) })

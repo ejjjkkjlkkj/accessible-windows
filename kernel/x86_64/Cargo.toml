@@ -17,6 +17,10 @@ aw-x86-platform = { path = "../../crates/aw-x86-platform" }
 [features]
 exception-smoke-test = []
 double-fault-smoke-test = []
+# Drives the MSI delivery proof with QEMU's `edu` test device. Never enabled in
+# a shipping image: it contains a driver for a device that only exists inside an
+# emulator.
+msi-proof-device = []
 
 
 [profile.dev]
