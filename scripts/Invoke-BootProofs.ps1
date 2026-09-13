@@ -56,6 +56,17 @@ $configurations = @(
             # Kernel-owned W^X page tables.
             'AW_VMM_IDENTITY_MAP_OK'
             'AW_VMM_ACTIVE'
+            # One persistent frame owner, then a real runtime map/unmap on the
+            # live tables: a store reaches the frame through the new address and
+            # its identity address, translation agrees, and after unmap the
+            # address faults not-present.
+            'AW_FRAME_ALLOCATOR_OK'
+            'AW_VMM_MAP_OK va=0x0000000100000000'
+            'AW_VMM_MAP_READBACK_OK'
+            'AW_VMM_MAP_TRANSLATE_OK'
+            'AW_VMM_UNMAP_OK'
+            'AW_VMM_UNMAP_FAULT_OK'
+            'AW_VMM_RUNTIME_MAP_PROOF_OK'
             # CPU protection bits actually latched.
             'AW_SECURITY_ENFORCED wp=1 nx=1'
             'AW_SECURITY_BASELINE_OK'
@@ -109,6 +120,7 @@ $configurations = @(
             'AW_MEMORY_PROTECTION_FAIL'
             'AW_MEMORY_PROTECTION_SKIPPED'
             'AW_VMM_FAIL'
+            'AW_VMM_RUNTIME_MAP_FAIL'
             'AW_GDT_SEGMENTS_FAIL'
             'AW_PERCPU_BSP_FAIL'
             'AW_PERCPU_FAIL'
@@ -150,6 +162,7 @@ $configurations = @(
             'AW_PERCPU_AP_TIMER_OK aps=3'
             # The rest of bring-up must survive having other CPUs running.
             'AW_MEMORY_PROTECTION_PROOF_OK'
+            'AW_VMM_RUNTIME_MAP_PROOF_OK'
             'AW_APIC_TIMER_DELIVERY_PROOF_OK'
             'AW_IOAPIC_DELIVERY_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
@@ -161,6 +174,7 @@ $configurations = @(
             'AW_SMP_NO_APPLICATION_PROCESSORS'
             'AW_PERCPU_BSP_FAIL'
             'AW_PERCPU_FAIL'
+            'AW_VMM_RUNTIME_MAP_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )

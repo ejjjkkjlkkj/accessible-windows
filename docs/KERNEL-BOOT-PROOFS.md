@@ -60,6 +60,9 @@ kernel ELF for symbol-level triage.
 | NX (no execute from rodata) | PASS | `AW_MEMORY_PROTECTION_OK name=nx-execute-rodata error_code=0x11` |
 | W^X (no write to `.text`) | PASS | `AW_MEMORY_PROTECTION_OK name=wx-write-text error_code=0x03` |
 | Guard page below #DF stack | PASS | `AW_MEMORY_PROTECTION_OK name=guard-page error_code=0x00` |
+| Persistent frame allocator | PASS | `AW_FRAME_ALLOCATOR_OK`; one owner backs the page tables and every later mapping |
+| Runtime map/unmap (live tables) | PASS | `AW_VMM_MAP_OK` → `AW_VMM_MAP_READBACK_OK` → `AW_VMM_MAP_TRANSLATE_OK` → `AW_VMM_UNMAP_OK` |
+| Runtime unmap negative test | PASS | `AW_VMM_UNMAP_FAULT_OK`; the unmapped address faults not-present after the TLB shootdown |
 | APIC timer IRQ delivery | PASS | `AW_APIC_TIMER_FIRED`, `AW_APIC_TIMER_MONOTONIC_OK ticks>=8` |
 | APIC timer negative test | PASS | `AW_APIC_TIMER_MASKED_STOPPED` then `AW_APIC_TIMER_UNMASKED_RESUMED` |
 | MADT parse + ISA IRQ override | PASS | `AW_IOAPIC_ROUTED isa_irq=0 gsi=2` (the override, not the IRQ number) |

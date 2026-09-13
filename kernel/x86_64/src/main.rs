@@ -11,6 +11,7 @@
 mod acpi;
 mod apic_timer;
 mod device_irq;
+mod frame_allocator;
 mod interrupt_vectors;
 mod interrupts;
 mod ioapic;
@@ -22,6 +23,7 @@ mod memory_protection;
 mod msi;
 #[cfg(feature = "msi-proof-device")]
 mod msi_proof;
+mod page_mapper;
 mod pci_config;
 mod percpu;
 mod pit;
@@ -356,9 +358,20 @@ fn probe_bootstrap_page_allocator(handoff: &KernelHandoff) -> bool {
 fn activate_virtual_memory(handoff: &KernelHandoff) -> Option<virtual_memory::ActiveMap> {
     debug_write("AW_VMM_BEGIN\n");
 
-    let Some(descriptors) = memory_map_descriptors(handoff) else {
+    let map_handoff = handoff.memory_map;
+    if !map_handoff.is_valid() || map_handoff.buffer_address > usize::MAX as u64 {
         debug_write("AW_VMM_FAIL reason=memory_map\n");
         return None;
+    }
+    // SAFETY: the ABI v4 loader reserves the normalized descriptor buffer as
+    // LOADER_DATA before ExitBootServices and never frees it, so it is valid for
+    // the remainder of the kernel's life - hence a `'static` slice. Shape was
+    // validated by `is_valid` above.
+    let descriptors: &'static [MemoryDescriptorHandoff] = unsafe {
+        core::slice::from_raw_parts(
+            map_handoff.buffer_address as usize as *const MemoryDescriptorHandoff,
+            map_handoff.entry_count as usize,
+        )
     };
 
     let kernel_image = handoff.kernel_image;
@@ -370,16 +383,16 @@ fn activate_virtual_memory(handoff: &KernelHandoff) -> Option<virtual_memory::Ac
         debug_write("AW_VMM_FAIL reason=kernel_range_shape\n");
         return None;
     };
-    let protected_ranges = [kernel_range];
 
-    let mut allocator =
-        match BootstrapPageAllocator::with_protected_ranges(descriptors, &protected_ranges) {
-            Ok(allocator) => allocator,
-            Err(_) => {
-                debug_write("AW_VMM_FAIL reason=allocator_init\n");
-                return None;
-            }
-        };
+    // The one allocator that owns physical frames from here on: the page tables
+    // built below and every runtime mapping draw from it, so a frame spent on a
+    // table is never handed back out (dossier section 7).
+    // SAFETY: CPL0 single-core bootstrap, called once before any allocation.
+    if !unsafe { frame_allocator::init(descriptors, kernel_range) } {
+        debug_write("AW_VMM_FAIL reason=frame_allocator_init\n");
+        return None;
+    }
+    debug_write("AW_FRAME_ALLOCATOR_OK\n");
 
     // SAFETY: CPL0 single-core bootstrap after IDT/TSS install. Page-table
     // frames come from conventional RAM outside the kernel image, and the map
@@ -387,7 +400,7 @@ fn activate_virtual_memory(handoff: &KernelHandoff) -> Option<virtual_memory::Ac
     // execution continues across the CR3 switch.
     let map = unsafe {
         virtual_memory::activate(
-            || allocator.allocate_page().map(|page| page.start_address()),
+            frame_allocator::allocate,
             interrupts::double_fault_guard_page(),
         )
     };
@@ -519,6 +532,105 @@ fn prove_memory_protections(map: &virtual_memory::ActiveMap) {
     if all_passed {
         debug_write("AW_MEMORY_PROTECTION_PROOF_OK\n");
     }
+}
+
+/// First page above the 4 GiB low identity window. The runtime-mapping proof
+/// maps here because the walk to it meets only interior tables - the window's
+/// huge leaves stop at 4 GiB - so a fresh 4 KiB leaf can be added without
+/// splitting anything.
+const RUNTIME_MAP_TEST_VA: u64 = 0x1_0000_0000;
+
+/// A non-zero pattern written through the freshly mapped page, distinct from the
+/// zero a fresh frame holds, so a read-back that returns it proves the store
+/// reached the mapped frame and not stale zeroes.
+const RUNTIME_MAP_SENTINEL: u64 = 0xA11C_AB1E_5EED_F00D;
+
+/// Prove the runtime map/unmap API edits the live page tables (dossier
+/// section 7): map a frame at a fresh address, prove a store reaches it through
+/// both the new address and the frame's identity address, prove translation
+/// agrees, then unmap and prove the address now faults not-present.
+fn prove_runtime_mapping() {
+    debug_write("AW_VMM_RUNTIME_MAP_BEGIN\n");
+
+    let Some(frame) = frame_allocator::allocate() else {
+        debug_write("AW_VMM_RUNTIME_MAP_FAIL reason=no_frame\n");
+        return;
+    };
+
+    let flags = aw_x86_paging::PageTableFlags::WRITABLE
+        .union(aw_x86_paging::PageTableFlags::NO_EXECUTE);
+    // SAFETY: CPL0. The frame was just handed out by the sole frame owner, and
+    // RUNTIME_MAP_TEST_VA is otherwise unused.
+    if let Err(error) = unsafe { page_mapper::map_page(RUNTIME_MAP_TEST_VA, frame, flags) } {
+        debug_write("AW_VMM_RUNTIME_MAP_FAIL reason=map_");
+        debug_write(error.name());
+        debug_write("\n");
+        return;
+    }
+    debug_write("AW_VMM_MAP_OK va=");
+    debug_write_hex_u64(RUNTIME_MAP_TEST_VA);
+    debug_write(" frame=");
+    debug_write_hex_u64(frame);
+    debug_write("\n");
+
+    // Store through the new mapping; read it back through both the new address
+    // and the frame's identity address (the frame is inside the identity
+    // window). Agreement proves the mapping points where translation says.
+    // SAFETY: the page is mapped writable above; the frame is identity-mapped.
+    let (via_va, via_identity) = unsafe {
+        core::ptr::write_volatile(RUNTIME_MAP_TEST_VA as *mut u64, RUNTIME_MAP_SENTINEL);
+        (
+            core::ptr::read_volatile(RUNTIME_MAP_TEST_VA as *const u64),
+            core::ptr::read_volatile(frame as *const u64),
+        )
+    };
+    if via_va != RUNTIME_MAP_SENTINEL || via_identity != RUNTIME_MAP_SENTINEL {
+        debug_write("AW_VMM_RUNTIME_MAP_FAIL reason=readback\n");
+        return;
+    }
+    debug_write("AW_VMM_MAP_READBACK_OK\n");
+
+    match page_mapper::translate(RUNTIME_MAP_TEST_VA) {
+        Some((resolved, resolved_flags))
+            if resolved == frame
+                && resolved_flags.contains(aw_x86_paging::PageTableFlags::NO_EXECUTE)
+                && !resolved_flags.contains(aw_x86_paging::PageTableFlags::USER_ACCESSIBLE) =>
+        {
+            debug_write("AW_VMM_MAP_TRANSLATE_OK\n");
+        }
+        _ => {
+            debug_write("AW_VMM_RUNTIME_MAP_FAIL reason=translate\n");
+            return;
+        }
+    }
+
+    // SAFETY: CPL0; the address was mapped by this function.
+    match unsafe { page_mapper::unmap_page(RUNTIME_MAP_TEST_VA) } {
+        Ok(returned) if returned == frame => debug_write("AW_VMM_UNMAP_OK\n"),
+        _ => {
+            debug_write("AW_VMM_RUNTIME_MAP_FAIL reason=unmap\n");
+            return;
+        }
+    }
+    if page_mapper::translate(RUNTIME_MAP_TEST_VA).is_some() {
+        debug_write("AW_VMM_RUNTIME_MAP_FAIL reason=still_mapped\n");
+        return;
+    }
+
+    // The address is unmapped, so touching it must take a not-present #PF. This
+    // is the negative test: the mapping is gone from the CPU, not just the
+    // tables, because the leaf was invalidated in the TLB.
+    // SAFETY: RUNTIME_MAP_TEST_VA was just unmapped, so the probe faults and
+    // recovers exactly like the guard-page probe.
+    match unsafe { memory_protection::probe_touch_guard_page(RUNTIME_MAP_TEST_VA) } {
+        ProofOutcome::Faulted(_) => debug_write("AW_VMM_UNMAP_FAULT_OK\n"),
+        _ => {
+            debug_write("AW_VMM_RUNTIME_MAP_FAIL reason=no_unmap_fault\n");
+            return;
+        }
+    }
+
+    debug_write("AW_VMM_RUNTIME_MAP_PROOF_OK\n");
 }
 
 /// Give the bootstrap processor its own GS-reachable per-CPU block before the
@@ -1302,7 +1414,10 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // the firmware tables stay active and boot continues, with the
         // protections explicitly reported as unproven.
         match activate_virtual_memory(handoff) {
-            Some(map) => prove_memory_protections(&map),
+            Some(map) => {
+                prove_memory_protections(&map);
+                prove_runtime_mapping();
+            }
             None => debug_write("AW_MEMORY_PROTECTION_SKIPPED reason=no-kernel-page-tables\n"),
         }
 
