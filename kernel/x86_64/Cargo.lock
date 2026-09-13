@@ -13,6 +13,8 @@ dependencies = [
  "aw-kernel-core",
  "aw-memory",
  "aw-pci",
+ "aw-x86-interrupts",
+ "aw-x86-paging",
  "aw-x86-platform",
 ]
 
@@ -26,6 +28,17 @@ dependencies = [
 [[package]]
 name = "aw-pci"
 version = "0.1.0"
+
+[[package]]
+name = "aw-x86-interrupts"
+version = "0.1.0"
+
+[[package]]
+name = "aw-x86-paging"
+version = "0.1.0"
+dependencies = [
+ "aw-memory",
+]
 
 [[package]]
 name = "aw-x86-platform"

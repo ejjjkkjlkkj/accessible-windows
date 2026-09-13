@@ -128,6 +128,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aw-x86-interrupts"
+version = "0.1.0"
+
+[[package]]
 name = "aw-x86-paging"
 version = "0.1.0"
 dependencies = [

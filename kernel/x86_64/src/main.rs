@@ -1,5 +1,18 @@
 #![no_main]
 #![no_std]
+// The dedicated smoke-test images intentionally diverge inside `_start` before
+// the normal boot continuation runs, leaving its helper functions unused in
+// those builds only. The default (normal) build keeps full dead-code analysis.
+#![cfg_attr(
+    any(feature = "exception-smoke-test", feature = "double-fault-smoke-test"),
+    allow(dead_code)
+)]
+
+mod apic_timer_irq_v25;
+mod interrupts;
+mod legacy_pic;
+mod security_baseline_v26;
+mod virtual_memory_v27;
 
 use aw_kernel_core::{
     HANDOFF_FLAG_FRAMEBUFFER_PRESENT, HANDOFF_FLAG_PCIE_ECAM_PRESENT, HandoffPixelFormat,
@@ -88,6 +101,19 @@ fn debug_write_u8(mut value: u8) {
     }
 }
 
+fn debug_write_hex_u64(value: u64) {
+    debug_write("0x");
+    for shift in (0..16).rev() {
+        let nibble = ((value >> (shift * 4)) & 0x0f) as u8;
+        let byte = if nibble < 10 {
+            b'0' + nibble
+        } else {
+            b'a' + (nibble - 10)
+        };
+        // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
+        unsafe { outb(DEBUG_PORT, byte) };
+    }
+}
 #[inline(always)]
 fn halt_forever() -> ! {
     loop {
@@ -264,16 +290,14 @@ fn probe_bootstrap_page_allocator(handoff: &KernelHandoff) -> bool {
     };
     let protected_ranges = [kernel_range];
 
-    let mut allocator = match BootstrapPageAllocator::with_protected_ranges(
-        descriptors,
-        &protected_ranges,
-    ) {
-        Ok(allocator) => allocator,
-        Err(_) => {
-            debug_write("AW_BOOTSTRAP_PAGE_ALLOC_FAIL reason=allocator_init\n");
-            return false;
-        }
-    };
+    let mut allocator =
+        match BootstrapPageAllocator::with_protected_ranges(descriptors, &protected_ranges) {
+            Ok(allocator) => allocator,
+            Err(_) => {
+                debug_write("AW_BOOTSTRAP_PAGE_ALLOC_FAIL reason=allocator_init\n");
+                return false;
+            }
+        };
 
     let Some(page) = allocator.allocate_page() else {
         debug_write("AW_BOOTSTRAP_PAGE_ALLOC_FAIL reason=no_page\n");
@@ -287,6 +311,83 @@ fn probe_bootstrap_page_allocator(handoff: &KernelHandoff) -> bool {
     debug_write("AW_KERNEL_RANGE_PROTECTED_OK\n");
     debug_write("AW_BOOTSTRAP_PAGE_ALLOC_OK\n");
     true
+}
+
+fn activate_virtual_memory(handoff: &KernelHandoff) -> bool {
+    debug_write("AW_VMM_BEGIN\n");
+
+    if !virtual_memory_v27::supports_1gib_pages() {
+        debug_write("AW_VMM_UNAVAILABLE reason=no-1gib-pages\n");
+        return false;
+    }
+
+    let Some(descriptors) = memory_map_descriptors(handoff) else {
+        debug_write("AW_VMM_FAIL reason=memory_map\n");
+        return false;
+    };
+
+    let kernel_image = handoff.kernel_image;
+    let Some(kernel_end) = kernel_image.allocation_end_exclusive() else {
+        debug_write("AW_VMM_FAIL reason=kernel_range_overflow\n");
+        return false;
+    };
+    let Some(kernel_range) = PhysicalRange::new(kernel_image.physical_address, kernel_end) else {
+        debug_write("AW_VMM_FAIL reason=kernel_range_shape\n");
+        return false;
+    };
+    let protected_ranges = [kernel_range];
+
+    let mut allocator =
+        match BootstrapPageAllocator::with_protected_ranges(descriptors, &protected_ranges) {
+            Ok(allocator) => allocator,
+            Err(_) => {
+                debug_write("AW_VMM_FAIL reason=allocator_init\n");
+                return false;
+            }
+        };
+
+    let Some(pml4) = allocator.allocate_page() else {
+        debug_write("AW_VMM_FAIL reason=no_pml4_frame\n");
+        return false;
+    };
+    let Some(pdpt) = allocator.allocate_page() else {
+        debug_write("AW_VMM_FAIL reason=no_pdpt_frame\n");
+        return false;
+    };
+
+    let previous_cr3 = virtual_memory_v27::current_cr3();
+
+    // SAFETY: CPL0 single-core bootstrap after IDT/TSS install. The two frames
+    // are distinct, page-aligned conventional-RAM pages inside the low identity
+    // window, so identity mapping keeps the current RIP, stack, framebuffer and
+    // ECAM window valid across the CR3 switch.
+    match unsafe {
+        virtual_memory_v27::activate_identity_map(pml4.start_address(), pdpt.start_address())
+    } {
+        Ok(new_cr3) => {
+            debug_write("AW_VMM_CR3 prev=");
+            debug_write_hex_u64(previous_cr3);
+            debug_write(" new=");
+            debug_write_hex_u64(new_cr3);
+            debug_write("\n");
+            debug_write("AW_VMM_IDENTITY_MAP_OK gib=");
+            debug_write_u8(virtual_memory_v27::IDENTITY_GIB as u8);
+            debug_write("\n");
+            debug_write("AW_VMM_ACTIVE\n");
+            true
+        }
+        Err(error) => {
+            debug_write("AW_VMM_FAIL reason=");
+            // Inline literals stay RIP-relative; see debug_exception_name.
+            match error {
+                virtual_memory_v27::VmmError::NoOneGibPages => debug_write("no-1gib-pages"),
+                virtual_memory_v27::VmmError::BadTableFrame => debug_write("bad-table-frame"),
+                virtual_memory_v27::VmmError::BuildFailed => debug_write("build-failed"),
+            }
+            debug_write("\n");
+            false
+        }
+    }
 }
 
 fn pci_read_u32(address: PciAddress, register_offset: u8) -> Option<u32> {
@@ -388,14 +489,13 @@ fn scan_pcie_ecam(handoff: &KernelHandoff) -> bool {
                     continue;
                 }
 
-                let header_register =
-                    pcie_ecam_read_u32(region, bus, device, 0, 0x0c).unwrap_or(0);
+                let header_register = pcie_ecam_read_u32(region, bus, device, 0, 0x0c).unwrap_or(0);
                 let header_type = ((header_register >> 16) & 0xff) as u8;
                 let function_count = if header_type & 0x80 != 0 { 8 } else { 1 };
 
                 for function in 0_u8..function_count {
-                    let vendor_device = pcie_ecam_read_u32(region, bus, device, function, 0x00)
-                        .unwrap_or(u32::MAX);
+                    let vendor_device =
+                        pcie_ecam_read_u32(region, bus, device, function, 0x00).unwrap_or(u32::MAX);
                     if vendor_device as u16 == 0xffff {
                         continue;
                     }
@@ -457,8 +557,11 @@ fn scan_pci_mechanism1() {
 
                 let class_revision = pci_read_u32(address, 0x08).unwrap_or(0);
                 let subsystem = pci_read_u32(address, 0x2c);
-                let identity =
-                    PciDeviceIdentity::from_config_registers(vendor_device, class_revision, subsystem);
+                let identity = PciDeviceIdentity::from_config_registers(
+                    vendor_device,
+                    class_revision,
+                    subsystem,
+                );
                 any_device = true;
                 classify_pci_device(identity, &mut found);
             }
@@ -528,9 +631,17 @@ fn paint_boot_marker(handoff: &KernelHandoff) -> bool {
     true
 }
 
+/// Native kernel entry point invoked by the UEFI loader after
+/// `ExitBootServices`.
+///
+/// # Safety
+///
+/// The loader must pass a `handoff_ptr` that is either null or points at a
+/// live, correctly initialized [`KernelHandoff`] that outlives this call. The
+/// pointer is validated before any field other than nullness is trusted.
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text._start")]
-pub extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
+pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
     // SAFETY: This is the first native kernel instruction path. No IDT exists
     // yet, so mask interrupts before touching any other CPU state.
     unsafe { asm!("cli", options(nomem, nostack, preserves_flags)) };
@@ -548,24 +659,124 @@ pub extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         halt_forever();
     }
 
+    // SAFETY: _start masks interrupts before reaching this point. The tables
+    // are installed once during single-core bootstrap.
+    debug_write("AW_NATIVE_GDT_IDT_BEGIN\n");
+    // `install()` emits AW_NATIVE_GDT_IDT_INSTALLED once the tables are live.
+    unsafe { interrupts::install() };
     debug_write("AW_NATIVE_KERNEL_ENTRY_OK\n");
-    if !validate_memory_map(handoff) {
-        halt_forever();
-    }
-    if !probe_bootstrap_page_allocator(handoff) {
-        halt_forever();
-    }
-    validate_cpu_baseline();
-    scan_pci(handoff);
 
-    if paint_boot_marker(handoff) {
-        debug_write("AW_NATIVE_FRAMEBUFFER_WRITE_OK\n");
-    } else {
-        debug_write("AW_NATIVE_FRAMEBUFFER_WRITE_SKIP\n");
+    // The three configurations below are mutually exclusive and each diverges,
+    // so exactly one of them is the terminal path of `_start` in any given
+    // build. Keeping the normal-boot continuation inside its own branch avoids
+    // dead trailing code in the dedicated smoke-test images.
+    #[cfg(feature = "double-fault-smoke-test")]
+    {
+        debug_write("AW_DOUBLE_FAULT_SMOKE_REQUEST\n");
+        // SAFETY: dedicated smoke-test build; this intentionally causes a
+        // delivery-time #GP failure so the CPU must enter #DF on IST1.
+        unsafe { interrupts::trigger_double_fault_smoke() }
     }
 
-    debug_write("AW_NATIVE_KERNEL_IDLE\n");
-    halt_forever();
+    #[cfg(all(
+        feature = "exception-smoke-test",
+        not(feature = "double-fault-smoke-test")
+    ))]
+    {
+        debug_write("AW_EXCEPTION_SMOKE_TRIGGER vector=6\n");
+        // SAFETY: dedicated smoke-test build; `ud2` deterministically raises
+        // #UD (vector 6) so the invalid-opcode handler can be observed.
+        unsafe { asm!("ud2", options(noreturn)) }
+    }
+
+    #[cfg(not(any(feature = "exception-smoke-test", feature = "double-fault-smoke-test")))]
+    {
+        // Take over paging from the firmware before anything else in the
+        // normal boot path, so the remaining bring-up runs on kernel-owned
+        // page tables. Identity-mapped, so a failure here is non-fatal: the
+        // firmware tables stay active and boot continues.
+        activate_virtual_memory(handoff);
+
+        debug_write("AW_SECURITY_BASELINE_BEGIN\n");
+        // SAFETY: CPL0, single-core bootstrap, runs after IDT install.
+        match unsafe { security_baseline_v26::first_security_gap() } {
+            None => debug_write("AW_SECURITY_BASELINE_OK\n"),
+            Some(gap) => {
+                use security_baseline_v26::RuntimeSecurityGap as Gap;
+                debug_write("AW_SECURITY_BASELINE_GAP reason=");
+                // Inline literals keep the reason RIP-relative; a `&str`-returning
+                // accessor would compile to a base-0 rodata pointer and print
+                // blank in this flat, relocation-free kernel image.
+                match gap {
+                    Gap::WriteProtectDisabled => debug_write("cr0-write-protect-disabled"),
+                    Gap::NxSupportedButDisabled => debug_write("nx-supported-but-disabled"),
+                    Gap::SmepSupportedButDisabled => debug_write("smep-supported-but-disabled"),
+                    Gap::SmapSupportedButDisabled => debug_write("smap-supported-but-disabled"),
+                    Gap::UmipSupportedButDisabled => debug_write("umip-supported-but-disabled"),
+                }
+                debug_write("\n");
+            }
+        }
+
+        debug_write("AW_APIC_TIMER_BEGIN\n");
+        // SAFETY: runs once after IDT/TSS install, with interrupts still
+        // masked. The legacy PIC is remapped and fully masked before the
+        // first `sti` so an unremapped IRQ0 cannot alias the #DF vector.
+        let apic_timer_armed = match unsafe { apic_timer_irq_v25::arm_one_shot_after_idt() } {
+            Ok(()) => {
+                unsafe {
+                    legacy_pic::remap_and_mask_all();
+                    apic_timer_irq_v25::enable_interrupts_for_timer_test();
+                }
+                debug_write("AW_APIC_TIMER_ARMED\n");
+                true
+            }
+            Err(reason) => {
+                debug_write("AW_APIC_TIMER_UNAVAILABLE reason=");
+                debug_write(reason);
+                debug_write("\n");
+                false
+            }
+        };
+
+        if apic_timer_armed {
+            let mut spins: u32 = 0;
+            while !apic_timer_irq_v25::timer_fired() && spins < 50_000_000 {
+                spins += 1;
+                core::hint::spin_loop();
+            }
+            if apic_timer_irq_v25::timer_fired() {
+                debug_write("AW_APIC_TIMER_FIRED\n");
+            } else {
+                debug_write("AW_APIC_TIMER_NOT_FIRED\n");
+            }
+        }
+
+        // The one-shot timer proof is complete. Re-mask interrupts so the rest
+        // of bootstrap and the idle HLT loop keep the interrupts-disabled
+        // invariant they were written against: no general IRQ servicing exists
+        // yet, and every non-exception vector is a not-present gate.
+        // SAFETY: CPL0; simply clears IF.
+        unsafe { asm!("cli", options(nomem, nostack, preserves_flags)) };
+
+        if !validate_memory_map(handoff) {
+            halt_forever();
+        }
+        if !probe_bootstrap_page_allocator(handoff) {
+            halt_forever();
+        }
+        validate_cpu_baseline();
+        scan_pci(handoff);
+
+        if paint_boot_marker(handoff) {
+            debug_write("AW_NATIVE_FRAMEBUFFER_WRITE_OK\n");
+        } else {
+            debug_write("AW_NATIVE_FRAMEBUFFER_WRITE_SKIP\n");
+        }
+
+        debug_write("AW_NATIVE_KERNEL_IDLE\n");
+        halt_forever()
+    }
 }
 
 #[panic_handler]
@@ -573,3 +784,7 @@ fn panic(_info: &PanicInfo<'_>) -> ! {
     debug_write("AW_NATIVE_KERNEL_PANIC\n");
     halt_forever();
 }
+
+mod interrupt_vectors_v20;
+
+mod local_apic_v20;

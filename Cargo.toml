@@ -23,6 +23,7 @@ members = [
     "crates/aw-storefs",
     "crates/aw-vmm-plan",
     "crates/aw-x86-paging",
+    "crates/aw-x86-interrupts",
     "crates/aw-x86-platform",
     "crates/aw-x86-vmm-plan",
 ]

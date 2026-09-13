@@ -9,7 +9,14 @@ build = "build.rs"
 aw-kernel-core = { path = "../../crates/aw-kernel-core" }
 aw-memory = { path = "../../crates/aw-memory" }
 aw-pci = { path = "../../crates/aw-pci" }
+aw-x86-interrupts = { path = "../../crates/aw-x86-interrupts" }
+aw-x86-paging = { path = "../../crates/aw-x86-paging" }
 aw-x86-platform = { path = "../../crates/aw-x86-platform" }
+
+[features]
+exception-smoke-test = []
+double-fault-smoke-test = []
+
 
 [profile.dev]
 panic = "abort"
