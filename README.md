@@ -32,6 +32,7 @@ Bootstrap phase. The repository currently contains:
 - Local APIC timer interrupts with a monotonic tick counter;
 - device interrupts routed through an I/O APIC using the MADT's interrupt
   source overrides, and MSI delivered straight into the local APIC;
+- SMP bring-up, with every application processor on its own GDT, TSS and IST;
 - UEFI memory-map and GOP/display discovery, ACPI/PCIe ECAM enumeration;
 - a GPT disk-image builder with a FAT32 EFI System Partition;
 - a QEMU/OVMF proof suite that asserts what the CPU actually did, not what

@@ -69,6 +69,11 @@ kernel ELF for symbol-level triage.
 | MSI negative test | PASS | `AW_MSI_MASKED_STOPPED` then `AW_MSI_UNMASKED_RESUMED` |
 | MSI-X | TO BUILD | - |
 | INTx routing through ACPI `_PRT` | TO BUILD | - |
+| SMP bring-up (INIT-SIPI-SIPI) | PASS | `AW_SMP_ONLINE online=3 started=3` (`smp`, `-smp 4`) |
+| Per-CPU GDT, TSS and IST | PASS | `AW_SMP_PER_CPU_TABLES_OK cpus=3` (distinct GDT/TSS/IST1 per CPU) |
+| AP identity | PASS | `AW_SMP_AP_ONLINE apic_id=N requested=N`, read by the AP from its own APIC |
+| Per-CPU #DF on an AP's IST | TO PROVE | only the bootstrap processor's IST is proved by a real fault |
+| Scheduler / anything running on an AP | TO BUILD | APs park in `hlt` |
 | SMP / per-CPU GDT-TSS-IST | TO BUILD | - |
 | Ring 3 + syscalls | TO BUILD | - |
 | Physical hardware boot | TO PROVE | never run on real hardware from this tree |
@@ -110,6 +115,15 @@ command protocol; everything it exercises - the capability walk, the message
 encoding, bus mastering, the vector plumbing - is what an NVMe or xHCI driver
 will use unchanged.
 
+**An application processor is online only if it says so itself.** A counter the
+bootstrap processor increments after sending a SIPI proves that a SIPI was sent.
+Each AP instead reports the APIC ID it read from *its own* local APIC, plus the
+GDT, TSS and IST1 addresses it actually loaded, and the suite requires those to
+match the CPU that was asked for and to differ from every other CPU's. Sharing a
+TSS between two CPUs is not a subtle bug - the busy bit `ltr` sets makes the
+second `ltr` a `#GP`, and two CPUs faulting onto one IST stack corrupt each
+other - so "the tables are private" is checked rather than assumed.
+
 **The memory protections fault on purpose.** Page-table flags describe an
 intention; only a `#PF` with the right error code shows the CPU enforcing it.
 Each probe arms a narrow expectation in the exception handler (one vector, one
@@ -131,6 +145,12 @@ work, and user-mode fault handling will need exactly the same machinery.
 - Only the #DF emergency stack has a guard page. The bootstrap kernel still runs
   on the stack the UEFI loader handed over; guarding it requires the kernel to
   allocate and switch to its own stack first.
+- Application processors park in `hlt` with interrupts masked, on a fixed
+  bound of 8 CPUs. Their #DF stacks have a guard *page* but not a guard
+  *hole*: the kernel's page tables were built before those stacks existed, so
+  an AP stack overflow is currently silent where the bootstrap processor's
+  faults. An AP is also never sent an interrupt, so its IDT is loaded but
+  unexercised.
 - MSI is proved on one emulated device with one vector. MSI-X, multiple
   vectors per device, and per-vector masking are untouched, as is INTx routing
   through the ACPI `_PRT` - which needs an AML interpreter, so a device without

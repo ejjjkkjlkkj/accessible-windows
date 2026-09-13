@@ -83,6 +83,11 @@ $configurations = @(
             'AW_IOAPIC_MASKED_STOPPED'
             'AW_IOAPIC_UNMASKED_RESUMED'
             'AW_IOAPIC_DELIVERY_PROOF_OK'
+            # A uniprocessor machine: the MADT describes one CPU and there is
+            # nothing to start, which must be reported as such rather than as a
+            # bring-up that silently did nothing.
+            'AW_SMP_CPUS described=1'
+            'AW_SMP_NO_APPLICATION_PROCESSORS'
             # Rest of bring-up still clean.
             'AW_MEMORY_MAP_VALIDATE_OK'
             'AW_BOOTSTRAP_PAGE_ALLOC_OK'
@@ -106,7 +111,40 @@ $configurations = @(
             'AW_IOAPIC_IRQ_NOT_FIRED'
             'AW_IOAPIC_MASK_INEFFECTIVE'
             'AW_IOAPIC_DID_NOT_RESUME'
+            'AW_SMP_UNAVAILABLE'
+            'AW_SMP_AP_NOT_ONLINE'
+            'AW_SMP_TABLES_SHARED'
             'AW_SECURITY_BASELINE_GAP'
+        )
+    }
+    @{
+        # Four processors. "Online" is not a counter the bootstrap processor
+        # increments: each AP reports the APIC ID it read from its own local
+        # APIC and the tables it actually loaded, and those must all differ.
+        Name     = 'smp'
+        Features = @()
+        QemuArgs = @('-smp', '4')
+        Required = @(
+            'AW_SMP_CPUS described=4 bsp_apic_id=0'
+            'AW_SMP_AP_ONLINE cpu=1 apic_id=1 requested=1 tr=0x0000000000000018'
+            'AW_SMP_AP_ONLINE cpu=2 apic_id=2 requested=2 tr=0x0000000000000018'
+            'AW_SMP_AP_ONLINE cpu=3 apic_id=3 requested=3 tr=0x0000000000000018'
+            'AW_SMP_ONLINE online=3 started=3'
+            'AW_SMP_PER_CPU_TABLES_OK cpus=3'
+            'AW_SMP_ALL_ONLINE'
+            # The rest of bring-up must survive having other CPUs running.
+            'AW_MEMORY_PROTECTION_PROOF_OK'
+            'AW_APIC_TIMER_DELIVERY_PROOF_OK'
+            'AW_IOAPIC_DELIVERY_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_SMP_UNAVAILABLE'
+            'AW_SMP_AP_NOT_ONLINE'
+            'AW_SMP_TABLES_SHARED'
+            'AW_SMP_NO_APPLICATION_PROCESSORS'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
         )
     }
     @{

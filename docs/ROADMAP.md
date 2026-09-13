@@ -59,7 +59,11 @@
 - [x] IOAPIC/MSI routing for device interrupts: a real device IRQ routed by the
       MADT's interrupt source overrides through an I/O APIC, and an MSI written
       straight into the local APIC, each proved by delivery plus a mask test
-- [ ] SMP bring-up on both AMD and Intel test profiles
+- [x] SMP bring-up: INIT-SIPI-SIPI through a real-mode trampoline, each AP
+      installing its own GDT, TSS and IST, proved by every AP reporting the
+      APIC ID it read from its own local APIC and tables distinct from all
+      others'
+- [ ] SMP validation on both AMD and Intel test profiles
 - [ ] Scheduler
 - [ ] User/kernel privilege separation
 - [ ] IPC and handle/object model

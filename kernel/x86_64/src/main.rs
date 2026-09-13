@@ -25,6 +25,7 @@ mod msi_proof;
 mod pci_config;
 mod pit;
 mod security_baseline;
+mod smp;
 mod virtual_memory;
 
 use irq_proof::DeliveryProof;
@@ -705,6 +706,120 @@ fn pci_read_u32(address: PciAddress, register_offset: u8) -> Option<u32> {
     }
 }
 
+/// Start the application processors and prove each one really runs, on tables
+/// of its own.
+///
+/// "Online" is not claimed from a counter the bootstrap processor increments.
+/// Each AP reports the APIC ID it read from its *own* local APIC, plus the GDT,
+/// TSS and IST1 addresses it actually loaded - values no other CPU could have
+/// produced, and which must all differ from each other and from the bootstrap
+/// processor's.
+fn bring_up_secondary_processors(handoff: &KernelHandoff) {
+    debug_write("AW_SMP_BEGIN\n");
+
+    // SAFETY: the identity map is active and the RSDP comes from the validated
+    // handoff.
+    let madt = match unsafe { acpi::find_madt(handoff.acpi_rsdp) } {
+        Ok(madt) => madt,
+        Err(error) => {
+            debug_write("AW_SMP_UNAVAILABLE reason=madt_");
+            debug_write(error.name());
+            debug_write("\n");
+            return;
+        }
+    };
+
+    // SAFETY: CPL0 on the bootstrap processor, after the IDT is installed, the
+    // kernel owns its page tables and x2APIC is enabled.
+    let result = match unsafe { smp::bring_up(handoff, madt) } {
+        Ok(result) => result,
+        Err(reason) => {
+            debug_write("AW_SMP_UNAVAILABLE reason=");
+            debug_write(reason);
+            debug_write("\n");
+            return;
+        }
+    };
+
+    debug_write("AW_SMP_CPUS described=");
+    debug_write_u64(result.described as u64);
+    debug_write(" bsp_apic_id=");
+    debug_write_u64(u64::from(result.bootstrap_apic_id));
+    debug_write("\n");
+
+    let (bsp_gdt, bsp_tss) = interrupts::bootstrap_tables();
+    let mut tables_are_private = result.online > 0;
+    let mut seen: [(u64, u64, u32); interrupts::MAX_CPUS] = [(0, 0, 0); interrupts::MAX_CPUS];
+    let mut seen_count = 0;
+
+    for cpu in 1..interrupts::MAX_CPUS {
+        let Some(summary) = smp::ap_summary(cpu) else {
+            continue;
+        };
+
+        debug_write("AW_SMP_AP_ONLINE cpu=");
+        debug_write_u64(summary.cpu as u64);
+        debug_write(" apic_id=");
+        debug_write_u64(u64::from(summary.reported_apic_id));
+        debug_write(" requested=");
+        debug_write_u64(u64::from(summary.requested_apic_id));
+        debug_write(" tr=");
+        debug_write_hex_u64(u64::from(summary.task_register));
+        debug_write(" gdt=");
+        debug_write_hex_u64(summary.gdt_base);
+        debug_write(" tss=");
+        debug_write_hex_u64(summary.tss_base);
+        debug_write(" ist1=");
+        debug_write_hex_u64(summary.ist1_top);
+        debug_write("\n");
+
+        // The AP that answered must be the one that was asked, and it must not
+        // be sharing a descriptor table with anyone.
+        if summary.reported_apic_id != summary.requested_apic_id
+            || summary.gdt_base == bsp_gdt
+            || summary.tss_base == bsp_tss
+            || seen[..seen_count].iter().any(|&(gdt, tss, apic_id)| {
+                gdt == summary.gdt_base
+                    || tss == summary.tss_base
+                    || apic_id == summary.reported_apic_id
+            })
+        {
+            tables_are_private = false;
+        }
+
+        seen[seen_count] = (
+            summary.gdt_base,
+            summary.tss_base,
+            summary.reported_apic_id,
+        );
+        seen_count += 1;
+    }
+
+    debug_write("AW_SMP_ONLINE online=");
+    debug_write_u64(result.online as u64);
+    debug_write(" started=");
+    debug_write_u64(result.started as u64);
+    debug_write("\n");
+
+    if result.started == 0 {
+        debug_write("AW_SMP_NO_APPLICATION_PROCESSORS\n");
+        return;
+    }
+    if result.online != result.started {
+        debug_write("AW_SMP_AP_NOT_ONLINE\n");
+        return;
+    }
+    if !tables_are_private {
+        debug_write("AW_SMP_TABLES_SHARED\n");
+        return;
+    }
+
+    debug_write("AW_SMP_PER_CPU_TABLES_OK cpus=");
+    debug_write_u64(seen_count as u64);
+    debug_write("\n");
+    debug_write("AW_SMP_ALL_ONLINE\n");
+}
+
 /// Prove an MSI arrives: the device writes the interrupt into the local APIC
 /// itself, with no pin and no I/O APIC anywhere in the path.
 ///
@@ -1049,6 +1164,7 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
 
         prove_apic_timer_delivery();
         prove_device_interrupt_routing(handoff);
+        bring_up_secondary_processors(handoff);
         #[cfg(feature = "msi-proof-device")]
         prove_msi_delivery(handoff);
 

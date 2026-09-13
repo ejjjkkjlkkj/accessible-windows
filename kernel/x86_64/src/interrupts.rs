@@ -135,6 +135,148 @@ pub(crate) fn double_fault_guard_page() -> u64 {
     core::ptr::addr_of!(DOUBLE_FAULT_IST_STACK) as u64
 }
 
+/// Application processors this kernel is willing to bring up, plus the
+/// bootstrap processor. A fixed bound keeps every per-CPU table in `.bss` with
+/// no allocator in the path; a machine with more CPUs leaves the rest parked.
+pub(crate) const MAX_CPUS: usize = 8;
+
+/// Per-AP #DF stack. Smaller than the bootstrap processor's, and its guard page
+/// is *not* unmapped: the kernel's page tables were built before these existed,
+/// so an AP stack overflow is currently silent. Tracked as a known limitation.
+const AP_IST_STACK_SIZE: usize = 8 * 1024;
+
+#[repr(C, align(4096))]
+struct ApIstStack {
+    guard: [u8; PAGE_SIZE],
+    stack: [u8; AP_IST_STACK_SIZE],
+}
+
+static mut AP_GDTS: [[u64; 5]; MAX_CPUS] = [[0; 5]; MAX_CPUS];
+static mut AP_TSSES: [TaskStateSegment; MAX_CPUS] = [TaskStateSegment::EMPTY; MAX_CPUS];
+static mut AP_IST_STACKS: [ApIstStack; MAX_CPUS] = [const {
+    ApIstStack {
+        guard: [0; PAGE_SIZE],
+        stack: [0; AP_IST_STACK_SIZE],
+    }
+}; MAX_CPUS];
+
+/// What one application processor loaded, read back from the CPU itself.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ApTables {
+    pub task_register: u16,
+    pub gdt_base: u64,
+    pub tss_base: u64,
+    pub ist1_top: u64,
+}
+
+/// Install this application processor's own GDT and TSS, then share the
+/// bootstrap processor's IDT.
+///
+/// The IDT is shared on purpose: interrupt gates hold no per-CPU state. The GDT
+/// and TSS cannot be, because the TSS descriptor lives in the GDT and the busy
+/// bit `ltr` sets is per-descriptor - two CPUs loading one TSS is a #GP on the
+/// second, and an IST shared between CPUs would have them fault onto the same
+/// stack.
+///
+/// # Safety
+///
+/// Runs once per AP, at CPL0 with interrupts masked, on a CPU whose `cpu` index
+/// is unique and below [`MAX_CPUS`].
+pub(crate) unsafe fn install_for_ap(cpu: usize) -> Option<ApTables> {
+    if cpu == 0 || cpu >= MAX_CPUS {
+        return None;
+    }
+
+    // SAFETY: `cpu` indexes this AP's own slot, which no other CPU touches.
+    let (gdt, tss, ist) = unsafe {
+        (
+            core::ptr::addr_of_mut!(AP_GDTS).cast::<[u64; 5]>().add(cpu),
+            core::ptr::addr_of_mut!(AP_TSSES)
+                .cast::<TaskStateSegment>()
+                .add(cpu),
+            core::ptr::addr_of!(AP_IST_STACKS).cast::<ApIstStack>().add(cpu),
+        )
+    };
+
+    // SAFETY: taking the address of a field, never reading through it.
+    let stack_start = unsafe { core::ptr::addr_of!((*ist).stack) } as *const u8 as u64;
+    let ist1_top = (stack_start + AP_IST_STACK_SIZE as u64) & !0xf_u64;
+
+    let (tss_low, tss_high) = encode_tss_descriptor(tss as u64);
+    // SAFETY: this CPU's own tables, written before they are loaded.
+    unsafe {
+        tss.write(TaskStateSegment::with_ist1(ist1_top));
+        let entries = gdt.cast::<u64>();
+        entries.add(0).write(0);
+        entries.add(1).write(CODE_DESCRIPTOR);
+        entries.add(2).write(DATA_DESCRIPTOR);
+        entries.add(3).write(tss_low);
+        entries.add(4).write(tss_high);
+    }
+
+    let gdt_pointer =
+        DescriptorTablePointer::new(gdt as u64, 5, core::mem::size_of::<u64>()).ok()?;
+    let idt_pointer = DescriptorTablePointer::new(
+        core::ptr::addr_of!(IDT) as u64,
+        IDT_ENTRY_COUNT,
+        core::mem::size_of::<IdtEntry>(),
+    )
+    .ok()?;
+
+    // SAFETY: CPL0 with interrupts masked; the tables above are fully built and
+    // the segment reload makes the visible selectors match the new GDT, which
+    // the first `iretq` on this CPU will re-validate.
+    unsafe {
+        asm!(
+            "lgdt [{gdt_pointer}]",
+            gdt_pointer = in(reg) &gdt_pointer,
+            options(readonly, nostack, preserves_flags),
+        );
+        reload_segment_registers();
+        asm!(
+            "lidt [{idt_pointer}]",
+            idt_pointer = in(reg) &idt_pointer,
+            options(readonly, nostack, preserves_flags),
+        );
+        asm!(
+            "mov ax, 0x18",
+            "ltr ax",
+            out("ax") _,
+            options(nostack, preserves_flags),
+        );
+    }
+
+    let task_register: u16;
+    // SAFETY: reading the task register has no side effects.
+    unsafe {
+        asm!("str ax", out("ax") task_register, options(nostack, preserves_flags));
+    }
+    let (code_selector, stack_selector) = current_segments();
+
+    if task_register != TSS_SELECTOR_RAW
+        || code_selector != CODE_SELECTOR_RAW
+        || stack_selector != DATA_SELECTOR_RAW
+    {
+        return None;
+    }
+
+    Some(ApTables {
+        task_register,
+        gdt_base: gdt as u64,
+        tss_base: tss as u64,
+        ist1_top,
+    })
+}
+
+/// The bootstrap processor's own tables, for comparison against the APs'.
+#[must_use]
+pub(crate) fn bootstrap_tables() -> (u64, u64) {
+    (
+        core::ptr::addr_of!(GDT) as u64,
+        core::ptr::addr_of!(TSS) as u64,
+    )
+}
+
 const fn gate_for_selector(
     handler_address: u64,
     code_selector: SegmentSelector,
