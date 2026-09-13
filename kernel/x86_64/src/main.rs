@@ -8,11 +8,16 @@
     allow(dead_code)
 )]
 
-mod apic_timer_irq_v25;
+mod apic_timer;
+mod interrupt_vectors;
 mod interrupts;
 mod legacy_pic;
-mod security_baseline_v26;
-mod virtual_memory_v27;
+mod local_apic;
+mod memory_protection;
+mod security_baseline;
+mod virtual_memory;
+
+use memory_protection::{ProofOutcome, ProtectionProof};
 
 use aw_kernel_core::{
     HANDOFF_FLAG_FRAMEBUFFER_PRESENT, HANDOFF_FLAG_PCIE_ECAM_PRESENT, HandoffPixelFormat,
@@ -92,6 +97,28 @@ fn debug_write_u8(mut value: u8) {
     while value != 0 {
         index -= 1;
         digits[index] = b'0' + value % 10;
+        value /= 10;
+    }
+
+    for byte in &digits[index..] {
+        // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
+        unsafe { outb(DEBUG_PORT, *byte) };
+    }
+}
+
+fn debug_write_u64(mut value: u64) {
+    let mut digits = [0_u8; 20];
+    let mut index = digits.len();
+
+    if value == 0 {
+        // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
+        unsafe { outb(DEBUG_PORT, b'0') };
+        return;
+    }
+
+    while value != 0 {
+        index -= 1;
+        digits[index] = b'0' + (value % 10) as u8;
         value /= 10;
     }
 
@@ -313,27 +340,22 @@ fn probe_bootstrap_page_allocator(handoff: &KernelHandoff) -> bool {
     true
 }
 
-fn activate_virtual_memory(handoff: &KernelHandoff) -> bool {
+fn activate_virtual_memory(handoff: &KernelHandoff) -> Option<virtual_memory::ActiveMap> {
     debug_write("AW_VMM_BEGIN\n");
-
-    if !virtual_memory_v27::supports_1gib_pages() {
-        debug_write("AW_VMM_UNAVAILABLE reason=no-1gib-pages\n");
-        return false;
-    }
 
     let Some(descriptors) = memory_map_descriptors(handoff) else {
         debug_write("AW_VMM_FAIL reason=memory_map\n");
-        return false;
+        return None;
     };
 
     let kernel_image = handoff.kernel_image;
     let Some(kernel_end) = kernel_image.allocation_end_exclusive() else {
         debug_write("AW_VMM_FAIL reason=kernel_range_overflow\n");
-        return false;
+        return None;
     };
     let Some(kernel_range) = PhysicalRange::new(kernel_image.physical_address, kernel_end) else {
         debug_write("AW_VMM_FAIL reason=kernel_range_shape\n");
-        return false;
+        return None;
     };
     let protected_ranges = [kernel_range];
 
@@ -342,50 +364,220 @@ fn activate_virtual_memory(handoff: &KernelHandoff) -> bool {
             Ok(allocator) => allocator,
             Err(_) => {
                 debug_write("AW_VMM_FAIL reason=allocator_init\n");
-                return false;
+                return None;
             }
         };
 
-    let Some(pml4) = allocator.allocate_page() else {
-        debug_write("AW_VMM_FAIL reason=no_pml4_frame\n");
-        return false;
-    };
-    let Some(pdpt) = allocator.allocate_page() else {
-        debug_write("AW_VMM_FAIL reason=no_pdpt_frame\n");
-        return false;
+    // SAFETY: CPL0 single-core bootstrap after IDT/TSS install. Page-table
+    // frames come from conventional RAM outside the kernel image, and the map
+    // identity-covers the current RIP, stack, framebuffer and ECAM window, so
+    // execution continues across the CR3 switch.
+    let map = unsafe {
+        virtual_memory::activate(
+            || allocator.allocate_page().map(|page| page.start_address()),
+            interrupts::double_fault_guard_page(),
+        )
     };
 
-    let previous_cr3 = virtual_memory_v27::current_cr3();
-
-    // SAFETY: CPL0 single-core bootstrap after IDT/TSS install. The two frames
-    // are distinct, page-aligned conventional-RAM pages inside the low identity
-    // window, so identity mapping keeps the current RIP, stack, framebuffer and
-    // ECAM window valid across the CR3 switch.
-    match unsafe {
-        virtual_memory_v27::activate_identity_map(pml4.start_address(), pdpt.start_address())
-    } {
-        Ok(new_cr3) => {
+    match map {
+        Ok(map) => {
             debug_write("AW_VMM_CR3 prev=");
-            debug_write_hex_u64(previous_cr3);
+            debug_write_hex_u64(map.previous_cr3);
             debug_write(" new=");
-            debug_write_hex_u64(new_cr3);
+            debug_write_hex_u64(map.cr3);
             debug_write("\n");
             debug_write("AW_VMM_IDENTITY_MAP_OK gib=");
-            debug_write_u8(virtual_memory_v27::IDENTITY_GIB as u8);
+            debug_write_u8(virtual_memory::IDENTITY_GIB as u8);
+            debug_write(" tables=");
+            debug_write_u64(map.table_count as u64);
+            debug_write("\n");
+            debug_write("AW_VMM_WX_LAYOUT text=");
+            debug_write_hex_u64(map.layout.text.0);
+            debug_write("..");
+            debug_write_hex_u64(map.layout.text.1);
+            debug_write(" data=");
+            debug_write_hex_u64(map.layout.data.0);
+            debug_write("..");
+            debug_write_hex_u64(map.layout.data.1);
+            debug_write(" guard=");
+            debug_write_hex_u64(map.guard_page);
             debug_write("\n");
             debug_write("AW_VMM_ACTIVE\n");
-            true
+            Some(map)
         }
         Err(error) => {
             debug_write("AW_VMM_FAIL reason=");
-            // Inline literals stay RIP-relative; see debug_exception_name.
-            match error {
-                virtual_memory_v27::VmmError::NoOneGibPages => debug_write("no-1gib-pages"),
-                virtual_memory_v27::VmmError::BadTableFrame => debug_write("bad-table-frame"),
-                virtual_memory_v27::VmmError::BuildFailed => debug_write("build-failed"),
-            }
+            debug_write(error.name());
             debug_write("\n");
-            false
+            None
+        }
+    }
+}
+
+/// Enable the CPU protection bits, then prove each one with a real fault.
+///
+/// Nothing here is claimed from a flag or a build success: every protection is
+/// asserted only after the CPU has actually refused the corresponding access
+/// with the expected `#PF` error code (dossier section 7 and DOD-03).
+fn prove_memory_protections(map: &virtual_memory::ActiveMap) {
+    debug_write("AW_SECURITY_BASELINE_BEGIN\n");
+    // SAFETY: CPL0, single-core bootstrap, after the kernel owns its page
+    // tables and with no user-accessible page mapped anywhere.
+    let state = unsafe { security_baseline::enforce_baseline() };
+    debug_write("AW_SECURITY_ENFORCED wp=");
+    debug_write_u8(u8::from(state.cr0_write_protect));
+    debug_write(" nx=");
+    debug_write_u8(u8::from(state.efer_nx_enable));
+    debug_write(" smep=");
+    debug_write_u8(u8::from(state.cr4_smep));
+    debug_write(" smap=");
+    debug_write_u8(u8::from(state.cr4_smap));
+    debug_write(" umip=");
+    debug_write_u8(u8::from(state.cr4_umip));
+    debug_write("\n");
+
+    // SAFETY: CPL0, read-only.
+    match unsafe { security_baseline::first_security_gap() } {
+        None => debug_write("AW_SECURITY_BASELINE_OK\n"),
+        Some(gap) => {
+            debug_write("AW_SECURITY_BASELINE_GAP reason=");
+            debug_write(gap.name());
+            debug_write("\n");
+        }
+    }
+
+    debug_write("AW_MEMORY_PROTECTION_BEGIN\n");
+
+    // Each probe targets a page whose permissions the map audit already
+    // verified, so a missing fault means the CPU is not enforcing them.
+    // SAFETY: every target is a kernel-owned page of the running image; the
+    // probes recover through the armed exception path and never run foreign
+    // code or corrupt live data.
+    // The guard page is the first page of `.data`, so the NX probes target
+    // pages that are definitely present: otherwise a not-present fault would
+    // masquerade as an NX fault and prove nothing about NX.
+    let writable_page = map.layout.data.1 - 4096;
+    let proofs = [
+        ProtectionProof {
+            name: "nx-execute-rodata",
+            outcome: unsafe { memory_protection::probe_execute_data(map.layout.rodata.0) },
+        },
+        ProtectionProof {
+            name: "nx-execute-data",
+            outcome: unsafe { memory_protection::probe_execute_data(writable_page) },
+        },
+        ProtectionProof {
+            name: "wx-write-text",
+            outcome: unsafe { memory_protection::probe_write_readonly(map.layout.text.0) },
+        },
+        ProtectionProof {
+            name: "guard-page",
+            outcome: unsafe { memory_protection::probe_touch_guard_page(map.guard_page) },
+        },
+    ];
+
+    let all_passed = proofs.iter().all(|proof| proof.outcome.is_pass());
+    for proof in proofs {
+        match proof.outcome {
+            ProofOutcome::Faulted(fault) => {
+                debug_write("AW_MEMORY_PROTECTION_OK name=");
+                debug_write(proof.name);
+                debug_write(" error_code=");
+                debug_write_hex_u64(fault.error_code);
+                debug_write(" address=");
+                debug_write_hex_u64(fault.address);
+                debug_write("\n");
+            }
+            ProofOutcome::NoFault => {
+                debug_write("AW_MEMORY_PROTECTION_FAIL name=");
+                debug_write(proof.name);
+                debug_write(" reason=no-fault\n");
+            }
+            ProofOutcome::WrongErrorCode(fault) => {
+                debug_write("AW_MEMORY_PROTECTION_FAIL name=");
+                debug_write(proof.name);
+                debug_write(" reason=wrong-error-code error_code=");
+                debug_write_hex_u64(fault.error_code);
+                debug_write("\n");
+            }
+        }
+    }
+
+    if all_passed {
+        debug_write("AW_MEMORY_PROTECTION_PROOF_OK\n");
+    }
+}
+
+/// Number of timer interrupts the delivery proof requires before it accepts
+/// that hardware interrupt delivery works. More than one, so a single spurious
+/// or self-inflicted entry cannot pass it.
+const APIC_TIMER_REQUIRED_TICKS: u64 = 8;
+
+/// Run the Local APIC timer delivery proof and report it on the debug console.
+///
+/// Returns normally whether or not the proof passes: an absent or broken timer
+/// must not stop the rest of bootstrap from reporting its own state, and the
+/// markers make the failure explicit instead of silent.
+fn prove_apic_timer_delivery() {
+    debug_write("AW_APIC_TIMER_BEGIN\n");
+
+    // SAFETY: runs once after IDT/TSS install, with interrupts still masked.
+    // The legacy PIC is remapped and fully masked before the first `sti`, so an
+    // unremapped IRQ0 cannot alias the #DF vector.
+    if let Err(reason) = unsafe { apic_timer::arm_periodic_after_idt() } {
+        debug_write("AW_APIC_TIMER_UNAVAILABLE reason=");
+        debug_write(reason);
+        debug_write("\n");
+        return;
+    }
+    // SAFETY: CPL0; the PIC is reprogrammed and fully masked before any `sti`.
+    unsafe { legacy_pic::remap_and_mask_all() };
+    debug_write("AW_APIC_TIMER_ARMED mode=periodic vector=");
+    debug_write_u8(interrupt_vectors::APIC_TIMER_VECTOR);
+    debug_write("\n");
+
+    // SAFETY: CPL0, immediately after arming. Returns with interrupts disabled
+    // and the timer masked, so the idle loop keeps its documented invariant.
+    let proof = unsafe { apic_timer::run_delivery_proof(APIC_TIMER_REQUIRED_TICKS) };
+
+    match proof {
+        apic_timer::DeliveryProof::Passed {
+            ticks_after_run,
+            ticks_while_masked,
+            ticks_after_unmask,
+        } => {
+            debug_write("AW_APIC_TIMER_FIRED\n");
+            debug_write("AW_APIC_TIMER_MONOTONIC_OK ticks=");
+            debug_write_u64(ticks_after_run);
+            debug_write(" required=");
+            debug_write_u64(APIC_TIMER_REQUIRED_TICKS);
+            debug_write("\n");
+            debug_write("AW_APIC_TIMER_MASKED_STOPPED ticks=");
+            debug_write_u64(ticks_while_masked);
+            debug_write("\n");
+            debug_write("AW_APIC_TIMER_UNMASKED_RESUMED ticks=");
+            debug_write_u64(ticks_after_unmask);
+            debug_write("\n");
+            debug_write("AW_APIC_TIMER_DELIVERY_PROOF_OK\n");
+        }
+        apic_timer::DeliveryProof::NotDelivered { ticks } => {
+            debug_write("AW_APIC_TIMER_NOT_FIRED ticks=");
+            debug_write_u64(ticks);
+            debug_write("\n");
+        }
+        apic_timer::DeliveryProof::MaskIneffective { before, after } => {
+            // The counter moved with the vector masked, so the increments are
+            // not attributable to real interrupt delivery.
+            debug_write("AW_APIC_TIMER_MASK_INEFFECTIVE before=");
+            debug_write_u64(before);
+            debug_write(" after=");
+            debug_write_u64(after);
+            debug_write("\n");
+        }
+        apic_timer::DeliveryProof::DidNotResume { ticks } => {
+            debug_write("AW_APIC_TIMER_DID_NOT_RESUME ticks=");
+            debug_write_u64(ticks);
+            debug_write("\n");
         }
     }
 }
@@ -692,72 +884,16 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
     #[cfg(not(any(feature = "exception-smoke-test", feature = "double-fault-smoke-test")))]
     {
         // Take over paging from the firmware before anything else in the
-        // normal boot path, so the remaining bring-up runs on kernel-owned
-        // page tables. Identity-mapped, so a failure here is non-fatal: the
-        // firmware tables stay active and boot continues.
-        activate_virtual_memory(handoff);
-
-        debug_write("AW_SECURITY_BASELINE_BEGIN\n");
-        // SAFETY: CPL0, single-core bootstrap, runs after IDT install.
-        match unsafe { security_baseline_v26::first_security_gap() } {
-            None => debug_write("AW_SECURITY_BASELINE_OK\n"),
-            Some(gap) => {
-                use security_baseline_v26::RuntimeSecurityGap as Gap;
-                debug_write("AW_SECURITY_BASELINE_GAP reason=");
-                // Inline literals keep the reason RIP-relative; a `&str`-returning
-                // accessor would compile to a base-0 rodata pointer and print
-                // blank in this flat, relocation-free kernel image.
-                match gap {
-                    Gap::WriteProtectDisabled => debug_write("cr0-write-protect-disabled"),
-                    Gap::NxSupportedButDisabled => debug_write("nx-supported-but-disabled"),
-                    Gap::SmepSupportedButDisabled => debug_write("smep-supported-but-disabled"),
-                    Gap::SmapSupportedButDisabled => debug_write("smap-supported-but-disabled"),
-                    Gap::UmipSupportedButDisabled => debug_write("umip-supported-but-disabled"),
-                }
-                debug_write("\n");
-            }
+        // normal boot path, so the remaining bring-up runs on kernel-owned,
+        // W^X page tables. Identity-mapped, so a failure here is non-fatal:
+        // the firmware tables stay active and boot continues, with the
+        // protections explicitly reported as unproven.
+        match activate_virtual_memory(handoff) {
+            Some(map) => prove_memory_protections(&map),
+            None => debug_write("AW_MEMORY_PROTECTION_SKIPPED reason=no-kernel-page-tables\n"),
         }
 
-        debug_write("AW_APIC_TIMER_BEGIN\n");
-        // SAFETY: runs once after IDT/TSS install, with interrupts still
-        // masked. The legacy PIC is remapped and fully masked before the
-        // first `sti` so an unremapped IRQ0 cannot alias the #DF vector.
-        let apic_timer_armed = match unsafe { apic_timer_irq_v25::arm_one_shot_after_idt() } {
-            Ok(()) => {
-                unsafe {
-                    legacy_pic::remap_and_mask_all();
-                    apic_timer_irq_v25::enable_interrupts_for_timer_test();
-                }
-                debug_write("AW_APIC_TIMER_ARMED\n");
-                true
-            }
-            Err(reason) => {
-                debug_write("AW_APIC_TIMER_UNAVAILABLE reason=");
-                debug_write(reason);
-                debug_write("\n");
-                false
-            }
-        };
-
-        if apic_timer_armed {
-            let mut spins: u32 = 0;
-            while !apic_timer_irq_v25::timer_fired() && spins < 50_000_000 {
-                spins += 1;
-                core::hint::spin_loop();
-            }
-            if apic_timer_irq_v25::timer_fired() {
-                debug_write("AW_APIC_TIMER_FIRED\n");
-            } else {
-                debug_write("AW_APIC_TIMER_NOT_FIRED\n");
-            }
-        }
-
-        // The one-shot timer proof is complete. Re-mask interrupts so the rest
-        // of bootstrap and the idle HLT loop keep the interrupts-disabled
-        // invariant they were written against: no general IRQ servicing exists
-        // yet, and every non-exception vector is a not-present gate.
-        // SAFETY: CPL0; simply clears IF.
-        unsafe { asm!("cli", options(nomem, nostack, preserves_flags)) };
+        prove_apic_timer_delivery();
 
         if !validate_memory_map(handoff) {
             halt_forever();
@@ -785,6 +921,3 @@ fn panic(_info: &PanicInfo<'_>) -> ! {
     halt_forever();
 }
 
-mod interrupt_vectors_v20;
-
-mod local_apic_v20;

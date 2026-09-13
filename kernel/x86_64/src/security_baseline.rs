@@ -118,6 +118,103 @@ unsafe fn rdmsr(msr: u32) -> u64 {
     ((high as u64) << 32) | (low as u64)
 }
 
+/// # Safety
+/// CPL0 only.
+unsafe fn write_cr0(value: u64) {
+    unsafe {
+        asm!("mov cr0, {}", in(reg) value, options(nostack, preserves_flags));
+    }
+}
+
+/// # Safety
+/// CPL0 only.
+unsafe fn write_cr4(value: u64) {
+    unsafe {
+        asm!("mov cr4, {}", in(reg) value, options(nostack, preserves_flags));
+    }
+}
+
+/// # Safety
+/// CPL0 only. MSR must exist.
+unsafe fn wrmsr(msr: u32, value: u64) {
+    let low = value as u32;
+    let high = (value >> 32) as u32;
+    unsafe {
+        asm!(
+            "wrmsr",
+            in("ecx") msr,
+            in("eax") low,
+            in("edx") high,
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+}
+
+/// Turn on every CPU protection the hardware reports, then re-read the state.
+///
+/// Reporting a gap is not the same as closing it: until these bits are set,
+/// read-only page-table entries do not stop supervisor writes (CR0.WP), NX bits
+/// are ignored (EFER.NXE), and supervisor code may execute or read user pages
+/// (CR4.SMEP/SMAP). The kernel therefore enables what the CPU supports before
+/// it claims any memory protection, and the caller proves the result with real
+/// faults rather than trusting this function.
+///
+/// Unsupported features are skipped rather than forced, so this is safe on
+/// older CPUs; a feature that is supported but refuses to latch shows up as a
+/// remaining gap in [`first_security_gap`].
+///
+/// # Safety
+/// CPL0 only, during controlled bring-up, after the kernel owns its page
+/// tables. Enabling SMEP/SMAP requires that no supervisor code is executing
+/// from, or dereferencing, user-accessible pages.
+pub unsafe fn enforce_baseline() -> RuntimeSecurityState {
+    let caps = capabilities();
+
+    // SAFETY: CPL0. Setting CR0.WP only makes read-only mappings authoritative
+    // for supervisor writes; it never unmaps anything.
+    unsafe {
+        let cr0 = read_cr0();
+        if cr0 & CR0_WP == 0 {
+            write_cr0(cr0 | CR0_WP);
+        }
+    }
+
+    if caps.nx {
+        // SAFETY: CPL0, and EFER exists on every long-mode CPU.
+        unsafe {
+            let efer = rdmsr(IA32_EFER_MSR);
+            if efer & EFER_NXE == 0 {
+                wrmsr(IA32_EFER_MSR, efer | EFER_NXE);
+            }
+        }
+    }
+
+    let mut cr4_wanted = 0;
+    if caps.smep {
+        cr4_wanted |= CR4_SMEP;
+    }
+    if caps.smap {
+        cr4_wanted |= CR4_SMAP;
+    }
+    if caps.umip {
+        cr4_wanted |= CR4_UMIP;
+    }
+
+    if cr4_wanted != 0 {
+        // SAFETY: CPL0; only sets supervisor-protection bits, and no
+        // user-accessible page is mapped at this point in bring-up.
+        unsafe {
+            let cr4 = read_cr4();
+            if cr4 & cr4_wanted != cr4_wanted {
+                write_cr4(cr4 | cr4_wanted);
+            }
+        }
+    }
+
+    // SAFETY: CPL0; read-only.
+    unsafe { runtime_state() }
+}
+
 /// Reads security state without changing hardware configuration.
 ///
 /// # Safety

@@ -62,22 +62,36 @@ SECTIONS
         . = ALIGN(0x1000);
     }
 
+    /*
+     * Section bounds are exported so the kernel can apply W^X permissions to
+     * its own image at 4 KiB granularity once it owns the page tables. Every
+     * boundary is page aligned, so no page ever mixes two permission classes.
+     */
     .text : ALIGN(0x1000)
     {
+        __text_start = .;
         KEEP(*(.text._start))
         *(.text .text.*)
+        . = ALIGN(0x1000);
+        __text_end = .;
     }
 
     .rodata : ALIGN(0x1000)
     {
+        __rodata_start = .;
         *(.rodata .rodata.*)
+        . = ALIGN(0x1000);
+        __rodata_end = .;
     }
 
     .data : ALIGN(0x1000)
     {
+        __data_start = .;
         *(.data .data.*)
         *(.data.rel.ro .data.rel.ro.*)
         *(.got .got.plt)
+        . = ALIGN(0x1000);
+        __data_end = .;
     }
 
     . = ALIGN(0x1000);

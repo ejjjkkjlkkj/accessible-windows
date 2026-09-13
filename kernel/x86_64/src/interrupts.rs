@@ -14,6 +14,7 @@ use aw_x86_interrupts::{
     SegmentSelector, exception_pushes_error_code,
 };
 use core::arch::{asm, naked_asm};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
 use crate::{debug_write, debug_write_hex_u64, halt_forever};
 
@@ -96,9 +97,22 @@ impl TaskStateSegment {
 
 const _: () = assert!(core::mem::size_of::<TaskStateSegment>() == 104);
 
-#[repr(align(16))]
-#[allow(dead_code)]
-struct IstStack([u8; DOUBLE_FAULT_IST_STACK_SIZE]);
+/// The #DF emergency stack, preceded by a page that the kernel's own page
+/// tables deliberately leave unmapped.
+///
+/// x86 stacks grow downwards, so overflowing this one runs off its low end
+/// straight into `guard`. Without the hole, that would quietly scribble over
+/// whatever static happened to be laid out below it; with it, the overflow
+/// takes a not-present #PF at a known address.
+#[repr(C, align(4096))]
+struct GuardedIstStack {
+    guard: [u8; PAGE_SIZE],
+    stack: [u8; DOUBLE_FAULT_IST_STACK_SIZE],
+}
+
+const PAGE_SIZE: usize = 4096;
+
+const _: () = assert!(DOUBLE_FAULT_IST_STACK_SIZE.is_multiple_of(PAGE_SIZE));
 
 #[used]
 #[unsafe(link_section = ".data.gdt")]
@@ -110,7 +124,16 @@ static mut TSS: TaskStateSegment = TaskStateSegment::EMPTY;
 
 #[used]
 #[unsafe(link_section = ".data.ist")]
-static mut DOUBLE_FAULT_IST_STACK: IstStack = IstStack([0; DOUBLE_FAULT_IST_STACK_SIZE]);
+static mut DOUBLE_FAULT_IST_STACK: GuardedIstStack = GuardedIstStack {
+    guard: [0; PAGE_SIZE],
+    stack: [0; DOUBLE_FAULT_IST_STACK_SIZE],
+};
+
+/// Address of the unmapped page below the #DF emergency stack.
+#[must_use]
+pub(crate) fn double_fault_guard_page() -> u64 {
+    core::ptr::addr_of!(DOUBLE_FAULT_IST_STACK) as u64
+}
 
 const fn gate_for_selector(
     handler_address: u64,
@@ -290,8 +313,17 @@ struct ExceptionFrame {
     rip: u64,
     cs: u64,
     rflags: u64,
+    rsp: u64,
+    ss: u64,
 }
 
+/// Common exception entry: save the full context, hand it to Rust, then either
+/// resume the interrupted context or never come back.
+///
+/// The handler is allowed to *return*, and to have rewritten `rip` in the saved
+/// frame before doing so. That is what makes a fault recoverable, which the
+/// memory-protection proofs need (deliberately fault, then continue) and which
+/// user-mode fault handling will need for real.
 #[unsafe(naked)]
 extern "sysv64" fn common_exception_entry() -> ! {
     naked_asm!(
@@ -311,12 +343,114 @@ extern "sysv64" fn common_exception_entry() -> ! {
         "push r13",
         "push r14",
         "push r15",
+        // RDI = &ExceptionFrame. RBP keeps the unaligned RSP across the call,
+        // which the SysV ABI requires to be 16-byte aligned; RBP itself is
+        // already saved on the stack, so clobbering the register is free.
         "mov rdi, rsp",
+        "mov rbp, rsp",
         "and rsp, -16",
         "call {handler}",
-        "ud2",
+        "mov rsp, rbp",
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rbp",
+        "pop rdi",
+        "pop rsi",
+        "pop rdx",
+        "pop rcx",
+        "pop rbx",
+        "pop rax",
+        // Discard the vector and error-code words the stubs pushed.
+        "add rsp, 16",
+        "iretq",
         handler = sym handle_exception,
     )
+}
+
+/// A fault the kernel asked for on purpose, and what the CPU reported for it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CaughtFault {
+    pub vector: u8,
+    pub error_code: u64,
+    /// CR2 for #PF, otherwise the faulting instruction pointer.
+    pub address: u64,
+    pub rip: u64,
+}
+
+static EXPECT_ARMED: AtomicBool = AtomicBool::new(false);
+static EXPECT_VECTOR: AtomicU8 = AtomicU8::new(0);
+static EXPECT_ADDRESS_LOW: AtomicU64 = AtomicU64::new(0);
+static EXPECT_ADDRESS_HIGH: AtomicU64 = AtomicU64::new(0);
+static EXPECT_RECOVERY_RIP: AtomicU64 = AtomicU64::new(0);
+
+static CAUGHT_ANY: AtomicBool = AtomicBool::new(false);
+static CAUGHT_VECTOR: AtomicU8 = AtomicU8::new(0);
+static CAUGHT_ERROR_CODE: AtomicU64 = AtomicU64::new(0);
+static CAUGHT_ADDRESS: AtomicU64 = AtomicU64::new(0);
+static CAUGHT_RIP: AtomicU64 = AtomicU64::new(0);
+
+/// The two words a fault probe arms from assembly, once it knows the address
+/// of its own recovery label.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ExpectedFaultSlots {
+    /// Where to resume. Must be written before `armed`.
+    pub recovery_rip: *mut u64,
+    /// Written last: with this set, a matching fault resumes instead of halting.
+    pub armed: *mut bool,
+}
+
+/// Declare which fault is about to be provoked on purpose.
+///
+/// The caller finishes arming from assembly by storing its recovery label into
+/// [`ExpectedFaultSlots::recovery_rip`] and then `1` into
+/// [`ExpectedFaultSlots::armed`], in that order, immediately before the
+/// faulting instruction. Splitting it this way is what lets the recovery point
+/// be a label *after* the faulting instruction in the same `asm!` block.
+///
+/// The window is deliberately narrow: any *other* fault, including the same
+/// vector at a different address, still takes the normal fatal path. An armed
+/// expectation is consumed by the first matching fault.
+pub(crate) fn prepare_expected_fault(vector: u8, low: u64, high: u64) -> ExpectedFaultSlots {
+    EXPECT_ARMED.store(false, Ordering::Relaxed);
+    CAUGHT_ANY.store(false, Ordering::Relaxed);
+    EXPECT_VECTOR.store(vector, Ordering::Relaxed);
+    EXPECT_ADDRESS_LOW.store(low, Ordering::Relaxed);
+    EXPECT_ADDRESS_HIGH.store(high, Ordering::Relaxed);
+    EXPECT_RECOVERY_RIP.store(0, Ordering::Release);
+
+    ExpectedFaultSlots {
+        recovery_rip: EXPECT_RECOVERY_RIP.as_ptr(),
+        armed: EXPECT_ARMED.as_ptr(),
+    }
+}
+
+/// Disarm without consuming, and report whether a matching fault was caught.
+pub(crate) fn take_expected_fault() -> Option<CaughtFault> {
+    EXPECT_ARMED.store(false, Ordering::Release);
+    if !CAUGHT_ANY.swap(false, Ordering::AcqRel) {
+        return None;
+    }
+    Some(CaughtFault {
+        vector: CAUGHT_VECTOR.load(Ordering::Relaxed),
+        error_code: CAUGHT_ERROR_CODE.load(Ordering::Relaxed),
+        address: CAUGHT_ADDRESS.load(Ordering::Relaxed),
+        rip: CAUGHT_RIP.load(Ordering::Relaxed),
+    })
+}
+
+const PAGE_FAULT_VECTOR: u8 = 14;
+
+fn read_cr2() -> u64 {
+    let value: u64;
+    // SAFETY: reading CR2 at CPL0 has no side effects.
+    unsafe { asm!("mov {}, cr2", out(reg) value, options(nomem, nostack, preserves_flags)) };
+    value
 }
 
 /// Write the short name of a CPU exception vector to the debug console.
@@ -334,13 +468,25 @@ fn debug_exception_name(vector: u8) {
 }
 
 fn double_fault_ist_bounds() -> (u64, u64) {
-    let start = core::ptr::addr_of!(DOUBLE_FAULT_IST_STACK) as u64;
+    // SAFETY: only the address of the field is taken, never its contents.
+    let start = unsafe { core::ptr::addr_of!((*core::ptr::addr_of!(DOUBLE_FAULT_IST_STACK)).stack) }
+        as *const u8 as u64;
     (start, start + DOUBLE_FAULT_IST_STACK_SIZE as u64)
 }
 
-extern "sysv64" fn handle_exception(frame: *const ExceptionFrame) -> ! {
-    let frame = unsafe { &*frame };
+extern "sysv64" fn handle_exception(frame: *mut ExceptionFrame) {
+    // SAFETY: `common_exception_entry` passes the address of the register block
+    // it just pushed, which is a live, correctly laid out `ExceptionFrame`.
+    let frame = unsafe { &mut *frame };
     let vector = frame.vector as u8;
+
+    if let Some(recovery) = match_expected_fault(vector, frame) {
+        // Resume the interrupted context at the recovery point instead of
+        // halting. `iretq` restores the original RSP from the frame, so the
+        // stack is exactly as the faulting instruction left it.
+        frame.rip = recovery;
+        return;
+    }
 
     debug_write("AW_NATIVE_EXCEPTION vector=");
     crate::debug_write_u8(vector);
@@ -438,9 +584,44 @@ fn current_segments() -> (u16, u16) {
     (cs, ss)
 }
 
+/// If this fault is the one the kernel armed for, record it and return where
+/// execution must resume.
+fn match_expected_fault(vector: u8, frame: &ExceptionFrame) -> Option<u64> {
+    if !EXPECT_ARMED.load(Ordering::Acquire) || vector != EXPECT_VECTOR.load(Ordering::Relaxed) {
+        return None;
+    }
+    let recovery = EXPECT_RECOVERY_RIP.load(Ordering::Acquire);
+    if recovery == 0 {
+        // Armed but never told where to resume: fall through to the fatal path
+        // rather than `iretq` into address zero.
+        return None;
+    }
+
+    let address = if vector == PAGE_FAULT_VECTOR {
+        read_cr2()
+    } else {
+        frame.rip
+    };
+    if address < EXPECT_ADDRESS_LOW.load(Ordering::Relaxed)
+        || address >= EXPECT_ADDRESS_HIGH.load(Ordering::Relaxed)
+    {
+        return None;
+    }
+
+    CAUGHT_VECTOR.store(vector, Ordering::Relaxed);
+    CAUGHT_ERROR_CODE.store(frame.error_code, Ordering::Relaxed);
+    CAUGHT_ADDRESS.store(address, Ordering::Relaxed);
+    CAUGHT_RIP.store(frame.rip, Ordering::Relaxed);
+    CAUGHT_ANY.store(true, Ordering::Relaxed);
+    EXPECT_ARMED.store(false, Ordering::Release);
+
+    Some(recovery)
+}
+
 fn prepare_tss_and_gdt() -> (DescriptorTablePointer, u64) {
-    let stack_start = core::ptr::addr_of_mut!(DOUBLE_FAULT_IST_STACK) as u64;
-    let stack_top = (stack_start + DOUBLE_FAULT_IST_STACK_SIZE as u64) & !0xf_u64;
+    let (stack_start, stack_end) = double_fault_ist_bounds();
+    debug_assert!(stack_start > double_fault_guard_page());
+    let stack_top = stack_end & !0xf_u64;
     let tss_address = core::ptr::addr_of_mut!(TSS) as u64;
     let (tss_low, tss_high) = encode_tss_descriptor(tss_address);
 
@@ -473,7 +654,7 @@ fn prepare_tss_and_gdt() -> (DescriptorTablePointer, u64) {
 ///
 /// Must run once with external interrupts masked.
 pub(crate) unsafe fn install() {
-    debug_write("AW_GDT_IDT_V17 begin\n");
+    debug_write("AW_GDT_IDT_BEGIN\n");
 
     let (gdt_pointer, ist1_top) = prepare_tss_and_gdt();
     let idt_storage = core::ptr::addr_of_mut!(IDT).cast::<IdtEntry>();
@@ -496,7 +677,7 @@ pub(crate) unsafe fn install() {
             options(readonly, nostack, preserves_flags),
         );
     }
-    debug_write("AW_GDT_IDT_V17 lgdt_ok\n");
+    debug_write("AW_GDT_LOADED\n");
 
     // SAFETY: CPL0, interrupts masked, and the table just loaded above provides
     // the Ring 0 code/data descriptors this reload selects.
@@ -550,7 +731,7 @@ pub(crate) unsafe fn install() {
         );
     }
 
-    debug_write("AW_GDT_IDT_V17 lidt_ok\n");
+    debug_write("AW_IDT_LOADED\n");
     debug_write("AW_TSS_IST_READY vector=8 ist=1\n");
     debug_write("AW_IDT_VECTOR_COUNT ");
     crate::debug_write_u8(EXCEPTION_IDT_ENTRY_COUNT as u8);

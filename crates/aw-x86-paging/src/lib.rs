@@ -5,7 +5,10 @@ mod memory;
 mod offline;
 
 pub use memory::BootstrapFrameAllocator;
-pub use offline::{FrameAllocator, OfflinePageTableBuilder, ResolvedMapping};
+pub use offline::{
+    FrameAllocator, HUGE_PAGE_1G_SIZE, HUGE_PAGE_2M_SIZE, LeafSize, OfflinePageTableBuilder,
+    ResolvedLeaf, ResolvedMapping,
+};
 
 pub const PAGE_SIZE: u64 = 4096;
 pub const PAGE_TABLE_ENTRIES: usize = 512;
