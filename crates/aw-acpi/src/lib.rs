@@ -7,8 +7,11 @@ pub const RSDP_MAX_LEN: usize = 4096;
 pub const SDT_HEADER_LEN: usize = 36;
 pub const MCFG_HEADER_LEN: usize = 44;
 pub const MCFG_ALLOCATION_LEN: usize = 16;
+/// SDT header, then the 32-bit local APIC address and the 32-bit flags word.
+pub const MADT_HEADER_LEN: usize = 44;
 const RSDP_SIGNATURE: &[u8; 8] = b"RSD PTR ";
 const MCFG_SIGNATURE: [u8; 4] = *b"MCFG";
+const MADT_SIGNATURE: [u8; 4] = *b"APIC";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RsdpError {
@@ -248,6 +251,319 @@ fn parse_mcfg_allocation(bytes: &[u8]) -> McfgAllocation {
     }
 }
 
+/// Why a MADT (`APIC`) table was rejected.
+///
+/// Every variant is a refusal to guess. The MADT is the only description the
+/// kernel gets of where the I/O APICs live and which global system interrupt a
+/// legacy ISA IRQ actually arrives on, so a malformed table must fail closed
+/// rather than fall back to the conventional addresses.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MadtError {
+    InvalidSdt(SdtError),
+    InvalidSignature,
+    /// The table is shorter than the fixed MADT header.
+    TooShort,
+    /// An entry declared a length of 0 or 1, which cannot advance the walk.
+    ZeroLengthEntry,
+    /// An entry claimed to extend past the end of the table.
+    EntryOutOfBounds,
+    /// A known entry type was shorter than its architectural layout.
+    EntryTooShortForType,
+}
+
+impl From<SdtError> for MadtError {
+    fn from(value: SdtError) -> Self {
+        Self::InvalidSdt(value)
+    }
+}
+
+/// Interrupt polarity as encoded in the MPS INTI flags (ACPI 6.5, 5.2.12.5).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Polarity {
+    /// `00`: whatever the bus specification says. ISA means active high.
+    ConformsToBus,
+    ActiveHigh,
+    ActiveLow,
+}
+
+/// Interrupt trigger mode as encoded in the MPS INTI flags.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TriggerMode {
+    /// `00`: whatever the bus specification says. ISA means edge triggered.
+    ConformsToBus,
+    Edge,
+    Level,
+}
+
+/// The MPS INTI flags word shared by override and NMI entries.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InterruptFlags(pub u16);
+
+impl InterruptFlags {
+    #[must_use]
+    pub const fn polarity(self) -> Polarity {
+        match self.0 & 0b11 {
+            0b01 => Polarity::ActiveHigh,
+            0b11 => Polarity::ActiveLow,
+            // `10` is reserved; treating it as "ask the bus" keeps the decoder
+            // total without inventing a meaning for it.
+            _ => Polarity::ConformsToBus,
+        }
+    }
+
+    #[must_use]
+    pub const fn trigger_mode(self) -> TriggerMode {
+        match (self.0 >> 2) & 0b11 {
+            0b01 => TriggerMode::Edge,
+            0b11 => TriggerMode::Level,
+            _ => TriggerMode::ConformsToBus,
+        }
+    }
+}
+
+/// One entry of the MADT's variable-length interrupt-controller list.
+///
+/// Types this kernel does not consume yet are preserved as [`MadtEntry::Other`]
+/// with their raw type byte rather than dropped, so a later pass can tell the
+/// difference between "no such entry" and "not decoded here".
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MadtEntry {
+    LocalApic {
+        processor_uid: u8,
+        apic_id: u8,
+        flags: u32,
+    },
+    IoApic {
+        id: u8,
+        address: u32,
+        gsi_base: u32,
+    },
+    InterruptSourceOverride {
+        bus: u8,
+        source_irq: u8,
+        global_system_interrupt: u32,
+        flags: InterruptFlags,
+    },
+    LocalX2Apic {
+        x2apic_id: u32,
+        flags: u32,
+        processor_uid: u32,
+    },
+    Other {
+        kind: u8,
+    },
+}
+
+const MADT_LOCAL_APIC: u8 = 0;
+const MADT_IO_APIC: u8 = 1;
+const MADT_INTERRUPT_SOURCE_OVERRIDE: u8 = 2;
+const MADT_LOCAL_X2APIC: u8 = 9;
+
+const MADT_LOCAL_APIC_LEN: usize = 8;
+const MADT_IO_APIC_LEN: usize = 12;
+const MADT_INTERRUPT_SOURCE_OVERRIDE_LEN: usize = 10;
+const MADT_LOCAL_X2APIC_LEN: usize = 16;
+
+/// The ISA bus number used by interrupt source overrides.
+pub const MADT_ISA_BUS: u8 = 0;
+
+/// A MADT whose header and complete entry list have already been validated.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Madt<'a> {
+    table: &'a [u8],
+}
+
+impl<'a> Madt<'a> {
+    /// Physical address of the local APIC registers, as reported by firmware.
+    #[must_use]
+    pub fn local_apic_address(self) -> u32 {
+        u32::from_le_bytes([
+            self.table[36],
+            self.table[37],
+            self.table[38],
+            self.table[39],
+        ])
+    }
+
+    #[must_use]
+    pub fn flags(self) -> u32 {
+        u32::from_le_bytes([
+            self.table[40],
+            self.table[41],
+            self.table[42],
+            self.table[43],
+        ])
+    }
+
+    /// Bit 0 of the flags word: the platform also has a pair of 8259 PICs,
+    /// which must be masked before APIC-mode interrupts are enabled.
+    #[must_use]
+    pub fn dual_8259_present(self) -> bool {
+        self.flags() & 1 != 0
+    }
+
+    #[must_use]
+    pub fn entries(self) -> MadtEntries<'a> {
+        MadtEntries {
+            rest: &self.table[MADT_HEADER_LEN..],
+        }
+    }
+
+    /// First I/O APIC whose window covers `gsi`, and the offset of `gsi` within
+    /// that I/O APIC's redirection table.
+    #[must_use]
+    pub fn io_apic_for_gsi(self, gsi: u32) -> Option<(u8, u32, u32)> {
+        self.entries().find_map(|entry| match entry {
+            MadtEntry::IoApic {
+                id,
+                address,
+                gsi_base,
+            } if gsi >= gsi_base => Some((id, address, gsi - gsi_base)),
+            _ => None,
+        })
+    }
+
+    /// Resolve a legacy ISA IRQ to the global system interrupt it is really
+    /// delivered on, together with the polarity and trigger mode to program.
+    ///
+    /// Identity mapping is the ACPI default, but it is routinely wrong: the
+    /// timer's IRQ 0 is commonly overridden to GSI 2, and the ACPI SCI is
+    /// commonly overridden to level/low. Programming an I/O APIC from the IRQ
+    /// number alone is exactly the bug this lookup exists to prevent.
+    #[must_use]
+    pub fn resolve_isa_irq(self, irq: u8) -> (u32, Polarity, TriggerMode) {
+        for entry in self.entries() {
+            if let MadtEntry::InterruptSourceOverride {
+                bus,
+                source_irq,
+                global_system_interrupt,
+                flags,
+            } = entry
+                && bus == MADT_ISA_BUS
+                && source_irq == irq
+            {
+                return (
+                    global_system_interrupt,
+                    flags.polarity(),
+                    flags.trigger_mode(),
+                );
+            }
+        }
+
+        (
+            u32::from(irq),
+            Polarity::ConformsToBus,
+            TriggerMode::ConformsToBus,
+        )
+    }
+}
+
+/// Iterator over a validated MADT's entry list.
+///
+/// [`validate_madt`] has already walked the whole list, so every `length` byte
+/// seen here is non-zero and in bounds and the iteration always terminates.
+pub struct MadtEntries<'a> {
+    rest: &'a [u8],
+}
+
+impl Iterator for MadtEntries<'_> {
+    type Item = MadtEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.rest.len() < 2 {
+            return None;
+        }
+
+        let kind = self.rest[0];
+        let length = usize::from(self.rest[1]);
+        if length < 2 || length > self.rest.len() {
+            return None;
+        }
+
+        let (entry, rest) = self.rest.split_at(length);
+        self.rest = rest;
+        Some(parse_madt_entry(kind, entry))
+    }
+}
+
+fn parse_madt_entry(kind: u8, entry: &[u8]) -> MadtEntry {
+    match kind {
+        MADT_LOCAL_APIC if entry.len() >= MADT_LOCAL_APIC_LEN => MadtEntry::LocalApic {
+            processor_uid: entry[2],
+            apic_id: entry[3],
+            flags: u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]),
+        },
+        MADT_IO_APIC if entry.len() >= MADT_IO_APIC_LEN => MadtEntry::IoApic {
+            id: entry[2],
+            address: u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]),
+            gsi_base: u32::from_le_bytes([entry[8], entry[9], entry[10], entry[11]]),
+        },
+        MADT_INTERRUPT_SOURCE_OVERRIDE if entry.len() >= MADT_INTERRUPT_SOURCE_OVERRIDE_LEN => {
+            MadtEntry::InterruptSourceOverride {
+                bus: entry[2],
+                source_irq: entry[3],
+                global_system_interrupt: u32::from_le_bytes([
+                    entry[4], entry[5], entry[6], entry[7],
+                ]),
+                flags: InterruptFlags(u16::from_le_bytes([entry[8], entry[9]])),
+            }
+        }
+        MADT_LOCAL_X2APIC if entry.len() >= MADT_LOCAL_X2APIC_LEN => MadtEntry::LocalX2Apic {
+            x2apic_id: u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]),
+            flags: u32::from_le_bytes([entry[8], entry[9], entry[10], entry[11]]),
+            processor_uid: u32::from_le_bytes([entry[12], entry[13], entry[14], entry[15]]),
+        },
+        _ => MadtEntry::Other { kind },
+    }
+}
+
+/// Minimum entry length architecturally required for a type this crate decodes.
+const fn required_entry_length(kind: u8) -> usize {
+    match kind {
+        MADT_LOCAL_APIC => MADT_LOCAL_APIC_LEN,
+        MADT_IO_APIC => MADT_IO_APIC_LEN,
+        MADT_INTERRUPT_SOURCE_OVERRIDE => MADT_INTERRUPT_SOURCE_OVERRIDE_LEN,
+        MADT_LOCAL_X2APIC => MADT_LOCAL_X2APIC_LEN,
+        _ => 2,
+    }
+}
+
+/// Validate a MADT header and its entire entry list before anything reads it.
+///
+/// The walk is performed once, here, so [`Madt::entries`] cannot loop forever
+/// on a zero-length entry or read past the declared table length.
+pub fn validate_madt(bytes: &[u8]) -> Result<Madt<'_>, MadtError> {
+    let header = validate_sdt(bytes)?;
+    if header.signature != MADT_SIGNATURE {
+        return Err(MadtError::InvalidSignature);
+    }
+    if header.length < MADT_HEADER_LEN {
+        return Err(MadtError::TooShort);
+    }
+
+    let table = &bytes[..header.length];
+    let mut rest = &table[MADT_HEADER_LEN..];
+    while !rest.is_empty() {
+        if rest.len() < 2 {
+            return Err(MadtError::EntryOutOfBounds);
+        }
+        let kind = rest[0];
+        let length = usize::from(rest[1]);
+        if length < 2 {
+            return Err(MadtError::ZeroLengthEntry);
+        }
+        if length > rest.len() {
+            return Err(MadtError::EntryOutOfBounds);
+        }
+        if length < required_entry_length(kind) {
+            return Err(MadtError::EntryTooShortForType);
+        }
+        rest = &rest[length..];
+    }
+
+    Ok(Madt { table })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,6 +670,162 @@ mod tests {
             allocation.ecam_address(2, 5, 3, 0x120),
             Some(0xe000_0000 + (2_u64 << 20) + (5_u64 << 15) + (3_u64 << 12) + 0x120)
         );
+    }
+
+    /// A MADT shaped like the one QEMU's q35 machine publishes: one local APIC,
+    /// one I/O APIC at the conventional address, and the IRQ 0 -> GSI 2
+    /// override that makes the timer arrive on a different pin than its IRQ
+    /// number suggests.
+    fn valid_madt() -> [u8; MADT_HEADER_LEN + 8 + 12 + 10 + 10] {
+        let mut table = [0_u8; MADT_HEADER_LEN + 8 + 12 + 10 + 10];
+        table[..4].copy_from_slice(b"APIC");
+        let table_len = table.len();
+        table[4..8].copy_from_slice(&(table_len as u32).to_le_bytes());
+        table[8] = 5;
+        table[10..16].copy_from_slice(b"AWOS  ");
+        table[36..40].copy_from_slice(&0xfee0_0000_u32.to_le_bytes());
+        // PCAT_COMPAT: the legacy 8259 pair is present and must be masked.
+        table[40..44].copy_from_slice(&1_u32.to_le_bytes());
+
+        let mut at = MADT_HEADER_LEN;
+        // Processor local APIC, enabled.
+        table[at] = 0;
+        table[at + 1] = 8;
+        table[at + 2] = 1;
+        table[at + 3] = 0;
+        table[at + 4..at + 8].copy_from_slice(&1_u32.to_le_bytes());
+        at += 8;
+
+        // I/O APIC 0 at 0xfec00000, covering GSI 0 upwards.
+        table[at] = 1;
+        table[at + 1] = 12;
+        table[at + 2] = 0;
+        table[at + 4..at + 8].copy_from_slice(&0xfec0_0000_u32.to_le_bytes());
+        table[at + 8..at + 12].copy_from_slice(&0_u32.to_le_bytes());
+        at += 12;
+
+        // ISA IRQ 0 is really delivered on GSI 2, bus-default polarity/trigger.
+        table[at] = 2;
+        table[at + 1] = 10;
+        table[at + 2] = MADT_ISA_BUS;
+        table[at + 3] = 0;
+        table[at + 4..at + 8].copy_from_slice(&2_u32.to_le_bytes());
+        table[at + 8..at + 10].copy_from_slice(&0_u16.to_le_bytes());
+        at += 10;
+
+        // ISA IRQ 9 (the ACPI SCI) is level triggered and active low.
+        table[at] = 2;
+        table[at + 1] = 10;
+        table[at + 2] = MADT_ISA_BUS;
+        table[at + 3] = 9;
+        table[at + 4..at + 8].copy_from_slice(&9_u32.to_le_bytes());
+        table[at + 8..at + 10].copy_from_slice(&0b1111_u16.to_le_bytes());
+
+        set_checksum(&mut table, 9, table_len);
+        table
+    }
+
+    #[test]
+    fn parses_madt_header_and_entry_list() {
+        let table = valid_madt();
+        let madt = validate_madt(&table).expect("valid MADT must parse");
+
+        assert_eq!(madt.local_apic_address(), 0xfee0_0000);
+        assert!(madt.dual_8259_present());
+
+        let mut entries = madt.entries();
+        assert_eq!(
+            entries.next(),
+            Some(MadtEntry::LocalApic {
+                processor_uid: 1,
+                apic_id: 0,
+                flags: 1,
+            })
+        );
+        assert_eq!(
+            entries.next(),
+            Some(MadtEntry::IoApic {
+                id: 0,
+                address: 0xfec0_0000,
+                gsi_base: 0,
+            })
+        );
+        assert_eq!(madt.entries().count(), 4);
+    }
+
+    #[test]
+    fn resolves_overridden_and_identity_mapped_isa_irqs() {
+        let table = valid_madt();
+        let madt = validate_madt(&table).expect("valid MADT must parse");
+
+        // The timer: overridden onto another pin, bus-default electrical spec.
+        assert_eq!(
+            madt.resolve_isa_irq(0),
+            (2, Polarity::ConformsToBus, TriggerMode::ConformsToBus)
+        );
+        // The SCI: overridden and explicitly level/low.
+        assert_eq!(
+            madt.resolve_isa_irq(9),
+            (9, Polarity::ActiveLow, TriggerMode::Level)
+        );
+        // Everything without an override stays identity mapped.
+        assert_eq!(
+            madt.resolve_isa_irq(4),
+            (4, Polarity::ConformsToBus, TriggerMode::ConformsToBus)
+        );
+    }
+
+    #[test]
+    fn locates_the_io_apic_owning_a_global_system_interrupt() {
+        let table = valid_madt();
+        let madt = validate_madt(&table).expect("valid MADT must parse");
+
+        assert_eq!(madt.io_apic_for_gsi(2), Some((0, 0xfec0_0000, 2)));
+    }
+
+    #[test]
+    fn rejects_madt_with_a_zero_length_entry() {
+        let mut table = valid_madt();
+        table[MADT_HEADER_LEN + 1] = 0;
+        let table_len = table.len();
+        set_checksum(&mut table, 9, table_len);
+
+        assert_eq!(validate_madt(&table), Err(MadtError::ZeroLengthEntry));
+    }
+
+    #[test]
+    fn rejects_madt_entry_that_runs_past_the_table() {
+        let mut table = valid_madt();
+        table[MADT_HEADER_LEN + 1] = 0xff;
+        let table_len = table.len();
+        set_checksum(&mut table, 9, table_len);
+
+        assert_eq!(validate_madt(&table), Err(MadtError::EntryOutOfBounds));
+    }
+
+    #[test]
+    fn rejects_io_apic_entry_too_short_for_its_type() {
+        let mut table = valid_madt();
+        // Shrink the I/O APIC entry to 4 bytes and absorb the difference into
+        // the following entry, so only the per-type length rule can catch it.
+        let io_apic = MADT_HEADER_LEN + 8;
+        table[io_apic + 1] = 4;
+        table[io_apic + 4] = 0x7f;
+        table[io_apic + 5] = 8;
+        let table_len = table.len();
+        set_checksum(&mut table, 9, table_len);
+
+        assert_eq!(validate_madt(&table), Err(MadtError::EntryTooShortForType));
+    }
+
+    #[test]
+    fn rejects_madt_with_a_foreign_signature() {
+        let mut table = valid_madt();
+        table[..4].copy_from_slice(b"MCFG");
+        let table_len = table.len();
+        set_checksum(&mut table, 9, table_len);
+
+        assert_eq!(validate_madt(&table), Err(MadtError::InvalidSignature));
     }
 
     #[test]
