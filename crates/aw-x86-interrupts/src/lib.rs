@@ -11,6 +11,13 @@
 //! to get right before it ever executes `lgdt`/`lidt`. The kernel crate is
 //! responsible for placing the produced bytes in memory and executing the
 //! privileged instructions, with narrowly scoped and documented `unsafe`.
+//!
+//! The same split applies to the two routers a device interrupt can arrive
+//! through: [`ioapic`] encodes redirection-table entries and [`msi`] encodes
+//! message address/data pairs, and neither performs any access.
+
+pub mod ioapic;
+pub mod msi;
 
 /// CPU privilege level used by both segment and gate descriptors.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
