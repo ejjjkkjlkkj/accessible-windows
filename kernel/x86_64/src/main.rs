@@ -17,6 +17,7 @@ mod clock;
 mod device_irq;
 mod fat16;
 mod frame_allocator;
+mod gpt;
 mod heap;
 mod interrupt_vectors;
 mod interrupts;
@@ -1510,6 +1511,9 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         ahci::prove();
         #[cfg(feature = "ahci-write-smoke-test")]
         ahci::prove_write();
+        // Read the disk's own GPT partition table (read-only; reports unavailable
+        // on a non-GPT disk, e.g. the write-smoke scratch disk).
+        gpt::prove();
         #[cfg(feature = "msi-proof-device")]
         prove_msi_delivery(handoff);
 

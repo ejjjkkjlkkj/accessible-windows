@@ -48,6 +48,10 @@ if ($LASTEXITCODE -ne 0) { throw 'building userland spinner A failed' }
 if ($LASTEXITCODE -ne 0) { throw 'building userland spinner B failed' }
 & $python.Source (Join-Path $PSScriptRoot 'build_bootable_image.py') '--fat-only' $vblkDisk $fatStage
 if ($LASTEXITCODE -ne 0) { throw 'building the FAT16 test disk failed' }
+# A full GPT disk (protective MBR + GPT + FAT16 ESP) for the GPT parser proof.
+$gptDisk = Join-Path $repoRoot 'target/gpt-test.img'
+& $python.Source (Join-Path $PSScriptRoot 'build_bootable_image.py') $gptDisk $fatStage
+if ($LASTEXITCODE -ne 0) { throw 'building the GPT test disk failed' }
 
 # A blank scratch disk for the AHCI write proof: it overwrites LBA 0, so it must
 # never be a data disk. Recreated blank each run.
@@ -512,6 +516,29 @@ $configurations = @(
         )
         Forbidden = @(
             'AW_AHCI_WRITE_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
+        # GPT parser: read the partition table off a real GPT disk on AHCI, validate
+        # the header signature and CRC32, and find the first partition (the ESP).
+        # Read-only. The disk is a full GPT image (protective MBR + GPT + FAT16 ESP).
+        Name     = 'gpt'
+        Features = @()
+        QemuArgs = @(
+            '-device', 'ich9-ahci,id=sata0'
+            '-drive', "if=none,id=gptdisk,file=$gptDisk,format=raw"
+            '-device', 'ide-hd,drive=gptdisk,bus=sata0.0'
+        )
+        Required = @(
+            'AW_GPT_HEADER_OK'
+            'AW_GPT_PARTITION index=0'
+            'AW_GPT_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_GPT_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )
