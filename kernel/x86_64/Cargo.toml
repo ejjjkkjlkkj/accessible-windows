@@ -39,6 +39,11 @@ gpt-write-smoke-test = []
 # root directory), then creates a file in it and reads it back. Test-only, scratch
 # disk only: it overwrites the volume. Never enabled in the normal boot path.
 fat-format-smoke-test = []
+# The capstone: on one blank disk, write a GPT, format the ESP as FAT16, write a
+# file, then read it back through the whole stack (GPT -> partition -> FAT -> file),
+# the way an installer provisions a target disk. Test-only, scratch disk only: it
+# partitions and formats the whole disk. Never enabled in the normal boot path.
+disk-build-smoke-test = []
 # Drives the MSI delivery proof with QEMU's `edu` test device. Never enabled in
 # a shipping image: it contains a driver for a device that only exists inside an
 # emulator.

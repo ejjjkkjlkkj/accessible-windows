@@ -19,6 +19,8 @@ mod fat16;
 mod frame_allocator;
 mod gpt;
 mod heap;
+#[cfg(feature = "disk-build-smoke-test")]
+mod installer;
 mod interrupt_vectors;
 mod interrupts;
 mod ioapic;
@@ -1527,6 +1529,16 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
             fat16::prove_format(&port, 0, 16384);
         } else {
             debug_write("AW_MKFS_FAIL reason=no_ahci_port\n");
+        }
+        // Capstone: build a complete installable disk from blank - GPT + FAT16 ESP +
+        // a file - and read it back through the whole stack. Runs before the read
+        // proves so they see the disk it built. Scratch disk only, gated out of the
+        // normal boot path; the 8 MiB scratch disk is 16384 sectors.
+        #[cfg(feature = "disk-build-smoke-test")]
+        if let Some(port) = ahci::init() {
+            installer::prove(&port, 16384);
+        } else {
+            debug_write("AW_DISKBUILD_FAIL reason=no_ahci_port\n");
         }
         #[cfg(not(feature = "ahci-write-smoke-test"))]
         ahci::prove();

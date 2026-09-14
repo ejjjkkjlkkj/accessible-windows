@@ -149,36 +149,36 @@ pub fn prove() {
 // System Partition. It is gated and only ever pointed at a scratch disk, since it
 // overwrites the partition table.
 
-#[cfg(feature = "gpt-write-smoke-test")]
+#[cfg(any(feature = "gpt-write-smoke-test", feature = "disk-build-smoke-test"))]
 use alloc::vec;
-#[cfg(feature = "gpt-write-smoke-test")]
+#[cfg(any(feature = "gpt-write-smoke-test", feature = "disk-build-smoke-test"))]
 use crate::fat16::{SectorSink, SectorSource};
 
 /// A fixed disk GUID for the scratch disk we build (value is irrelevant to the
 /// proof, only that it round-trips and is non-zero).
-#[cfg(feature = "gpt-write-smoke-test")]
+#[cfg(any(feature = "gpt-write-smoke-test", feature = "disk-build-smoke-test"))]
 const DISK_GUID: [u8; 16] = [
     0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01,
 ];
-#[cfg(feature = "gpt-write-smoke-test")]
+#[cfg(any(feature = "gpt-write-smoke-test", feature = "disk-build-smoke-test"))]
 const PART_GUID: [u8; 16] = [
     0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x07, 0x18, 0x29, 0x3a, 0x4b, 0x5c, 0x6d, 0x7e, 0x8f, 0x90,
 ];
 
-#[cfg(feature = "gpt-write-smoke-test")]
+#[cfg(any(feature = "gpt-write-smoke-test", feature = "disk-build-smoke-test"))]
 const NUM_ENTRIES: usize = 128;
-#[cfg(feature = "gpt-write-smoke-test")]
+#[cfg(any(feature = "gpt-write-smoke-test", feature = "disk-build-smoke-test"))]
 const ENTRY_SIZE: usize = 128;
 /// 128 entries x 128 bytes = 16 KiB = 32 sectors.
-#[cfg(feature = "gpt-write-smoke-test")]
+#[cfg(any(feature = "gpt-write-smoke-test", feature = "disk-build-smoke-test"))]
 const ENTRY_SECTORS: u64 = (NUM_ENTRIES * ENTRY_SIZE / SECTOR_SIZE) as u64;
 
-#[cfg(feature = "gpt-write-smoke-test")]
+#[cfg(any(feature = "gpt-write-smoke-test", feature = "disk-build-smoke-test"))]
 fn put_u32(buffer: &mut [u8], offset: usize, value: u32) {
     buffer[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
-#[cfg(feature = "gpt-write-smoke-test")]
+#[cfg(any(feature = "gpt-write-smoke-test", feature = "disk-build-smoke-test"))]
 fn put_u64(buffer: &mut [u8], offset: usize, value: u64) {
     buffer[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
 }
@@ -186,7 +186,7 @@ fn put_u64(buffer: &mut [u8], offset: usize, value: u64) {
 /// Fill in one GPT header (92 bytes) at `my_lba`, its alternate at `alt_lba`, with
 /// the partition-array CRC already computed. Leaves the header CRC field zeroed,
 /// computes it over `header_size` bytes, and stores it.
-#[cfg(feature = "gpt-write-smoke-test")]
+#[cfg(any(feature = "gpt-write-smoke-test", feature = "disk-build-smoke-test"))]
 fn build_header(
     my_lba: u64,
     alt_lba: u64,
@@ -217,7 +217,7 @@ fn build_header(
 /// Write a GPT to a blank disk of `total_sectors`, with one ESP spanning the whole
 /// usable area. Lays down the protective MBR, the primary header and entry array
 /// near the front, and the backup array and header at the end of the disk.
-#[cfg(feature = "gpt-write-smoke-test")]
+#[cfg(any(feature = "gpt-write-smoke-test", feature = "disk-build-smoke-test"))]
 pub fn write_table<S: SectorSink>(sink: &S, total_sectors: u64) -> Result<(), &'static str> {
     if total_sectors < 2 * ENTRY_SECTORS + 8 {
         return Err("disk_too_small");
@@ -352,4 +352,48 @@ pub fn prove_write<S: SectorSource + SectorSink>(source: &S, total_sectors: u64)
     debug_write_u64(first_lba);
     debug_write("\n");
     debug_write("AW_GPTWRITE_PROOF_OK\n");
+}
+
+/// Read and validate the GPT on `source` and return the first real partition's
+/// (first_lba, last_lba), or [`None`] if there is no valid GPT or no partition.
+/// The reusable discovery step behind the disk builder's full-stack read.
+#[cfg(feature = "disk-build-smoke-test")]
+pub fn find_first_partition<S: SectorSource>(source: &S) -> Option<(u64, u64)> {
+    let mut header = [0u8; SECTOR_SIZE];
+    source.read_sector(1, &mut header).ok()?;
+    if &header[0..8] != b"EFI PART" {
+        return None;
+    }
+    let header_size = read_u32(&header, 12) as usize;
+    if !(92..=SECTOR_SIZE).contains(&header_size) {
+        return None;
+    }
+    let stored_crc = read_u32(&header, 16);
+    let mut scratch = header;
+    scratch[16] = 0;
+    scratch[17] = 0;
+    scratch[18] = 0;
+    scratch[19] = 0;
+    if crc32(&scratch[0..header_size]) != stored_crc {
+        return None;
+    }
+    let entries_lba = read_u64(&header, 72);
+    let entry_count = read_u32(&header, 80);
+    let entry_size = read_u32(&header, 84) as usize;
+    if !(128..=SECTOR_SIZE).contains(&entry_size) {
+        return None;
+    }
+    let mut table = [0u8; SECTOR_SIZE];
+    source.read_sector(entries_lba, &mut table).ok()?;
+    let per_sector = SECTOR_SIZE / entry_size;
+    for index in 0..per_sector.min(entry_count as usize) {
+        let base = index * entry_size;
+        if guid_is_zero(&table[base..base + 16]) {
+            continue;
+        }
+        let first_lba = read_u64(&table, base + 32);
+        let last_lba = read_u64(&table, base + 40);
+        return Some((first_lba, last_lba));
+    }
+    None
 }

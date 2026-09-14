@@ -279,19 +279,19 @@ pub fn prove_partition<S: SectorSource>(source: &S, base_lba: u64) {
 
 /// A sink for 512-byte sectors, the write counterpart of [`SectorSource`]. Shared
 /// by the filesystem writer and the GPT writer.
-#[cfg(any(feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test", feature = "fat-format-smoke-test"))]
+#[cfg(any(feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test", feature = "fat-format-smoke-test", feature = "disk-build-smoke-test"))]
 pub trait SectorSink {
     fn write_sector(&self, lba: u64, data: &[u8; SECTOR_SIZE]) -> Result<(), &'static str>;
 }
 
-#[cfg(any(feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test", feature = "fat-format-smoke-test"))]
+#[cfg(any(feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test", feature = "fat-format-smoke-test", feature = "disk-build-smoke-test"))]
 impl SectorSink for crate::ahci::AhciPort {
     fn write_sector(&self, lba: u64, data: &[u8; SECTOR_SIZE]) -> Result<(), &'static str> {
         crate::ahci::AhciPort::write_sector(self, lba, data)
     }
 }
 
-#[cfg(any(feature = "fat-write-smoke-test", feature = "fat-format-smoke-test"))]
+#[cfg(any(feature = "fat-write-smoke-test", feature = "fat-format-smoke-test", feature = "disk-build-smoke-test"))]
 fn put_u16(buffer: &mut [u8], offset: usize, value: u16) {
     buffer[offset] = value as u8;
     buffer[offset + 1] = (value >> 8) as u8;
@@ -302,7 +302,7 @@ fn put_u16(buffer: &mut [u8], offset: usize, value: u16) {
 /// Allocates the first free cluster, writes the data into it, marks the cluster as
 /// end-of-chain in every FAT copy, and writes a root-directory entry. Fails if the
 /// file needs more than one cluster, or there is no free cluster or root slot.
-#[cfg(any(feature = "fat-write-smoke-test", feature = "fat-format-smoke-test"))]
+#[cfg(any(feature = "fat-write-smoke-test", feature = "fat-format-smoke-test", feature = "disk-build-smoke-test"))]
 pub fn write_file<S: SectorSource + SectorSink>(
     source: &S,
     base_lba: u64,
@@ -453,7 +453,7 @@ pub fn prove_fat_write<S: SectorSource + SectorSink>(source: &S, base_lba: u64) 
 /// Format `total_sectors` starting at `base_lba` as an empty FAT16 volume. Chooses
 /// one sector per cluster and 512 root entries, sizes the FAT to cover the data
 /// area, and fails if the resulting cluster count is not in the FAT16 range.
-#[cfg(feature = "fat-format-smoke-test")]
+#[cfg(any(feature = "fat-format-smoke-test", feature = "disk-build-smoke-test"))]
 pub fn format<S: SectorSink>(
     sink: &S,
     base_lba: u64,
@@ -586,4 +586,17 @@ pub fn prove_format<S: SectorSource + SectorSink>(source: &S, base_lba: u64, tot
             debug_write("\n");
         }
     }
+}
+
+/// Read a whole file by its 8.3 `name` from the FAT16 volume at `base_lba` on any
+/// sector source, returning its bytes or [`None`] if the volume cannot be parsed or
+/// the file is absent. The generic counterpart of [`load_file`], used by the disk
+/// builder's full-stack read-back.
+#[cfg(feature = "disk-build-smoke-test")]
+pub fn read_named<S: SectorSource>(source: &S, base_lba: u64, name: &[u8; 11]) -> Option<Vec<u8>> {
+    let mut boot = [0u8; SECTOR_SIZE];
+    source.read_sector(base_lba, &mut boot).ok()?;
+    let geometry = parse_geometry(&boot)?;
+    let (first_cluster, size) = find_file(source, base_lba, &geometry, name).ok()??;
+    read_file(source, base_lba, &geometry, first_cluster, size).ok()
 }

@@ -80,6 +80,12 @@ $gptScratch = Join-Path $repoRoot 'target/gpt-write-scratch.img'
 $mkfsScratch = Join-Path $repoRoot 'target/mkfs-scratch.img'
 [System.IO.File]::WriteAllBytes($mkfsScratch, (New-Object byte[] (16384 * 512)))
 
+# A blank 8 MiB (16384-sector) scratch disk for the disk-build capstone: the kernel
+# partitions and formats the whole disk, so it must be its own blank disk, recreated
+# each run. The size must match what the kernel passes to installer::prove (16384).
+$buildScratch = Join-Path $repoRoot 'target/disk-build-scratch.img'
+[System.IO.File]::WriteAllBytes($buildScratch, (New-Object byte[] (16384 * 512)))
+
 # Where the serial config routes COM1, so its banner can be checked host-side.
 $serialFile = Join-Path $repoRoot 'target/serial-com1.log'
 if (Test-Path -LiteralPath $serialFile) { Remove-Item -LiteralPath $serialFile -Force }
@@ -654,6 +660,35 @@ $configurations = @(
         )
         Forbidden = @(
             'AW_MKFS_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
+        # Disk-build capstone: on one blank scratch disk the kernel writes a GPT,
+        # formats the ESP as FAT16, writes a file, then reads it back through the
+        # whole stack it just built (GPT -> partition -> FAT -> file) - what an
+        # installer does to provision a target disk. Its own blank scratch disk,
+        # recreated each run; it partitions and formats the whole disk, so it must
+        # never touch a data disk. Gated behind disk-build-smoke-test.
+        Name     = 'disk-build'
+        Features = @('disk-build-smoke-test')
+        QemuArgs = @(
+            '-device', 'ich9-ahci,id=sata0'
+            '-drive', "if=none,id=buildscratch,file=$buildScratch,format=raw"
+            '-device', 'ide-hd,drive=buildscratch,bus=sata0.0'
+        )
+        Required = @(
+            'AW_DISKBUILD_BEGIN sectors=16384'
+            'AW_DISKBUILD_PARTITIONED'
+            'AW_DISKBUILD_FORMATTED'
+            'AW_DISKBUILD_WROTE'
+            'AW_DISKBUILD_READBACK_OK'
+            'AW_DISKBUILD_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_DISKBUILD_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )
