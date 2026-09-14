@@ -1504,7 +1504,12 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         debug_write("AW_VIRTIO_NET_BEGIN\n");
         virtio_net::prove();
         // A real SATA controller (AHCI), the kind VMware and physical PCs use.
+        // The normal path only reads (safe on any disk, including a real boot
+        // disk); the write proof is a dedicated test build against a scratch disk.
+        #[cfg(not(feature = "ahci-write-smoke-test"))]
         ahci::prove();
+        #[cfg(feature = "ahci-write-smoke-test")]
+        ahci::prove_write();
         #[cfg(feature = "msi-proof-device")]
         prove_msi_delivery(handoff);
 

@@ -49,6 +49,11 @@ if ($LASTEXITCODE -ne 0) { throw 'building userland spinner B failed' }
 & $python.Source (Join-Path $PSScriptRoot 'build_bootable_image.py') '--fat-only' $vblkDisk $fatStage
 if ($LASTEXITCODE -ne 0) { throw 'building the FAT16 test disk failed' }
 
+# A blank scratch disk for the AHCI write proof: it overwrites LBA 0, so it must
+# never be a data disk. Recreated blank each run.
+$ahciScratch = Join-Path $repoRoot 'target/ahci-scratch.img'
+[System.IO.File]::WriteAllBytes($ahciScratch, (New-Object byte[] (1024 * 1024)))
+
 # Where the serial config routes COM1, so its banner can be checked host-side.
 $serialFile = Join-Path $repoRoot 'target/serial-com1.log'
 if (Test-Path -LiteralPath $serialFile) { Remove-Item -LiteralPath $serialFile -Force }
@@ -483,6 +488,30 @@ $configurations = @(
         )
         Forbidden = @(
             'AW_AHCI_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
+        # AHCI write: write a known pattern to LBA 0 of a dedicated *scratch* disk by
+        # DMA (WRITE DMA EXT), then read it back and confirm the bytes round-tripped.
+        # The scratch disk is blank and never a data disk, since the proof overwrites
+        # LBA 0. Gated behind ahci-write-smoke-test so the normal path never writes.
+        Name     = 'ahci-write'
+        Features = @('ahci-write-smoke-test')
+        QemuArgs = @(
+            '-device', 'ich9-ahci,id=sata0'
+            '-drive', "if=none,id=scratch,file=$ahciScratch,format=raw"
+            '-device', 'ide-hd,drive=scratch,bus=sata0.0'
+        )
+        Required = @(
+            'AW_AHCI_PORT_PRESENT'
+            'AW_AHCI_WRITE_ISSUED sector=0'
+            'AW_AHCI_WRITE_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_AHCI_WRITE_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )

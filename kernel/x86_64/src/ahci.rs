@@ -106,6 +106,8 @@ const TFD_ERR: u32 = 1 << 0;
 const SSTS_DET_PRESENT: u32 = 0x3; // device present and PHY communication established
 
 const ATA_READ_DMA_EXT: u8 = 0x25;
+#[cfg(feature = "ahci-write-smoke-test")]
+const ATA_WRITE_DMA_EXT: u8 = 0x35;
 pub const SECTOR_SIZE: usize = 512;
 
 // ---- DMA structures, identity-mapped statics ----------------------------
@@ -284,8 +286,14 @@ impl AhciPort {
         true
     }
 
-    /// Read one 512-byte sector `lba` into `out` by DMA (READ DMA EXT).
-    pub fn read_sector(&self, lba: u64, out: &mut [u8; SECTOR_SIZE]) -> Result<(), &'static str> {
+    /// Build, issue and await one single-sector command on slot 0, transferring
+    /// through the `DATA` static: `command_byte` is the ATA command and `write`
+    /// sets the header's write bit and the FIS direction. The caller fills `DATA`
+    /// before a write, or reads it after a read.
+    ///
+    /// # Safety
+    /// CPL0; the port is started and the DMA statics are live and identity-mapped.
+    unsafe fn command(&self, lba: u64, command_byte: u8, write: bool) -> Result<(), &'static str> {
         let base = self.abar;
         let clb = core::ptr::addr_of_mut!(COMMAND_LIST) as *mut u8;
         let ctba = core::ptr::addr_of_mut!(COMMAND_TABLE) as *mut u8;
@@ -293,10 +301,12 @@ impl AhciPort {
 
         // SAFETY: build command header 0 and its command table + PRDT.
         unsafe {
-            // Command header 0: CFL=5 dwords (H2D FIS is 20 bytes), PRDTL=1.
+            // Command header 0: CFL=5 dwords (H2D FIS is 20 bytes), PRDTL=1, and
+            // the write bit (DW0 bit 6) set for a device write.
             let cfl = 5u32;
             let prdtl = 1u32 << 16;
-            clb.cast::<u32>().write_volatile(cfl | prdtl); // DW0
+            let write_bit = if write { 1u32 << 6 } else { 0 };
+            clb.cast::<u32>().write_volatile(cfl | write_bit | prdtl); // DW0
             clb.add(4).cast::<u32>().write_volatile(0); // PRDBC
             clb.add(8).cast::<u32>().write_volatile(ctba as u32); // CTBA low
             clb.add(12).cast::<u32>().write_volatile(0); // CTBA high
@@ -308,7 +318,7 @@ impl AhciPort {
             // Register H2D FIS.
             ctba.add(0).write_volatile(0x27); // FIS type H2D
             ctba.add(1).write_volatile(0x80); // C=1 (command)
-            ctba.add(2).write_volatile(ATA_READ_DMA_EXT);
+            ctba.add(2).write_volatile(command_byte);
             ctba.add(4).write_volatile(lba as u8); // LBA 0..7
             ctba.add(5).write_volatile((lba >> 8) as u8); // LBA 8..15
             ctba.add(6).write_volatile((lba >> 16) as u8); // LBA 16..23
@@ -379,18 +389,39 @@ impl AhciPort {
         // file error, not the task file being perfectly idle: a real HBA (VMware's)
         // can still show BSY here for a moment after a good transfer, while it has
         // already moved the data and posted DPS in PxIS with no TFES. Fail only on
-        // an actual error bit; the sector's own signature is the real proof that
-        // the right bytes arrived.
+        // an actual error bit; a read-back is the real proof that the bytes moved.
         // SAFETY: MMIO read of this port's task file register.
         let tfd = unsafe { mmio_read(base, port_reg(self.port, PX_TFD)) };
         if tfd & TFD_ERR != 0 {
             return Err("task_file_error");
         }
+        Ok(())
+    }
+
+    /// Read one 512-byte sector `lba` into `out` by DMA (READ DMA EXT).
+    pub fn read_sector(&self, lba: u64, out: &mut [u8; SECTOR_SIZE]) -> Result<(), &'static str> {
+        // SAFETY: CPL0; single-sector DMA read into the DATA static.
+        unsafe { self.command(lba, ATA_READ_DMA_EXT, false)? };
+        let data = core::ptr::addr_of!(DATA) as *const u8;
         // SAFETY: copy the DMA buffer out through its identity address.
         unsafe {
             for (index, slot) in out.iter_mut().enumerate() {
                 *slot = data.add(index).read_volatile();
             }
+        }
+        Ok(())
+    }
+
+    /// Write one 512-byte sector `lba` from `src` by DMA (WRITE DMA EXT).
+    #[cfg(feature = "ahci-write-smoke-test")]
+    pub fn write_sector(&self, lba: u64, src: &[u8; SECTOR_SIZE]) -> Result<(), &'static str> {
+        let data = core::ptr::addr_of_mut!(DATA) as *mut u8;
+        // SAFETY: stage the bytes in the DMA buffer, then a single-sector write.
+        unsafe {
+            for (index, byte) in src.iter().enumerate() {
+                data.add(index).write_volatile(*byte);
+            }
+            self.command(lba, ATA_WRITE_DMA_EXT, true)?;
         }
         Ok(())
     }
@@ -401,6 +432,7 @@ impl AhciPort {
 /// GPT disk, or the FAT boot sector on the test image, either way content the HBA
 /// actually delivered by DMA. Prints `AW_AHCI_UNAVAILABLE` and returns if no
 /// controller is present, so it is safe to call on every boot configuration.
+#[cfg(not(feature = "ahci-write-smoke-test"))]
 pub fn prove() {
     debug_write("AW_AHCI_BEGIN\n");
     // init() prints its own AW_AHCI_UNAVAILABLE reason when nothing usable is found.
@@ -425,5 +457,51 @@ pub fn prove() {
             debug_write(reason);
             debug_write("\n");
         }
+    }
+}
+
+/// Prove a real AHCI write: write a known pattern to LBA 0, read it back through a
+/// fresh command, and confirm the bytes round-tripped (dossier section 11.2,
+/// roadmap Phase 3 "AHCI/SATA read/write").
+///
+/// Test-only, and only ever pointed at a dedicated scratch disk - never a boot or
+/// data disk, since it overwrites LBA 0. It is gated behind `ahci-write-smoke-test`
+/// and is not in the normal boot path, so a real machine's disk is never written.
+#[cfg(feature = "ahci-write-smoke-test")]
+pub fn prove_write() {
+    debug_write("AW_AHCI_WRITE_BEGIN\n");
+    let Some(port) = init() else {
+        return;
+    };
+
+    // A distinctive, position-dependent pattern ending in the 0x55AA signature, so
+    // a stale-buffer read or a partial transfer cannot pass by accident.
+    let mut pattern = [0u8; SECTOR_SIZE];
+    for (index, byte) in pattern.iter_mut().enumerate() {
+        *byte = (index as u8) ^ 0xa5;
+    }
+    pattern[510] = 0x55;
+    pattern[511] = 0xaa;
+
+    if let Err(reason) = port.write_sector(0, &pattern) {
+        debug_write("AW_AHCI_WRITE_FAIL reason=");
+        debug_write(reason);
+        debug_write("\n");
+        return;
+    }
+    debug_write("AW_AHCI_WRITE_ISSUED sector=0\n");
+
+    let mut back = [0u8; SECTOR_SIZE];
+    if let Err(reason) = port.read_sector(0, &mut back) {
+        debug_write("AW_AHCI_WRITE_FAIL reason=readback_");
+        debug_write(reason);
+        debug_write("\n");
+        return;
+    }
+
+    if back == pattern {
+        debug_write("AW_AHCI_WRITE_PROOF_OK\n");
+    } else {
+        debug_write("AW_AHCI_WRITE_FAIL reason=mismatch\n");
     }
 }

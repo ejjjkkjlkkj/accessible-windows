@@ -23,6 +23,10 @@ ap-double-fault-smoke-test = []
 # Runs the cooperative scheduler on an application processor, to prove threads
 # context switch on a CPU other than the bootstrap processor. Test-only.
 ap-scheduler-smoke-test = []
+# Writes a sector by DMA through AHCI and reads it back, to prove SATA writes.
+# Test-only: it overwrites LBA 0, so it must only ever run against a scratch disk,
+# never a boot or data disk. Never enabled in the normal boot path.
+ahci-write-smoke-test = []
 # Drives the MSI delivery proof with QEMU's `edu` test device. Never enabled in
 # a shipping image: it contains a driver for a device that only exists inside an
 # emulator.

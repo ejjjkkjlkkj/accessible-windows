@@ -66,6 +66,7 @@ kernel ELF for symbol-level triage.
 | Kernel heap / global allocator | PASS | `AW_HEAP_PROOF_OK`; `Box`/`Vec` allocate, a vector grows and sums, a freed block is reused, over-aligned allocations align |
 | virtio-blk device read (legacy) | PASS | `AW_VIRTIO_BLK_PROOF_OK` (`virtio-blk`); one virtqueue reads sector 0 and it is a FAT boot sector |
 | AHCI/SATA sector read (DMA) | PASS | `AW_AHCI_PROOF_OK` (`ahci`); brings up an AHCI HBA, finds the port with a disk, and reads LBA 0 by DMA (READ DMA EXT), checking the 0x55AA signature - the real controller model VMware and physical PCs use |
+| AHCI/SATA sector write (DMA) | PASS | `AW_AHCI_WRITE_PROOF_OK` (`ahci-write`); writes a known pattern to LBA 0 of a dedicated scratch disk by DMA (WRITE DMA EXT) and reads it back byte-for-byte - never run against a data disk |
 | FAT16 file read | PASS | `AW_FS_PROOF_OK` (`virtio-blk`); parse the BPB, find `HELLO.TXT`, follow its cluster chain, match the bytes |
 | Userland ELF loader | PASS | `AW_USER_LOADER_PROOF_OK` (`virtio-blk`); read `USERPROG.ELF` off the FAT16 disk, map its PT_LOAD segment as user pages, run it at CPL3, and see it report 0xC0DE through a syscall and exit |
 | Userland preemptive multitasking | PASS | `AW_USER_INIT_PROOF_OK` (`virtio-blk`); two spinner programs (`USERA.ELF`/`USERB.ELF`) loaded from disk, each on its own kernel stack, are preempted back and forth by the timer at CPL3 and their counters advance comparably - fair alternation, not one starved |
