@@ -38,6 +38,7 @@ mod security_baseline;
 mod serial;
 mod smp;
 mod virtio_blk;
+mod virtio_net;
 mod virtual_memory;
 
 use irq_proof::DeliveryProof;
@@ -1451,6 +1452,8 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
             }
             None => debug_write("AW_VIRTIO_BLK_UNAVAILABLE reason=no_device\n"),
         }
+        debug_write("AW_VIRTIO_NET_BEGIN\n");
+        virtio_net::prove();
         #[cfg(feature = "msi-proof-device")]
         prove_msi_delivery(handoff);
 

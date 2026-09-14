@@ -66,6 +66,7 @@ kernel ELF for symbol-level triage.
 | Kernel heap / global allocator | PASS | `AW_HEAP_PROOF_OK`; `Box`/`Vec` allocate, a vector grows and sums, a freed block is reused, over-aligned allocations align |
 | virtio-blk device read (legacy) | PASS | `AW_VIRTIO_BLK_PROOF_OK` (`virtio-blk`); one virtqueue reads sector 0 and it is a FAT boot sector |
 | FAT16 file read | PASS | `AW_FS_PROOF_OK` (`virtio-blk`); parse the BPB, find `HELLO.TXT`, follow its cluster chain, match the bytes |
+| virtio-net ARP exchange (legacy) | PASS | `AW_VIRTIO_NET_PROOF_OK` (`net`); reads its MAC from config, `AW_VIRTIO_NET_QUIET_OK` shows the receive ring idle while nothing is sent, then an ARP request draws the SLIRP gateway's reply (`spa=10.0.2.2`) |
 | 16550 serial console (COM1) | PASS | `AW_SERIAL_PROOF_OK` (`serial`); loopback self-test, then a banner appears in the host COM1 log |
 | APIC timer IRQ delivery | PASS | `AW_APIC_TIMER_FIRED`, `AW_APIC_TIMER_MONOTONIC_OK ticks>=8` |
 | APIC timer negative test | PASS | `AW_APIC_TIMER_MASKED_STOPPED` then `AW_APIC_TIMER_UNMASKED_RESUMED` |
@@ -130,6 +131,15 @@ be asked to raise an interrupt without first implementing a real controller's
 command protocol; everything it exercises - the capability walk, the message
 encoding, bus mastering, the vector plumbing - is what an NVMe or xHCI driver
 will use unchanged.
+
+**The virtio-net proof makes the reply attributable to the request.** A card both
+consumes and produces buffers, so a frame appearing in the receive ring proves
+nothing unless it can be tied to something the guest did. The `net` proof posts
+its receive buffers, then holds a window in which it sends nothing and requires
+the receive ring to stay empty (`AW_VIRTIO_NET_QUIET_OK`) - the same shape as the
+MSI masked window. Only then does it broadcast an ARP request, and it accepts the
+result only if a reply comes back with opcode 2 and sender address 10.0.2.2, the
+SLIRP gateway that could only answer because the request really left the guest.
 
 **An application processor is online only if it says so itself.** A counter the
 bootstrap processor increments after sending a SIPI proves that a SIPI was sent.

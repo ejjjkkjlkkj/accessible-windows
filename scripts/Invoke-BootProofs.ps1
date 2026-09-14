@@ -311,6 +311,35 @@ $configurations = @(
         )
     }
     @{
+        # The second real driver: legacy virtio-net against QEMU's user-mode
+        # (SLIRP) network. The proof is an ARP exchange, not a status bit - the
+        # guest reads its own MAC, confirms the receive ring stays quiet while it
+        # sends nothing, broadcasts "who has 10.0.2.2", and matches the gateway's
+        # reply. `disable-modern=on` selects the transitional (I/O BAR) device the
+        # driver speaks; the fixed `mac=` makes the config-space read deterministic.
+        Name     = 'net'
+        Features = @()
+        QemuArgs = @(
+            '-netdev', 'user,id=n0'
+            '-device', 'virtio-net-pci,netdev=n0,disable-modern=on,mac=52:54:00:12:34:56'
+        )
+        Required = @(
+            'AW_VIRTIO_NET_FOUND'
+            'AW_VIRTIO_NET_MAC mac=52:54:00:12:34:56'
+            'AW_VIRTIO_NET_QUIET_OK'
+            'AW_VIRTIO_NET_ARP_SENT'
+            'AW_VIRTIO_NET_ARP_REPLY_OK spa=10.0.2.2 sha='
+            'AW_VIRTIO_NET_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_VIRTIO_NET_UNAVAILABLE'
+            'AW_VIRTIO_NET_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
         # A real 16550 UART console on COM1: an internal loopback test proves the
         # device, then a banner is emitted on the real line and checked in the
         # host-side serial log - output that actually left the guest.
