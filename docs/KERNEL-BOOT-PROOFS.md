@@ -187,3 +187,31 @@ work, and user-mode fault handling will need exactly the same machinery.
   that range the loader fails the boot loudly (`reason=fixed_base_unavailable`)
   rather than misloading; a relocatable or higher-half image is the long-term
   answer.
+
+## Second hypervisor: VMware Workstation
+
+Every proof above runs under QEMU/OVMF. The dossier (sections 3.1 and 20) also
+asks for validation on other hypervisors on the way to real hardware.
+`scripts/Invoke-VMwareBoot.ps1` boots the same `dist` image under **VMware
+Workstation** - its own EFI firmware and a virtual SATA controller, a completely
+different firmware and device model than QEMU/OVMF - with COM1 routed to a file:
+
+```bash
+pwsh -NoProfile -File scripts/Invoke-VMwareBoot.ps1
+```
+
+| Subsystem | State | Evidence marker |
+|---|---|---|
+| UEFI boot on VMware EFI | PASS | `AW_VMWARE_BOOT_OK`; `AW-SERIAL-CONSOLE-OK` appears on the guest COM1 the script captures - VMware's firmware booted `\EFI\BOOT\BOOTX64.EFI`, the loader handed off, and the native kernel entered and drove a real 16550 |
+
+0xE9 debugcon is a QEMU/Bochs convenience VMware does not have, so the observable
+channel here is the real 16550 the native kernel brings up first (`serial::prove`).
+
+**Scope, honestly (section 1.1).** This proves boot to the native serial console
+on VMware, not yet a full clean boot to idle there. The banner repeats because the
+guest reboots shortly after it: the image's identity map covers only the low 4 GiB
+(see Known limitations), and VMware's memory layout trips that right after the
+serial banner, at the CR3 switch. Reaching idle on VMware needs the higher-half or
+relocatable image that limitation already calls for; the debugcon markers are also
+invisible there, so diagnosing it further first needs the loader's early markers
+routed to COM1.
