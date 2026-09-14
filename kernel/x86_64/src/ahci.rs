@@ -106,7 +106,7 @@ const TFD_ERR: u32 = 1 << 0;
 const SSTS_DET_PRESENT: u32 = 0x3; // device present and PHY communication established
 
 const ATA_READ_DMA_EXT: u8 = 0x25;
-#[cfg(any(feature = "ahci-write-smoke-test", feature = "fat-write-smoke-test"))]
+#[cfg(any(feature = "ahci-write-smoke-test", feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test"))]
 const ATA_WRITE_DMA_EXT: u8 = 0x35;
 pub const SECTOR_SIZE: usize = 512;
 
@@ -413,7 +413,7 @@ impl AhciPort {
     }
 
     /// Write one 512-byte sector `lba` from `src` by DMA (WRITE DMA EXT).
-    #[cfg(any(feature = "ahci-write-smoke-test", feature = "fat-write-smoke-test"))]
+    #[cfg(any(feature = "ahci-write-smoke-test", feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test"))]
     pub fn write_sector(&self, lba: u64, src: &[u8; SECTOR_SIZE]) -> Result<(), &'static str> {
         let data = core::ptr::addr_of_mut!(DATA) as *mut u8;
         // SAFETY: stage the bytes in the DMA buffer, then a single-sector write.

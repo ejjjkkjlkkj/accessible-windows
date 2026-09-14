@@ -68,6 +68,12 @@ $fatScratch = Join-Path $repoRoot 'target/fat-write-scratch.img'
 & $python.Source (Join-Path $PSScriptRoot 'build_bootable_image.py') '--fat-only' $fatScratch $fatStage
 if ($LASTEXITCODE -ne 0) { throw 'building the FAT16 write-scratch disk failed' }
 
+# A blank 8 MiB (16384-sector) scratch disk for the GPT-write proof: it writes a
+# whole partition table, so it must be its own blank disk, recreated each run. The
+# size must match the sector count the kernel passes to gpt::prove_write (16384).
+$gptScratch = Join-Path $repoRoot 'target/gpt-write-scratch.img'
+[System.IO.File]::WriteAllBytes($gptScratch, (New-Object byte[] (16384 * 512)))
+
 # Where the serial config routes COM1, so its banner can be checked host-side.
 $serialFile = Join-Path $repoRoot 'target/serial-com1.log'
 if (Test-Path -LiteralPath $serialFile) { Remove-Item -LiteralPath $serialFile -Force }
@@ -579,6 +585,41 @@ $configurations = @(
         )
         Forbidden = @(
             'AW_FATWRITE_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
+        # GPT write: partition a blank scratch disk - write a protective MBR, a
+        # primary and backup GPT header (each CRC32-checked) and an entry array with
+        # one ESP - then read the table back and validate both headers' CRCs and the
+        # ESP entry. This is the installer's partitioning half. After the write, the
+        # ordinary AHCI read (AW_AHCI_PROOF_OK) and GPT read (AW_GPT_PROOF_OK) run
+        # against the table we just wrote, so this also proves the reader on it.
+        # Its own blank scratch disk, recreated each run: it overwrites the whole
+        # partition table, so it must never touch a data disk. Gated behind
+        # gpt-write-smoke-test.
+        Name     = 'gpt-write'
+        Features = @('gpt-write-smoke-test')
+        QemuArgs = @(
+            '-device', 'ich9-ahci,id=sata0'
+            '-drive', "if=none,id=gptscratch,file=$gptScratch,format=raw"
+            '-device', 'ide-hd,drive=gptscratch,bus=sata0.0'
+        )
+        Required = @(
+            'AW_GPTWRITE_BEGIN sectors=16384'
+            'AW_GPTWRITE_WROTE'
+            'AW_GPTWRITE_HEADER_OK'
+            'AW_GPTWRITE_BACKUP_OK'
+            'AW_GPTWRITE_PROOF_OK'
+            # The reader validates the table we wrote: signature + CRC + ESP entry.
+            'AW_GPT_HEADER_OK'
+            'AW_GPT_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_GPTWRITE_FAIL'
+            'AW_GPT_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )

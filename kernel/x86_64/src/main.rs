@@ -1507,6 +1507,17 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // A real SATA controller (AHCI), the kind VMware and physical PCs use.
         // The normal path only reads (safe on any disk, including a real boot
         // disk); the write proof is a dedicated test build against a scratch disk.
+        // Partition a blank scratch disk first: write a GPT (the installer's
+        // partitioning half), then the ordinary AHCI read and GPT read below run
+        // against the table we just wrote and validate it. Scratch disk only,
+        // gated out of the normal boot path; the 8 MiB scratch disk is 16384
+        // sectors.
+        #[cfg(feature = "gpt-write-smoke-test")]
+        if let Some(port) = ahci::init() {
+            gpt::prove_write(&port, 16384);
+        } else {
+            debug_write("AW_GPTWRITE_FAIL reason=no_ahci_port\n");
+        }
         #[cfg(not(feature = "ahci-write-smoke-test"))]
         ahci::prove();
         #[cfg(feature = "ahci-write-smoke-test")]

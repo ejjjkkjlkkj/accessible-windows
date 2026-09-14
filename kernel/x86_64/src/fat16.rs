@@ -277,13 +277,14 @@ pub fn prove_partition<S: SectorSource>(source: &S, base_lba: u64) {
 // single-cluster file, the size the install/recovery bootstrap needs, and gated so
 // it only ever runs against a scratch disk - it modifies the filesystem.
 
-/// A sink for 512-byte sectors, the write counterpart of [`SectorSource`].
-#[cfg(feature = "fat-write-smoke-test")]
+/// A sink for 512-byte sectors, the write counterpart of [`SectorSource`]. Shared
+/// by the filesystem writer and the GPT writer.
+#[cfg(any(feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test"))]
 pub trait SectorSink {
     fn write_sector(&self, lba: u64, data: &[u8; SECTOR_SIZE]) -> Result<(), &'static str>;
 }
 
-#[cfg(feature = "fat-write-smoke-test")]
+#[cfg(any(feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test"))]
 impl SectorSink for crate::ahci::AhciPort {
     fn write_sector(&self, lba: u64, data: &[u8; SECTOR_SIZE]) -> Result<(), &'static str> {
         crate::ahci::AhciPort::write_sector(self, lba, data)

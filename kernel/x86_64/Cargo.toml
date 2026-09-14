@@ -31,6 +31,10 @@ ahci-write-smoke-test = []
 # directory entry) and reads it back. Test-only, scratch disk only: it modifies the
 # filesystem. Never enabled in the normal boot path.
 fat-write-smoke-test = []
+# Writes a GPT partition table (protective MBR + primary/backup headers with CRC32 +
+# an ESP entry) onto a blank disk and reads it back. Test-only, scratch disk only:
+# it overwrites the partition table. Never enabled in the normal boot path.
+gpt-write-smoke-test = []
 # Drives the MSI delivery proof with QEMU's `edu` test device. Never enabled in
 # a shipping image: it contains a driver for a device that only exists inside an
 # emulator.
