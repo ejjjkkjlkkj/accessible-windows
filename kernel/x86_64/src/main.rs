@@ -1470,6 +1470,9 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
                 // SAFETY: CPL0; paging, heap and the first Ring 3 proof are up, and
                 // the device was just brought up.
                 unsafe { ring3::prove_user_loader(&device) };
+                // Then load two userland programs and preemptively schedule both.
+                // SAFETY: same preconditions; runs before any AP is online.
+                unsafe { ring3::prove_user_init(&device) };
             }
             None => debug_write("AW_VIRTIO_BLK_UNAVAILABLE reason=no_device\n"),
         }

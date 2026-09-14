@@ -208,6 +208,11 @@ static PREEMPT_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// Saved full-frame RSP per slot. Slot 0 is the kernel that started the run
 /// (saved when it is first preempted); slots 1.. are the runnable contexts.
 static PREEMPT_RSP: [AtomicU64; PREEMPT_SLOTS] = [const { AtomicU64::new(0) }; PREEMPT_SLOTS];
+/// Per-slot kernel stack top for the TSS RSP0, so each CPL3 slot takes its
+/// interrupts on its own kernel stack instead of colliding on one. Zero for slots
+/// that run at CPL0 (the kernel and kernel threads), which never switch stacks on
+/// an interrupt and so need no RSP0 update.
+static PREEMPT_KSTACK: [AtomicU64; PREEMPT_SLOTS] = [const { AtomicU64::new(0) }; PREEMPT_SLOTS];
 static PREEMPT_CURRENT: AtomicUsize = AtomicUsize::new(0);
 static PREEMPT_SWITCHES: AtomicU32 = AtomicU32::new(0);
 /// Timer-driven switches to perform before handing control back to slot 0.
@@ -253,6 +258,17 @@ extern "C" fn aw_preempt_pick(current_rsp: u64) -> u64 {
         PREEMPT_ROTATION[(switches as usize - 1) % len].load(Ordering::Relaxed)
     };
     PREEMPT_CURRENT.store(next, Ordering::Relaxed);
+
+    // Point the TSS RSP0 at the incoming slot's own kernel stack, so when that
+    // slot is a CPL3 thread its next interrupt lands on its own stack rather than
+    // on top of another thread's saved frame. Slots that run at CPL0 leave this
+    // zero and keep the RSP0 they had.
+    let kstack = PREEMPT_KSTACK[next].load(Ordering::Relaxed);
+    if kstack != 0 {
+        // SAFETY: CPL0 in interrupt context; sets this CPU's TSS RSP0.
+        unsafe { crate::interrupts::set_bootstrap_rsp0(kstack) };
+    }
+
     PREEMPT_RSP[next].load(Ordering::Relaxed)
 }
 
@@ -266,6 +282,19 @@ fn set_preempt_plan(rotation: &[usize], limit: u32) {
     PREEMPT_CURRENT.store(0, Ordering::Relaxed);
     PREEMPT_SWITCHES.store(0, Ordering::Relaxed);
     PREEMPT_SAW_USER.store(false, Ordering::Relaxed);
+    // Per-slot kernel stacks are left as-is here: they default to zero (no RSP0
+    // switch, correct for the CPL0 kernel-thread and single-user runs) and the
+    // caller sets them just before a CPL3 multi-thread run. That run is the last
+    // preemption run in a boot, so nothing stale can leak into an earlier one.
+}
+
+/// Install one slot's own kernel stack top for the TSS RSP0, required for a CPL3
+/// thread so it takes interrupts on its own stack. Call after [`set_preempt_plan`]
+/// (via `run_preemption_over`, which calls it), before the run begins.
+pub fn set_slot_kstack(slot: usize, kstack_top: u64) {
+    if let Some(cell) = PREEMPT_KSTACK.get(slot) {
+        cell.store(kstack_top, Ordering::Relaxed);
+    }
 }
 
 /// Activate preemption, let the timer drive the switches, and return once the
@@ -306,19 +335,39 @@ unsafe fn run_preemption() {
 /// Same as [`run_preemption`]; additionally slot 1 must hold a valid CPL3
 /// interrupt frame and the swapgs bases must be armed.
 pub unsafe fn run_user_preemption(limit: u32) -> (u32, bool) {
-    set_preempt_plan(&[1], limit);
+    // SAFETY: forwarded to the caller's contract.
+    unsafe { run_preemption_over(&[1], limit) }
+}
+
+/// Install slot 1's initial saved-frame RSP (a CPL3 interrupt frame the caller
+/// built) for [`run_user_preemption`].
+pub fn set_user_slot_frame(frame_rsp: u64) {
+    set_slot_frame(1, frame_rsp);
+}
+
+/// Install one slot's initial saved-frame RSP (an interrupt frame the caller
+/// built). Slots 1.. are the runnable contexts; slot 0 is the kernel.
+pub fn set_slot_frame(slot: usize, frame_rsp: u64) {
+    if let Some(cell) = PREEMPT_RSP.get(slot) {
+        cell.store(frame_rsp, Ordering::Relaxed);
+    }
+}
+
+/// Run the preinstalled slots in `rotation` under timer preemption for `limit`
+/// switches, then return to the kernel. Returns the number of switches performed
+/// and whether a CPL3 context was ever the one preempted.
+///
+/// # Safety
+/// Same as [`run_preemption`]; every slot named in `rotation` must hold a valid
+/// initial interrupt frame, and (for user slots) the swapgs bases must be armed.
+pub unsafe fn run_preemption_over(rotation: &[usize], limit: u32) -> (u32, bool) {
+    set_preempt_plan(rotation, limit);
     // SAFETY: forwarded to the caller's contract.
     unsafe { run_preemption() };
     (
         PREEMPT_SWITCHES.load(Ordering::Relaxed),
         PREEMPT_SAW_USER.load(Ordering::Relaxed),
     )
-}
-
-/// Install slot 1's initial saved-frame RSP (a CPL3 interrupt frame the caller
-/// built) for [`run_user_preemption`].
-pub fn set_user_slot_frame(frame_rsp: u64) {
-    PREEMPT_RSP[1].store(frame_rsp, Ordering::Relaxed);
 }
 
 /// Prove cooperative multitasking runs on an application processor, not just the

@@ -622,6 +622,47 @@ fn map_segment(
     true
 }
 
+/// Validate an ELF64 image and map every PT_LOAD segment as user pages. Returns
+/// `(entry, base)` where `base` is the lowest PT_LOAD virtual address.
+///
+/// # Safety
+/// CPL0; maps into the live kernel page tables.
+unsafe fn load_elf_image(image: &[u8]) -> Option<(u64, u64)> {
+    let magic_ok = image.len() >= 64 && &image[0..4] == b"\x7fELF" && image[4] == 2 && image[5] == 1;
+    if !magic_ok || elf_u16(image, 18) != Some(0x3e) {
+        return None;
+    }
+    let entry = elf_u64(image, 24)?;
+    let phoff = elf_u64(image, 32)? as usize;
+    let phentsize = elf_u16(image, 54)? as usize;
+    let phnum = elf_u16(image, 56)? as usize;
+    if phentsize < 56 || phnum == 0 {
+        return None;
+    }
+    let mut base = u64::MAX;
+    let mut loaded = 0;
+    for i in 0..phnum {
+        let ph = phoff + i * phentsize;
+        if elf_u32(image, ph) != Some(1) {
+            continue; // PT_LOAD only
+        }
+        let p_flags = elf_u32(image, ph + 4)?;
+        let p_offset = elf_u64(image, ph + 8)?;
+        let p_vaddr = elf_u64(image, ph + 16)?;
+        let p_filesz = elf_u64(image, ph + 32)?;
+        let p_memsz = elf_u64(image, ph + 40)?;
+        if !map_segment(image, p_offset, p_vaddr, p_filesz, p_memsz, p_flags & 1 != 0, p_flags & 2 != 0) {
+            return None;
+        }
+        base = base.min(p_vaddr);
+        loaded += 1;
+    }
+    if loaded == 0 {
+        return None;
+    }
+    Some((entry, base))
+}
+
 /// Load a userland ELF from the FAT16 disk and run it at CPL3.
 ///
 /// # Safety
@@ -634,50 +675,11 @@ pub unsafe fn prove_user_loader(device: &BlkDevice) {
         return;
     };
 
-    let magic_ok =
-        image.len() >= 64 && &image[0..4] == b"\x7fELF" && image[4] == 2 && image[5] == 1;
-    if !magic_ok || elf_u16(&image, 18) != Some(0x3e) {
+    // SAFETY: CPL0; maps the image into the live kernel page tables.
+    let Some((entry, _base)) = (unsafe { load_elf_image(&image) }) else {
         debug_write("AW_USER_LOADER_FAIL reason=bad_elf\n");
         return;
-    }
-    let entry = elf_u64(&image, 24).unwrap_or(0);
-    let phoff = elf_u64(&image, 32).unwrap_or(0) as usize;
-    let phentsize = elf_u16(&image, 54).unwrap_or(0) as usize;
-    let phnum = elf_u16(&image, 56).unwrap_or(0) as usize;
-    if phentsize < 56 || phnum == 0 {
-        debug_write("AW_USER_LOADER_FAIL reason=no_phdr\n");
-        return;
-    }
-
-    let mut loaded = 0;
-    for i in 0..phnum {
-        let ph = phoff + i * phentsize;
-        if elf_u32(&image, ph) != Some(1) {
-            continue; // PT_LOAD only
-        }
-        let p_flags = elf_u32(&image, ph + 4).unwrap_or(0);
-        let p_offset = elf_u64(&image, ph + 8).unwrap_or(0);
-        let p_vaddr = elf_u64(&image, ph + 16).unwrap_or(0);
-        let p_filesz = elf_u64(&image, ph + 32).unwrap_or(0);
-        let p_memsz = elf_u64(&image, ph + 40).unwrap_or(0);
-        if !map_segment(
-            &image,
-            p_offset,
-            p_vaddr,
-            p_filesz,
-            p_memsz,
-            p_flags & 1 != 0,
-            p_flags & 2 != 0,
-        ) {
-            debug_write("AW_USER_LOADER_FAIL reason=map_segment\n");
-            return;
-        }
-        loaded += 1;
-    }
-    if loaded == 0 {
-        debug_write("AW_USER_LOADER_FAIL reason=no_load_segment\n");
-        return;
-    }
+    };
 
     let Some(stack_frame) = frame_allocator::allocate() else {
         debug_write("AW_USER_LOADER_FAIL reason=no_stack\n");
@@ -694,8 +696,6 @@ pub unsafe fn prove_user_loader(device: &BlkDevice) {
 
     debug_write("AW_USER_LOADER_MAP_OK entry=");
     debug_write_hex_u64(entry);
-    debug_write(" segments=");
-    debug_write_u64(loaded as u64);
     debug_write("\n");
 
     REPORTED_SEEN.store(false, Ordering::Relaxed);
@@ -728,4 +728,146 @@ pub unsafe fn prove_user_loader(device: &BlkDevice) {
 
     // SAFETY: CPL0; clear the GS shadow now the program has exited.
     unsafe { wrmsr(IA32_KERNEL_GS_BASE, 0) };
+}
+
+// ---- init: preemptively schedule two userland programs (roadmap P0 step 7) ---
+//
+// The loader ran one program to completion. This runs two at once: two userland
+// spinners are loaded from disk, each incrementing a counter in its own page, and
+// the timer preempts back and forth between them (reusing the Ring 3 preemption
+// switcher). Both counters advancing proves the kernel schedules more than one
+// userland program - the seed of an init/service manager. They share one address
+// space for now; per-process isolation is a later step.
+
+const INIT_A_NAME: &[u8; 11] = b"USERA   ELF";
+const INIT_B_NAME: &[u8; 11] = b"USERB   ELF";
+/// Timer-driven switches for the init run: enough for both programs to run several
+/// times in strict A/B rotation before control returns to the kernel.
+const INIT_LIMIT: u32 = 14;
+
+static mut INIT_FRAME_A: UserFrame = UserFrame([0; 20]);
+static mut INIT_FRAME_B: UserFrame = UserFrame([0; 20]);
+
+// A separate kernel stack per user program, so each takes its CPL3 interrupts on
+// its own stack (the TSS RSP0 is switched to the running one) instead of both
+// colliding on one and clobbering each other's saved frame.
+static mut INIT_KSTACK_A: KernelStack = KernelStack([0; 16 * 1024]);
+static mut INIT_KSTACK_B: KernelStack = KernelStack([0; 16 * 1024]);
+
+fn init_kstack_top(kstack: *const KernelStack) -> u64 {
+    (kstack as u64 + 16 * 1024) & !0xf_u64
+}
+
+/// Fill a 20-qword buffer as an initial CPL3 interrupt frame the timer ISR's
+/// pop/iretq epilogue can start: 15 zero GP registers, then rip/cs/rflags/rsp/ss.
+fn build_cpl3_frame(frame: *mut u64, entry: u64, rsp: u64) {
+    // SAFETY: the caller passes a live 20-qword buffer.
+    unsafe {
+        for i in 0..15 {
+            frame.add(i).write(0);
+        }
+        frame.add(15).write(entry);
+        frame.add(16).write(USER_CODE_SELECTOR);
+        frame.add(17).write(0x202); // IF set, reserved bit 1
+        frame.add(18).write(rsp);
+        frame.add(19).write(USER_DATA_SELECTOR);
+    }
+}
+
+/// Load two userland programs and let the timer preemptively schedule both at
+/// CPL3.
+///
+/// # Safety
+/// CPL0 on the bootstrap processor, after paging/heap/Ring 3 are up and the
+/// virtio-block device is present, before any AP is online. Interrupts masked.
+pub unsafe fn prove_user_init(device: &BlkDevice) {
+    debug_write("AW_USER_INIT_BEGIN\n");
+    let (Some(image_a), Some(image_b)) = (
+        fat16::load_file(device, INIT_A_NAME),
+        fat16::load_file(device, INIT_B_NAME),
+    ) else {
+        debug_write("AW_USER_INIT_UNAVAILABLE reason=no_files\n");
+        return;
+    };
+
+    // SAFETY: CPL0; map both images into the live kernel page tables.
+    let (Some((entry_a, base_a)), Some((entry_b, base_b))) =
+        (unsafe { load_elf_image(&image_a) }, unsafe { load_elf_image(&image_b) })
+    else {
+        debug_write("AW_USER_INIT_FAIL reason=bad_elf\n");
+        return;
+    };
+
+    // A read-write work page per program at base+0x1000: the spinner's counter is
+    // at its start, and base+0x2000 serves as its (never-touched) stack top.
+    let work_flags = PageTableFlags::USER_ACCESSIBLE
+        .union(PageTableFlags::WRITABLE)
+        .union(PageTableFlags::NO_EXECUTE);
+    let (Some(work_a), Some(work_b)) = (frame_allocator::allocate(), frame_allocator::allocate())
+    else {
+        debug_write("AW_USER_INIT_FAIL reason=no_frame\n");
+        return;
+    };
+    // SAFETY: zero both counters through their frames' identity addresses.
+    unsafe {
+        (work_a as *mut u64).write(0);
+        (work_b as *mut u64).write(0);
+    }
+    // SAFETY: CPL0; fresh work pages one page above each program's image.
+    let mapped = unsafe {
+        page_mapper::map_page(base_a + 0x1000, work_a, work_flags).is_ok()
+            && page_mapper::map_page(base_b + 0x1000, work_b, work_flags).is_ok()
+    };
+    if !mapped {
+        debug_write("AW_USER_INIT_FAIL reason=map_work\n");
+        return;
+    }
+
+    build_cpl3_frame(core::ptr::addr_of_mut!(INIT_FRAME_A) as *mut u64, entry_a, base_a + 0x2000);
+    build_cpl3_frame(core::ptr::addr_of_mut!(INIT_FRAME_B) as *mut u64, entry_b, base_b + 0x2000);
+    crate::scheduler::set_slot_frame(1, core::ptr::addr_of!(INIT_FRAME_A) as u64);
+    crate::scheduler::set_slot_frame(2, core::ptr::addr_of!(INIT_FRAME_B) as u64);
+    // Each user slot takes its interrupts on its own kernel stack.
+    crate::scheduler::set_slot_kstack(1, init_kstack_top(core::ptr::addr_of!(INIT_KSTACK_A)));
+    crate::scheduler::set_slot_kstack(2, init_kstack_top(core::ptr::addr_of!(INIT_KSTACK_B)));
+
+    // Arm the swapgs convention as in the single-program preemption proof: the
+    // live GS is the kernel per-CPU block and the shadow holds the user base, so
+    // each timer entry from CPL3 swaps the kernel base in for the per-CPU counter.
+    let user_gs = core::ptr::addr_of!(USER_GS_AREA) as u64;
+    // SAFETY: CPL0; RSP0 for the from-CPL3 interrupts and the swapgs shadow.
+    unsafe {
+        interrupts::set_bootstrap_rsp0(ring0_stack_top());
+        wrmsr(IA32_KERNEL_GS_BASE, user_gs);
+    }
+
+    // SAFETY: both slots hold valid CPL3 frames, the swapgs shadow is armed, no AP
+    // is online, and the timer gate is installed.
+    let (switches, saw_user) = unsafe { crate::scheduler::run_preemption_over(&[1, 2], INIT_LIMIT) };
+
+    // SAFETY: both counters were advanced at CPL3 through their identity-mapped pages.
+    let count_a = unsafe { (work_a as *const u64).read() };
+    let count_b = unsafe { (work_b as *const u64).read() };
+    // SAFETY: CPL0; clear the GS shadow now the programs are descheduled.
+    unsafe { wrmsr(IA32_KERNEL_GS_BASE, 0) };
+
+    debug_write("AW_USER_INIT_STATE switches=");
+    debug_write_u64(u64::from(switches));
+    debug_write(" a=");
+    debug_write_u64(count_a);
+    debug_write(" b=");
+    debug_write_u64(count_b);
+    debug_write("\n");
+    // Both must have run, and run *comparably*: correct A/B alternation gives each
+    // program a similar number of equal-length timeslices, so the counts stay close.
+    // A lopsided ratio would mean one program was starved - the shape of a broken
+    // switch that let only one keep running - so the proof rejects it.
+    let low = count_a.min(count_b);
+    let high = count_a.max(count_b);
+    let balanced = low > 0 && high <= low.saturating_mul(3);
+    if switches == INIT_LIMIT && saw_user && balanced {
+        debug_write("AW_USER_INIT_PROOF_OK\n");
+    } else {
+        debug_write("AW_USER_INIT_FAIL reason=unbalanced\n");
+    }
 }

@@ -40,6 +40,12 @@ $python = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command pyt
 # proof: the kernel reads it off this same disk and runs it at CPL3.
 & $python.Source (Join-Path $PSScriptRoot 'make-user-elf.py') (Join-Path $fatStage 'USERPROG.ELF')
 if ($LASTEXITCODE -ne 0) { throw 'building the userland test ELF failed' }
+# Two spinner programs at distinct bases (USERA.ELF/USERB.ELF), for the init proof
+# that preemptively schedules two userland programs at once.
+& $python.Source (Join-Path $PSScriptRoot 'make-user-elf.py') (Join-Path $fatStage 'USERA.ELF') '--spinner' '--base' '0x500000000'
+if ($LASTEXITCODE -ne 0) { throw 'building userland spinner A failed' }
+& $python.Source (Join-Path $PSScriptRoot 'make-user-elf.py') (Join-Path $fatStage 'USERB.ELF') '--spinner' '--base' '0x600000000'
+if ($LASTEXITCODE -ne 0) { throw 'building userland spinner B failed' }
 & $python.Source (Join-Path $PSScriptRoot 'build_bootable_image.py') '--fat-only' $vblkDisk $fatStage
 if ($LASTEXITCODE -ne 0) { throw 'building the FAT16 test disk failed' }
 
@@ -322,6 +328,9 @@ $configurations = @(
             # mapped and run at CPL3: it reports 0xC0DE through SYS_REPORT and exits.
             'AW_USER_LOADER_MAP_OK entry='
             'AW_USER_LOADER_PROOF_OK'
+            # Then two userland spinners loaded from the same disk, preemptively
+            # scheduled at CPL3 - both counters advance under timer switching.
+            'AW_USER_INIT_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
@@ -330,6 +339,8 @@ $configurations = @(
             'AW_FS_FAIL'
             'AW_USER_LOADER_FAIL'
             'AW_USER_LOADER_UNAVAILABLE'
+            'AW_USER_INIT_FAIL'
+            'AW_USER_INIT_UNAVAILABLE'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )
