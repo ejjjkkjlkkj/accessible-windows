@@ -393,3 +393,142 @@ pub fn prove() {
     // SAFETY: CPL0.
     unsafe { wrmsr(IA32_KERNEL_GS_BASE, 0) };
 }
+
+// ---- Ring 3 preemption (dossier sections 8-9, roadmap P0) ------------------
+//
+// The syscall proof drops to CPL3 with interrupts masked, so the only way back is
+// a syscall. This proves the asynchronous half: a user thread that never makes a
+// syscall - it just spins incrementing a counter with interrupts enabled - is
+// preempted by the timer, and the kernel takes control back on its own.
+//
+// It reuses the timer-driven switcher in `scheduler`: slot 0 is this kernel path,
+// slot 1 is the user thread, whose initial CPL3 interrupt frame is built here so
+// the timer ISR's `iretq` epilogue drops straight to CPL3. The ISR's conditional
+// swapgs keeps the per-CPU GS correct across the CPL3<->CPL0 boundary, so this is
+// also where swapgs stops being a static proof and starts being load-bearing.
+
+const R3P_DATA_VA: u64 = 0x2_1000_0000;
+const R3P_CODE_VA: u64 = 0x2_1000_1000;
+const R3P_STACK_VA: u64 = 0x2_1000_2000;
+const R3P_STACK_TOP: u64 = R3P_STACK_VA + 0x1000;
+
+/// Timer-driven switches for the user run: one to enter the user thread, then
+/// several while it spins, before control returns to the kernel.
+const R3P_LIMIT: u32 = 6;
+
+/// User spinner, position dependent: `mov rax, R3P_DATA_VA; inc qword [rax];
+/// jmp back`. It touches only the counter, never the stack, and never returns.
+const R3P_USER_CODE: [u8; 15] = [
+    0x48, 0xb8, 0x00, 0x00, 0x00, 0x10, 0x02, 0x00, 0x00, 0x00, // mov rax, 0x2_1000_0000
+    0x48, 0xff, 0x00, // inc qword ptr [rax]
+    0xeb, 0xfb, // jmp -5 (back to the inc)
+];
+
+/// Slot 1's initial CPL3 interrupt frame: 15 zeroed GP registers then the CPU
+/// interrupt frame (rip, cs, rflags, rsp, ss), laid out exactly as the timer ISR
+/// pushes and pops one.
+#[repr(C, align(16))]
+struct UserFrame([u64; 20]);
+static mut R3P_USER_FRAME: UserFrame = UserFrame([0; 20]);
+
+/// Prove a user thread is preempted by the timer.
+///
+/// # Safety
+/// CPL0 on the bootstrap processor, after the per-CPU block is installed and the
+/// APIC timer gate exists, before any application processor is online. Returns
+/// with the timer masked and interrupts disabled.
+pub unsafe fn prove_ring3_preemption() {
+    debug_write("AW_RING3_PREEMPT_BEGIN\n");
+
+    // Map the spinner's code (user, executable, read-only), its counter page and
+    // a user stack (both user, writable, non-executable).
+    let Some(code_frame) = frame_allocator::allocate() else {
+        debug_write("AW_RING3_PREEMPT_FAIL reason=no_code_frame\n");
+        return;
+    };
+    // SAFETY: write the routine through the frame's identity address.
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            R3P_USER_CODE.as_ptr(),
+            code_frame as *mut u8,
+            R3P_USER_CODE.len(),
+        );
+    }
+    let Some(data_frame) = frame_allocator::allocate() else {
+        debug_write("AW_RING3_PREEMPT_FAIL reason=no_data_frame\n");
+        return;
+    };
+    // SAFETY: zero the counter through the frame's identity address.
+    unsafe { (data_frame as *mut u64).write(0) };
+    let Some(stack_frame) = frame_allocator::allocate() else {
+        debug_write("AW_RING3_PREEMPT_FAIL reason=no_stack_frame\n");
+        return;
+    };
+
+    let rw = PageTableFlags::USER_ACCESSIBLE
+        .union(PageTableFlags::WRITABLE)
+        .union(PageTableFlags::NO_EXECUTE);
+    // SAFETY: CPL0; these VAs are unused and the frames were just allocated.
+    let mapped = unsafe {
+        page_mapper::map_page(R3P_CODE_VA, code_frame, PageTableFlags::USER_ACCESSIBLE).is_ok()
+            && page_mapper::map_page(R3P_DATA_VA, data_frame, rw).is_ok()
+            && page_mapper::map_page(R3P_STACK_VA, stack_frame, rw).is_ok()
+    };
+    if !mapped {
+        debug_write("AW_RING3_PREEMPT_FAIL reason=map\n");
+        return;
+    }
+
+    // Build slot 1's CPL3 entry frame.
+    let frame = core::ptr::addr_of_mut!(R3P_USER_FRAME) as *mut u64;
+    // SAFETY: R3P_USER_FRAME holds 20 qwords; fill the whole frame.
+    unsafe {
+        for offset in 0..15 {
+            frame.add(offset).write(0); // r15..rax
+        }
+        frame.add(15).write(R3P_CODE_VA); // rip
+        frame.add(16).write(USER_CODE_SELECTOR); // cs (RPL 3)
+        frame.add(17).write(0x202); // rflags: IF set, reserved bit 1
+        frame.add(18).write(R3P_STACK_TOP); // rsp
+        frame.add(19).write(USER_DATA_SELECTOR); // ss (RPL 3)
+    }
+    crate::scheduler::set_user_slot_frame(frame as u64);
+
+    // Arm the CPL3<->CPL0 GS convention: at CPL0 the live GS is the kernel per-CPU
+    // block and IA32_KERNEL_GS_BASE shadows the user base, so the first drop to
+    // CPL3 swaps the user base in and every syscall-less timer entry from CPL3
+    // swaps the kernel base back for the per-CPU counter.
+    let kernel_gs = crate::percpu::by_index(0)
+        .map(|block| core::ptr::from_ref(block) as u64)
+        .unwrap_or(0);
+    let user_gs = core::ptr::addr_of!(USER_GS_AREA) as u64;
+    // SAFETY: CPL0; RSP0 must point at a kernel stack for the from-CPL3 interrupt,
+    // and the shadow GS base is armed for swapgs.
+    unsafe {
+        interrupts::set_bootstrap_rsp0(ring0_stack_top());
+        wrmsr(IA32_KERNEL_GS_BASE, user_gs);
+    }
+
+    // SAFETY: CPL0, per-CPU installed, timer gate present, no AP online yet.
+    let (switches, saw_user) = unsafe { crate::scheduler::run_user_preemption(R3P_LIMIT) };
+
+    // SAFETY: the user thread advanced its counter through the identity mapping of
+    // the page it wrote at CPL3.
+    let count = unsafe { (data_frame as *const u64).read() };
+
+    // Restore the kernel GS shadow now the user run is over.
+    // SAFETY: CPL0; the live GS is the kernel per-CPU block again.
+    unsafe { wrmsr(IA32_KERNEL_GS_BASE, kernel_gs) };
+
+    debug_write("AW_RING3_PREEMPT_STATE switches=");
+    debug_write_u64(u64::from(switches));
+    debug_write(" user_count=");
+    debug_write_u64(count);
+    debug_write("\n");
+
+    if switches == R3P_LIMIT && saw_user && count > 0 {
+        debug_write("AW_RING3_PREEMPT_PROOF_OK\n");
+    } else {
+        debug_write("AW_RING3_PREEMPT_FAIL reason=not_preempted\n");
+    }
+}

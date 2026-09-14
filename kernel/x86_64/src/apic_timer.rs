@@ -58,6 +58,15 @@ aw_apic_timer_isr:
 
     cld
 
+    # If this interrupt came from CPL3 the live GS is the user's, so swap in the
+    # kernel GS before any GS-relative access (the per-CPU counter in dispatch).
+    # The saved CS sits just above the 15 pushed registers: [rsp + 15*8 + 8].
+    # From CPL0 (every existing proof) the test falls through and nothing changes.
+    test byte ptr [rsp + 128], 3
+    jz 1f
+    swapgs
+1:
+
     # Preserve the exact interrupt-frame stack position in RBX.
     mov rbx, rsp
 
@@ -72,6 +81,14 @@ aw_apic_timer_isr:
     mov rdi, rbx
     call aw_preempt_pick
     mov rsp, rax
+
+    # Symmetric to entry: if the frame being resumed targets CPL3, restore the
+    # user GS before iretq. The frame may differ from the one entered on, so this
+    # is decided from the CS actually being returned to.
+    test byte ptr [rsp + 128], 3
+    jz 2f
+    swapgs
+2:
 
     pop r15
     pop r14

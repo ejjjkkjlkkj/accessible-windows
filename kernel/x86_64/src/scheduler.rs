@@ -195,28 +195,38 @@ const KERNEL_CODE_SELECTOR: u64 = 0x08;
 const KERNEL_DATA_SELECTOR: u64 = 0x10;
 
 const PREEMPT_THREADS: usize = 3;
-/// Timer-driven switches to perform before handing control back to the kernel.
-/// Twelve lets each of the three threads run several times in strict rotation.
-const PREEMPT_LIMIT: u32 = 12;
+/// Slot count: slot 0 is the kernel that starts a run, slots 1..=PREEMPT_THREADS
+/// are the runnable contexts (kernel threads, or one user thread).
+const PREEMPT_SLOTS: usize = PREEMPT_THREADS + 1;
 
 static mut PREEMPT_STACKS: [Stack; PREEMPT_THREADS] =
     [const { Stack([0; STACK_SIZE]) }; PREEMPT_THREADS];
 
-/// Whether the timer ISR should switch threads. False everywhere except inside
-/// the preemption proof, so no other interrupt path is affected.
+/// Whether the timer ISR should switch contexts. False everywhere except inside a
+/// preemption proof, so no other interrupt path is affected.
 static PREEMPT_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// Saved full-frame RSP per slot. Slot 0 is the kernel that started the run
-/// (saved when it is first preempted); slots 1..=PREEMPT_THREADS are the threads.
-static PREEMPT_RSP: [AtomicU64; PREEMPT_THREADS + 1] =
-    [const { AtomicU64::new(0) }; PREEMPT_THREADS + 1];
+/// (saved when it is first preempted); slots 1.. are the runnable contexts.
+static PREEMPT_RSP: [AtomicU64; PREEMPT_SLOTS] = [const { AtomicU64::new(0) }; PREEMPT_SLOTS];
 static PREEMPT_CURRENT: AtomicUsize = AtomicUsize::new(0);
 static PREEMPT_SWITCHES: AtomicU32 = AtomicU32::new(0);
+/// Timer-driven switches to perform before handing control back to slot 0.
+static PREEMPT_LIMIT: AtomicU32 = AtomicU32::new(0);
+/// The slots to rotate through, and how many are in use. `aw_preempt_pick` picks
+/// the next runnable slot from here, so kernel-thread and user-thread proofs can
+/// share one switcher with different rotations.
+static PREEMPT_ROTATION: [AtomicUsize; PREEMPT_THREADS] =
+    [const { AtomicUsize::new(0) }; PREEMPT_THREADS];
+static PREEMPT_ROTATION_LEN: AtomicUsize = AtomicUsize::new(0);
+/// Set whenever the context just preempted was running at CPL3 - the evidence
+/// that a real user thread was interrupted by the timer.
+static PREEMPT_SAW_USER: AtomicBool = AtomicBool::new(false);
 static PREEMPT_COUNTS: [AtomicU64; PREEMPT_THREADS] =
     [const { AtomicU64::new(0) }; PREEMPT_THREADS];
 
 /// Called by the timer ISR after EOI, with the interrupted context's full-frame
 /// RSP. Returns the RSP to resume on - the same one when preemption is inactive,
-/// another thread's saved frame when it is active.
+/// another slot's saved frame when it is active.
 #[unsafe(no_mangle)]
 extern "C" fn aw_preempt_pick(current_rsp: u64) -> u64 {
     if !PREEMPT_ACTIVE.load(Ordering::Acquire) {
@@ -225,16 +235,90 @@ extern "C" fn aw_preempt_pick(current_rsp: u64) -> u64 {
     let current = PREEMPT_CURRENT.load(Ordering::Relaxed);
     PREEMPT_RSP[current].store(current_rsp, Ordering::Relaxed);
 
+    // The saved CS sits 128 bytes into the frame (15 GP registers, then rip).
+    // CPL 3 there means a user context was just interrupted.
+    // SAFETY: current_rsp is the live frame the ISR just built on a kernel stack.
+    let cs = unsafe { ((current_rsp + 128) as *const u64).read_volatile() };
+    if cs & 3 == 3 {
+        PREEMPT_SAW_USER.store(true, Ordering::Relaxed);
+    }
+
     let switches = PREEMPT_SWITCHES.fetch_add(1, Ordering::Relaxed) + 1;
-    let next = if switches >= PREEMPT_LIMIT {
-        // Enough preemptions: stop switching and return to the kernel (slot 0).
+    let next = if switches >= PREEMPT_LIMIT.load(Ordering::Relaxed) {
+        // Enough preemptions: stop switching and return to slot 0 (the kernel).
         PREEMPT_ACTIVE.store(false, Ordering::Release);
         0
     } else {
-        1 + (switches as usize - 1) % PREEMPT_THREADS
+        let len = PREEMPT_ROTATION_LEN.load(Ordering::Relaxed).max(1);
+        PREEMPT_ROTATION[(switches as usize - 1) % len].load(Ordering::Relaxed)
     };
     PREEMPT_CURRENT.store(next, Ordering::Relaxed);
     PREEMPT_RSP[next].load(Ordering::Relaxed)
+}
+
+/// Configure the rotation and switch budget for the next run.
+fn set_preempt_plan(rotation: &[usize], limit: u32) {
+    for (slot, value) in PREEMPT_ROTATION.iter().zip(rotation.iter()) {
+        slot.store(*value, Ordering::Relaxed);
+    }
+    PREEMPT_ROTATION_LEN.store(rotation.len(), Ordering::Relaxed);
+    PREEMPT_LIMIT.store(limit, Ordering::Relaxed);
+    PREEMPT_CURRENT.store(0, Ordering::Relaxed);
+    PREEMPT_SWITCHES.store(0, Ordering::Relaxed);
+    PREEMPT_SAW_USER.store(false, Ordering::Relaxed);
+}
+
+/// Activate preemption, let the timer drive the switches, and return once the
+/// budget is spent and control is back on slot 0.
+///
+/// # Safety
+/// CPL0 on the bootstrap processor, before any application processor is online
+/// (the switch state is single-CPU), with the APIC timer gate installed. The
+/// timer is left masked and interrupts disabled on return.
+unsafe fn run_preemption() {
+    PREEMPT_ACTIVE.store(true, Ordering::Release);
+    // SAFETY: unmask the timer and enable interrupts so the ISR preempts this
+    // loop; once PREEMPT_LIMIT switches have happened it returns here with the
+    // flag cleared and the loop falls through.
+    unsafe {
+        crate::apic_timer::set_timer_masked(false);
+        core::arch::asm!("sti", options(nomem, nostack, preserves_flags));
+    }
+    while PREEMPT_ACTIVE.load(Ordering::Acquire) {
+        core::hint::spin_loop();
+    }
+    // SAFETY: restore the masked-timer, interrupts-disabled state callers expect.
+    unsafe {
+        core::arch::asm!("cli", options(nomem, nostack, preserves_flags));
+        crate::apic_timer::set_timer_masked(true);
+    }
+}
+
+/// Run one preinstalled user context (slot 1) under timer preemption for `limit`
+/// switches, then return to the kernel. Returns the number of switches performed
+/// and whether a CPL3 context was ever the one preempted.
+///
+/// The caller installs slot 1's initial CPL3 frame in [`set_user_slot_frame`],
+/// maps the user pages, sets TSS RSP0 and the GS bases, and reads back the user
+/// thread's own evidence afterwards.
+///
+/// # Safety
+/// Same as [`run_preemption`]; additionally slot 1 must hold a valid CPL3
+/// interrupt frame and the swapgs bases must be armed.
+pub unsafe fn run_user_preemption(limit: u32) -> (u32, bool) {
+    set_preempt_plan(&[1], limit);
+    // SAFETY: forwarded to the caller's contract.
+    unsafe { run_preemption() };
+    (
+        PREEMPT_SWITCHES.load(Ordering::Relaxed),
+        PREEMPT_SAW_USER.load(Ordering::Relaxed),
+    )
+}
+
+/// Install slot 1's initial saved-frame RSP (a CPL3 interrupt frame the caller
+/// built) for [`run_user_preemption`].
+pub fn set_user_slot_frame(frame_rsp: u64) {
+    PREEMPT_RSP[1].store(frame_rsp, Ordering::Relaxed);
 }
 
 /// Lay out a thread's initial stack as if it had just been interrupted, so the
@@ -296,29 +380,15 @@ pub unsafe fn prove_preemptive() {
     init_preempt_thread(0, preempt_thread0);
     init_preempt_thread(1, preempt_thread1);
     init_preempt_thread(2, preempt_thread2);
-    PREEMPT_CURRENT.store(0, Ordering::Relaxed);
-    PREEMPT_SWITCHES.store(0, Ordering::Relaxed);
     for count in &PREEMPT_COUNTS {
         count.store(0, Ordering::Relaxed);
     }
 
-    PREEMPT_ACTIVE.store(true, Ordering::Release);
-    // SAFETY: CPL0; unmask the timer and enable interrupts so the ISR preempts
-    // this loop into the thread set. Once PREEMPT_LIMIT switches have happened the
-    // ISR returns here with the flag cleared and the loop falls through.
-    unsafe {
-        crate::apic_timer::set_timer_masked(false);
-        core::arch::asm!("sti", options(nomem, nostack, preserves_flags));
-    }
-    while PREEMPT_ACTIVE.load(Ordering::Acquire) {
-        core::hint::spin_loop();
-    }
-    // SAFETY: CPL0; restore the masked-timer, interrupts-disabled state the
-    // downstream bring-up expects.
-    unsafe {
-        core::arch::asm!("cli", options(nomem, nostack, preserves_flags));
-        crate::apic_timer::set_timer_masked(true);
-    }
+    // Rotate through the three thread slots; twelve switches gives each several
+    // turns before control returns to slot 0 (this kernel path).
+    set_preempt_plan(&[1, 2, 3], 12);
+    // SAFETY: CPL0 on the bootstrap processor, timer gate installed, no AP online.
+    unsafe { run_preemption() };
 
     let switches = PREEMPT_SWITCHES.load(Ordering::Relaxed);
     let mut all_ran = true;
@@ -335,9 +405,9 @@ pub unsafe fn prove_preemptive() {
     }
 
     // Each thread advanced without ever yielding, and control came back after
-    // exactly PREEMPT_LIMIT timer-driven switches: the switching was the timer's
-    // doing, not the threads'.
-    if all_ran && switches == PREEMPT_LIMIT {
+    // exactly the requested number of timer-driven switches: the switching was the
+    // timer's doing, not the threads'.
+    if all_ran && switches == 12 {
         debug_write("AW_PREEMPT_PROOF_OK threads=3 switches=");
         debug_write_u64(u64::from(switches));
         debug_write("\n");

@@ -1445,6 +1445,11 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // interrupts disabled again, as the device-routing proof below expects.
         // SAFETY: CPL0 on the bootstrap processor, right after the timer proof.
         unsafe { scheduler::prove_preemptive() };
+        // With per-CPU GS and the timer both live, prove a CPL3 user thread that
+        // never makes a syscall is preempted by the timer. Runs before SMP so the
+        // single-CPU switch state is never touched by an application processor.
+        // SAFETY: CPL0 on the bootstrap processor; per-CPU block installed.
+        unsafe { ring3::prove_ring3_preemption() };
         prove_device_interrupt_routing(handoff);
         bring_up_secondary_processors(handoff);
         prove_per_cpu_state();
