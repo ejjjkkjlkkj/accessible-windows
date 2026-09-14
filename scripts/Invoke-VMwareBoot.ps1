@@ -18,12 +18,11 @@
     \EFI\BOOT\BOOTX64.EFI, the loader handed off, and the native kernel entered and
     drove a real UART on this second hypervisor.
 
-    Scope (dossier section 1.1 - claim only what is proven): this proves boot to
-    the native serial console on VMware. It does NOT yet prove a full clean boot to
-    idle on VMware: the image's identity map covers only the low 4 GiB (a recorded
-    limitation), and VMware's memory layout trips that shortly after the serial
-    banner, so the guest reboots and the banner repeats. Reaching idle on VMware
-    needs the higher-half/relocatable image that limitation already calls for.
+    It requires a full clean boot: AW_NATIVE_KERNEL_IDLE must appear with no
+    AW_NATIVE_EXCEPTION / AW_NATIVE_KERNEL_PANIC, and the banner must not repeat
+    (a repeat would mean a crash-reboot loop). Booting cleanly here also depended
+    on not assuming the firmware left EFER.NXE on - VMware leaves it off, so the
+    kernel now enables it before installing its NX identity map.
 #>
 [CmdletBinding()]
 param(
@@ -100,8 +99,19 @@ tools.syncTime = "FALSE"
     if ($count -lt 1) {
         throw "VMware boot produced no '$banner' on COM1 (serial bytes: $($text.Length))."
     }
-    Write-Host "AW_VMWARE_BOOT_OK banner='$banner' occurrences=$count serial=$serial"
-    Write-Host 'VMware boot proof PASS: native kernel reached the serial console on VMware EFI.'
+    if (-not $text.Contains('AW_NATIVE_KERNEL_IDLE')) {
+        throw "VMware boot did not reach AW_NATIVE_KERNEL_IDLE (serial bytes: $($text.Length))."
+    }
+    foreach ($forbidden in @('AW_NATIVE_EXCEPTION', 'AW_NATIVE_KERNEL_PANIC')) {
+        if ($text.Contains($forbidden)) { throw "VMware boot emitted forbidden marker: $forbidden" }
+    }
+    # A clean boot reaches idle and halts, so the banner appears exactly once; a
+    # crash-reboot loop would repeat it. Allow a small margin, but reject a loop.
+    if ($count -gt 3) {
+        throw "VMware guest looks like it rebooted ($count banners): boot is not clean."
+    }
+    Write-Host "AW_VMWARE_BOOT_OK banner_occurrences=$count reached=AW_NATIVE_KERNEL_IDLE serial=$serial"
+    Write-Host 'VMware boot proof PASS: full clean boot to idle on VMware EFI, no fault.'
 }
 finally {
     Pop-Location

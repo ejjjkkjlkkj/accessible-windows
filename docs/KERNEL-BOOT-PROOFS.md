@@ -202,16 +202,19 @@ pwsh -NoProfile -File scripts/Invoke-VMwareBoot.ps1
 
 | Subsystem | State | Evidence marker |
 |---|---|---|
-| UEFI boot on VMware EFI | PASS | `AW_VMWARE_BOOT_OK`; `AW-SERIAL-CONSOLE-OK` appears on the guest COM1 the script captures - VMware's firmware booted `\EFI\BOOT\BOOTX64.EFI`, the loader handed off, and the native kernel entered and drove a real 16550 |
+| Full clean boot on VMware EFI | PASS | `AW_VMWARE_BOOT_OK`; the native kernel reaches `AW_NATIVE_KERNEL_IDLE` on VMware with no `AW_NATIVE_EXCEPTION`/`AW_NATIVE_KERNEL_PANIC`, and the serial banner appears exactly once (no crash-reboot loop) - VMware's firmware booted `\EFI\BOOT\BOOTX64.EFI`, the loader handed off, and every native proof (W^X, Ring 3, swapgs, scheduler, APIC timer, clock, PCIe scan) ran on it |
 
-0xE9 debugcon is a QEMU/Bochs convenience VMware does not have, so the observable
-channel here is the real 16550 the native kernel brings up first (`serial::prove`).
+0xE9 debugcon is a QEMU/Bochs convenience VMware does not have, so `debug_write`
+mirrors every marker onto the real 16550 once `serial::prove` confirms it, and the
+whole boot is captured on the guest COM1.
 
-**Scope, honestly (section 1.1).** This proves boot to the native serial console
-on VMware, not yet a full clean boot to idle there. The banner repeats because the
-guest reboots shortly after it: the image's identity map covers only the low 4 GiB
-(see Known limitations), and VMware's memory layout trips that right after the
-serial banner, at the CR3 switch. Reaching idle on VMware needs the higher-half or
-relocatable image that limitation already calls for; the debugcon markers are also
-invisible there, so diagnosing it further first needs the loader's early markers
-routed to COM1.
+**What it took.** The first attempt reboot-looped right after the serial banner.
+With the markers mirrored to COM1 the crash was pinned to the CR3 switch: the
+kernel's identity map marks every non-code page NX, but the NX bit is only valid
+with `EFER.NXE` set. QEMU/OVMF leaves it on; VMware's EFI leaves it off, so NX was
+a reserved bit and the first stack access on the new map raised a reserved-bit
+`#PF` and triple-faulted. The kernel now enables `EFER.NXE` itself before the map
+goes live rather than trusting the firmware - a portability fix that matters for
+real hardware too, not just VMware. The `physical=45 linear=48` address widths and
+`vendor=amd` in the capture confirm this is a genuinely different CPU model than
+the QEMU runs.

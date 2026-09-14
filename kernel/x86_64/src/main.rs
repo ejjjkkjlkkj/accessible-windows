@@ -102,10 +102,20 @@ unsafe fn inl(port: u16) -> u32 {
     value
 }
 
+/// Emit one diagnostic byte: to the 0xE9 debug port, and mirrored to the real
+/// 16550 once serial::prove has proved it present. The mirror is a no-op until
+/// then, so a machine with no COM1 (the QEMU proofs run `-serial none`) is
+/// unaffected; on hardware and hypervisors without a 0xE9 port (e.g. VMware) it is
+/// how every marker - strings and numbers alike - reaches a visible console.
+fn debug_put(byte: u8) {
+    // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
+    unsafe { outb(DEBUG_PORT, byte) };
+    serial::mirror_byte(byte);
+}
+
 fn debug_write(message: &str) {
     for byte in message.bytes() {
-        // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
-        unsafe { outb(DEBUG_PORT, byte) };
+        debug_put(byte);
     }
 }
 
@@ -114,8 +124,7 @@ fn debug_write_u8(mut value: u8) {
     let mut index = digits.len();
 
     if value == 0 {
-        // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
-        unsafe { outb(DEBUG_PORT, b'0') };
+        debug_put(b'0');
         return;
     }
 
@@ -126,8 +135,7 @@ fn debug_write_u8(mut value: u8) {
     }
 
     for byte in &digits[index..] {
-        // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
-        unsafe { outb(DEBUG_PORT, *byte) };
+        debug_put(*byte);
     }
 }
 
@@ -136,8 +144,7 @@ fn debug_write_u64(mut value: u64) {
     let mut index = digits.len();
 
     if value == 0 {
-        // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
-        unsafe { outb(DEBUG_PORT, b'0') };
+        debug_put(b'0');
         return;
     }
 
@@ -148,8 +155,7 @@ fn debug_write_u64(mut value: u64) {
     }
 
     for byte in &digits[index..] {
-        // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
-        unsafe { outb(DEBUG_PORT, *byte) };
+        debug_put(*byte);
     }
 }
 
@@ -162,8 +168,7 @@ fn debug_write_hex_u64(value: u64) {
         } else {
             b'a' + (nibble - 10)
         };
-        // SAFETY: DEBUG_PORT is the conventional byte-wide QEMU/Bochs debug port.
-        unsafe { outb(DEBUG_PORT, byte) };
+        debug_put(byte);
     }
 }
 #[inline(always)]
@@ -403,6 +408,25 @@ fn activate_virtual_memory(handoff: &KernelHandoff) -> Option<virtual_memory::Ac
         return None;
     }
     debug_write("AW_FRAME_ALLOCATOR_OK\n");
+
+    // The kernel-owned map marks every non-code page NX, but the NX bit is only
+    // valid with EFER.NXE set. QEMU/OVMF leaves it on, so the switch worked there;
+    // some firmware (VMware's EFI, for one) leaves it off, and then NX is a
+    // reserved bit that faults the first access to any NX page the instant the new
+    // CR3 loads - the kernel would triple-fault right after the switch. Enable it
+    // here, before the map goes live, so the switch is safe whatever the firmware
+    // left behind. The security baseline re-asserts it later; this is idempotent.
+    const IA32_EFER_MSR: u32 = 0xc000_0080;
+    const EFER_NXE: u64 = 1 << 11;
+    // SAFETY: CPL0; EFER exists on every long-mode CPU, and enabling NXE before any
+    // NX mapping is installed only makes the NX bits this kernel sets take effect.
+    unsafe {
+        let efer = local_apic::rdmsr(IA32_EFER_MSR);
+        if efer & EFER_NXE == 0 {
+            local_apic::wrmsr(IA32_EFER_MSR, efer | EFER_NXE);
+        }
+    }
+    debug_write("AW_VMM_NXE_ON\n");
 
     // SAFETY: CPL0 single-core bootstrap after IDT/TSS install. Page-table
     // frames come from conventional RAM outside the kernel image, and the map

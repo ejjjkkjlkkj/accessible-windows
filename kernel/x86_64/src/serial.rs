@@ -11,9 +11,25 @@
 //! present (the emulator started with no serial backend) the loopback readback
 //! does not match and the console is reported unavailable rather than assumed.
 
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use crate::debug_write;
 
 const COM1: u16 = 0x3f8;
+
+/// Set once COM1 is proved present, after which [`mirror_byte`] echoes every debug
+/// marker onto the real line. Off by default, so a machine with no COM1 (the QEMU
+/// proofs run `-serial none`) is unaffected.
+static MIRROR: AtomicBool = AtomicBool::new(false);
+
+/// Echo one debug byte onto COM1 if the console has been proved present. Called
+/// from `debug_write`, so it must never call back into `debug_write`.
+pub(crate) fn mirror_byte(byte: u8) {
+    if MIRROR.load(Ordering::Relaxed) {
+        // SAFETY: COM1 was configured and proved before the flag was set.
+        unsafe { write_byte(byte) };
+    }
+}
 
 // Register offsets from the port base (DLAB selects the divisor latches).
 const REG_DATA: u16 = 0; // THR (write) / RBR (read), or DLL when DLAB=1
@@ -133,6 +149,10 @@ pub fn prove() {
         return;
     }
     debug_write("AW_SERIAL_LOOPBACK_OK byte=0xae\n");
+
+    // COM1 is proved present: from here, mirror every debug marker onto the real
+    // line so boots on hardware/hypervisors without a 0xE9 port are diagnosable.
+    MIRROR.store(true, Ordering::Relaxed);
 
     // SAFETY: COM1 is configured and confirmed present.
     unsafe { write_str("AW-SERIAL-CONSOLE-OK accessible-windows\r\n") };
