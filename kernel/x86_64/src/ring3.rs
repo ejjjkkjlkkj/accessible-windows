@@ -14,8 +14,10 @@
 //! - `SYS_EXIT` returns control to the kernel to report.
 //!
 //! Interrupts stay masked throughout, so no asynchronous entry from CPL 3
-//! happens and `GS` is never user-controlled; `swapgs` and a real user `GS` base
-//! come with preemptive user scheduling.
+//! happens. The CPL3 code still runs on a distinct user `GS` base, and the
+//! syscall entry uses `swapgs` to reach the kernel per-CPU block rather than
+//! trusting whatever `GS` the user held - the discipline a preemptive user
+//! scheduler will depend on, proved here by `AW_SWAPGS_PROOF_OK`.
 
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
@@ -23,12 +25,16 @@ use aw_x86_paging::PageTableFlags;
 
 use crate::interrupts::{USER_CODE_SELECTOR_RAW, USER_DATA_SELECTOR_RAW};
 use crate::local_apic::{rdmsr, wrmsr};
-use crate::{debug_write, debug_write_hex_u64, debug_write_u64, frame_allocator, interrupts, page_mapper};
+use crate::{
+    debug_write, debug_write_hex_u64, debug_write_u64, frame_allocator, interrupts, page_mapper,
+};
 
 const IA32_EFER: u32 = 0xc000_0080;
 const IA32_STAR: u32 = 0xc000_0081;
 const IA32_LSTAR: u32 = 0xc000_0082;
 const IA32_FMASK: u32 = 0xc000_0084;
+const IA32_GS_BASE: u32 = 0xc000_0101;
+const IA32_KERNEL_GS_BASE: u32 = 0xc000_0102;
 const EFER_SYSCALL_ENABLE: u64 = 1 << 0;
 
 const USER_CODE_VA: u64 = 0x2_0000_0000;
@@ -93,6 +99,22 @@ static SAVED_USER_RFLAGS: AtomicU64 = AtomicU64::new(0);
 #[used]
 static SYSCALL_EXIT: AtomicU8 = AtomicU8::new(0);
 
+/// Two distinct GS bases for the swapgs proof. The kernel area's first qword is a
+/// recognizable magic; the user area's is zero. The syscall entry runs with the
+/// user area live and must `swapgs` to the kernel area, so `gs:[0]` reads the
+/// magic if the swap happened and null if it did not - a clean failure either
+/// way, never a user-controlled pointer dereference. These stand in for a real
+/// per-CPU base, which is not installed yet this early in boot; the point proved
+/// is the swap itself, not what the kernel GS ultimately points at.
+const KERNEL_GS_MAGIC: u64 = 0x0000_1111_2222_3333;
+
+#[repr(C, align(64))]
+struct GsArea([u64; 8]);
+static mut KERNEL_GS_AREA: GsArea = GsArea([KERNEL_GS_MAGIC, 0, 0, 0, 0, 0, 0, 0]);
+static mut USER_GS_AREA: GsArea = GsArea([0; 8]);
+/// The value the syscall handler read from `gs:[0]` after `swapgs`.
+static OBSERVED_KERNEL_GS: AtomicU64 = AtomicU64::new(0);
+
 // Results captured for the proof.
 static ADD_RESULT: AtomicU64 = AtomicU64::new(0);
 static ADD_SEEN: AtomicBool = AtomicBool::new(false);
@@ -121,6 +143,10 @@ core::arch::global_asm!(
     "    ret",
     // syscall entry: rax = number, rdi/rsi = args, rcx = user rip, r11 = rflags.
     "aw_syscall_entry:",
+    // The CPU entered with the user's GS still live. swapgs installs the kernel
+    // GS base this CPU stashed in IA32_KERNEL_GS_BASE, so gs:[0] reaches the
+    // per-CPU block instead of anything user-controlled (dossier sections 9-10).
+    "    swapgs",
     "    mov [rip + {user_rsp}], rsp",
     "    mov [rip + {user_rip}], rcx",
     "    mov [rip + {user_rflags}], r11",
@@ -136,7 +162,11 @@ core::arch::global_asm!(
     "    mov rcx, [rip + {user_rip}]",
     "    mov r11, [rip + {user_rflags}]",
     "    mov rsp, [rip + {user_rsp}]",
+    // Restore the user GS base before dropping back to CPL3.
+    "    swapgs",
     "    sysretq",
+    // Exit path: control returns to the kernel, which wants the kernel GS that
+    // the entry swapgs already installed, so it is deliberately not swapped back.
     "2:",
     "    mov rsp, [rip + {saved_rsp}]",
     "    jmp [rip + {saved_resume}]",
@@ -195,6 +225,19 @@ unsafe fn copy_from_user(user_ptr: u64, len: usize) -> usize {
 /// The syscall dispatcher. Returns the value the user receives in `rax`.
 #[unsafe(no_mangle)]
 extern "C" fn aw_syscall_dispatch(number: u64, arg0: u64, arg1: u64) -> u64 {
+    // Record, once, what gs:[0] holds. The entry stub ran swapgs before calling
+    // here, so this is the kernel area's magic if the swap worked, and null (from
+    // USER_GS_AREA) if it did not.
+    if OBSERVED_KERNEL_GS.load(Ordering::Relaxed) == 0 {
+        let gs0: u64;
+        // SAFETY: reading a GS-relative qword has no side effects; offset 0 of
+        // the kernel GS area holds KERNEL_GS_MAGIC once swapgs has run.
+        unsafe {
+            core::arch::asm!("mov {}, gs:[0]", out(reg) gs0, options(nostack, preserves_flags, readonly));
+        }
+        OBSERVED_KERNEL_GS.store(gs0, Ordering::Relaxed);
+    }
+
     match number {
         SYS_VERSION => ABI_VERSION,
         SYS_ADD => {
@@ -283,6 +326,19 @@ pub fn prove() {
         enable_syscall();
     }
 
+    // Arm swapgs: put the kernel GS area in IA32_KERNEL_GS_BASE and a distinct
+    // user area in the live GS, so the CPL3 code runs on the user GS and the
+    // syscall entry's swapgs must bring in the kernel one. install_bootstrap_per_cpu
+    // overwrites the live GS with the real per-CPU base right after this proof.
+    let kernel_gs = core::ptr::addr_of!(KERNEL_GS_AREA) as u64;
+    let user_gs = core::ptr::addr_of!(USER_GS_AREA) as u64;
+    // SAFETY: CPL0; both bases are canonical addresses of live statics, and the
+    // kernel makes no GS-relative access between here and the entry swapgs.
+    unsafe {
+        wrmsr(IA32_KERNEL_GS_BASE, kernel_gs);
+        wrmsr(IA32_GS_BASE, user_gs);
+    }
+
     debug_write("AW_RING3_MAP_OK code_va=");
     debug_write_hex_u64(USER_CODE_VA);
     debug_write(" stack_va=");
@@ -316,4 +372,24 @@ pub fn prove() {
     } else {
         debug_write("AW_RING3_FAIL reason=abi\n");
     }
+
+    // The syscall entry ran on the user GS and had to swapgs to reach the kernel
+    // area. The handler recorded gs:[0]; it proves the swap only if it read the
+    // kernel magic (and not the user area's null).
+    let observed = OBSERVED_KERNEL_GS.load(Ordering::Relaxed);
+    debug_write("AW_SWAPGS_GS observed=");
+    debug_write_hex_u64(observed);
+    debug_write(" expected=");
+    debug_write_hex_u64(KERNEL_GS_MAGIC);
+    debug_write("\n");
+    if observed == KERNEL_GS_MAGIC {
+        debug_write("AW_SWAPGS_PROOF_OK\n");
+    } else {
+        debug_write("AW_SWAPGS_FAIL\n");
+    }
+
+    // Clear the swapgs shadow now the proof is done; the live GS is the kernel
+    // area and install_bootstrap_per_cpu is about to set the real per-CPU base.
+    // SAFETY: CPL0.
+    unsafe { wrmsr(IA32_KERNEL_GS_BASE, 0) };
 }

@@ -105,6 +105,9 @@ $configurations = @(
             'AW_SYSCALL_WRITE copied=13'
             'AW_RING3_PROOF_OK'
             'AW_SYSCALL_ABI_PROOF_OK version=1'
+            # The syscall entry ran on a user GS base and had to swapgs to reach
+            # the kernel per-CPU block: gs:[0] matched this CPU's real per-CPU base.
+            'AW_SWAPGS_PROOF_OK'
             # Cooperative round-robin scheduler: three kernel threads context
             # switch and take exactly ten turns each over thirty yields.
             'AW_SCHED_THREAD id=0 count=10'
@@ -171,6 +174,7 @@ $configurations = @(
             'AW_VMM_RUNTIME_MAP_FAIL'
             'AW_HEAP_FAIL'
             'AW_RING3_FAIL'
+            'AW_SWAPGS_FAIL'
             'AW_SCHED_FAIL'
             'AW_CLOCK_FAIL'
             'AW_GDT_SEGMENTS_FAIL'

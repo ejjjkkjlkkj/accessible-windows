@@ -92,7 +92,7 @@ kernel ELF for symbol-level triage.
 | Monotonic TSC clock | PASS | `AW_CLOCK_PROOF_OK`; TSC monotonic, frequency calibrated against a PIT channel-2 one-shot |
 | Preemptive scheduling | TO BUILD | cooperative for now; wiring the switch into the timer interrupt makes it preemptive |
 | Ring 3 preemption / user scheduler | TO BUILD | one-shot proof: the handler returns to the kernel, it does not schedule user threads |
-| User-page `swapgs` on entry | TO BUILD | entry masks interrupts instead; a real user `GS` base needs `swapgs` |
+| User-page `swapgs` on entry | PASS | `AW_SWAPGS_PROOF_OK`; CPL3 runs on a distinct user `GS` base, and the syscall entry's `swapgs` makes `gs:[0]` reach this CPU's real per-CPU block (null if the swap were missing) |
 | Physical hardware boot | TO PROVE | never run on real hardware from this tree |
 
 Error codes above are `#PF` error codes (Intel SDM 4.7): bit 0 present, bit 1
