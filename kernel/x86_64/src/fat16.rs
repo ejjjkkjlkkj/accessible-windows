@@ -269,3 +269,174 @@ pub fn prove_partition<S: SectorSource>(source: &S, base_lba: u64) {
         }
     }
 }
+
+// ---- FAT16 write (roadmap Phase 3 "filesystem write") ----------------------
+//
+// Creating a file is what an installer needs: allocate a free cluster, write the
+// data, chain the FAT (every copy), and add a root-directory entry. Kept to a
+// single-cluster file, the size the install/recovery bootstrap needs, and gated so
+// it only ever runs against a scratch disk - it modifies the filesystem.
+
+/// A sink for 512-byte sectors, the write counterpart of [`SectorSource`].
+#[cfg(feature = "fat-write-smoke-test")]
+pub trait SectorSink {
+    fn write_sector(&self, lba: u64, data: &[u8; SECTOR_SIZE]) -> Result<(), &'static str>;
+}
+
+#[cfg(feature = "fat-write-smoke-test")]
+impl SectorSink for crate::ahci::AhciPort {
+    fn write_sector(&self, lba: u64, data: &[u8; SECTOR_SIZE]) -> Result<(), &'static str> {
+        crate::ahci::AhciPort::write_sector(self, lba, data)
+    }
+}
+
+#[cfg(feature = "fat-write-smoke-test")]
+fn put_u16(buffer: &mut [u8], offset: usize, value: u16) {
+    buffer[offset] = value as u8;
+    buffer[offset + 1] = (value >> 8) as u8;
+}
+
+/// Create a single-cluster file `name` with `data` on a FAT16 volume at `base_lba`.
+///
+/// Allocates the first free cluster, writes the data into it, marks the cluster as
+/// end-of-chain in every FAT copy, and writes a root-directory entry. Fails if the
+/// file needs more than one cluster, or there is no free cluster or root slot.
+#[cfg(feature = "fat-write-smoke-test")]
+pub fn write_file<S: SectorSource + SectorSink>(
+    source: &S,
+    base_lba: u64,
+    name: &[u8; 11],
+    data: &[u8],
+) -> Result<(), &'static str> {
+    let mut boot = [0u8; SECTOR_SIZE];
+    source.read_sector(base_lba, &mut boot).map_err(|_| "read_boot")?;
+    let geometry = parse_geometry(&boot).ok_or("bad_bpb")?;
+    let num_fats = (geometry.root_start - geometry.fat_start) / geometry.fat_sectors;
+    let cluster_bytes = geometry.sectors_per_cluster * SECTOR_SIZE;
+    if data.len() > cluster_bytes {
+        return Err("file_too_big");
+    }
+
+    // Find the first free FAT entry (value 0) at cluster index >= 2.
+    let entries_per_sector = SECTOR_SIZE / 2;
+    let mut free_cluster = 0usize;
+    let mut sector = [0u8; SECTOR_SIZE];
+    'scan: for fat_sector in 0..geometry.fat_sectors {
+        source
+            .read_sector(base_lba + (geometry.fat_start + fat_sector) as u64, &mut sector)
+            .map_err(|_| "read_fat")?;
+        for i in 0..entries_per_sector {
+            let cluster = fat_sector * entries_per_sector + i;
+            if cluster < 2 {
+                continue;
+            }
+            if read_u16(&sector, i * 2) == 0 {
+                free_cluster = cluster;
+                break 'scan;
+            }
+        }
+    }
+    if free_cluster == 0 {
+        return Err("no_free_cluster");
+    }
+
+    // Write the data into that cluster, one sector at a time, zero-padded.
+    let first_sector = geometry.data_start + (free_cluster - 2) * geometry.sectors_per_cluster;
+    for k in 0..geometry.sectors_per_cluster {
+        let mut buf = [0u8; SECTOR_SIZE];
+        let start = k * SECTOR_SIZE;
+        if start < data.len() {
+            let end = (start + SECTOR_SIZE).min(data.len());
+            buf[..end - start].copy_from_slice(&data[start..end]);
+        }
+        source
+            .write_sector(base_lba + (first_sector + k) as u64, &buf)
+            .map_err(|_| "write_data")?;
+    }
+
+    // Mark the cluster end-of-chain (0xFFFF) in every FAT copy.
+    let fat_byte = free_cluster * 2;
+    let fat_sector_index = fat_byte / SECTOR_SIZE;
+    let fat_in_sector = fat_byte % SECTOR_SIZE;
+    for copy in 0..num_fats {
+        let lba = base_lba + (geometry.fat_start + copy * geometry.fat_sectors + fat_sector_index) as u64;
+        source.read_sector(lba, &mut sector).map_err(|_| "read_fat_rw")?;
+        put_u16(&mut sector, fat_in_sector, 0xffff);
+        source.write_sector(lba, &sector).map_err(|_| "write_fat")?;
+    }
+
+    // Write a root-directory entry into the first free slot.
+    for root_sector in 0..geometry.root_sectors {
+        let lba = base_lba + (geometry.root_start + root_sector) as u64;
+        source.read_sector(lba, &mut sector).map_err(|_| "read_root_rw")?;
+        let mut offset = 0;
+        while offset < SECTOR_SIZE {
+            if sector[offset] == 0x00 || sector[offset] == 0xe5 {
+                for byte in &mut sector[offset..offset + 32] {
+                    *byte = 0;
+                }
+                sector[offset..offset + 11].copy_from_slice(name);
+                sector[offset + 11] = 0x20; // attribute: archive
+                put_u16(&mut sector, offset + 20, (free_cluster >> 16) as u16); // cluster high
+                put_u16(&mut sector, offset + 26, free_cluster as u16); // cluster low
+                let size = data.len() as u32;
+                sector[offset + 28] = size as u8;
+                sector[offset + 29] = (size >> 8) as u8;
+                sector[offset + 30] = (size >> 16) as u8;
+                sector[offset + 31] = (size >> 24) as u8;
+                source.write_sector(lba, &sector).map_err(|_| "write_root")?;
+                return Ok(());
+            }
+            offset += 32;
+        }
+    }
+    Err("no_root_slot")
+}
+
+/// Prove a FAT16 write: create a file, then read it back through the normal read
+/// path and confirm the bytes. Scratch disk only. Emits `AW_FATWRITE_*`.
+#[cfg(feature = "fat-write-smoke-test")]
+pub fn prove_fat_write<S: SectorSource + SectorSink>(source: &S, base_lba: u64) {
+    debug_write("AW_FATWRITE_BEGIN\n");
+    const NAME: &[u8; 11] = b"NEWFILE TXT";
+    const CONTENT: &[u8] = b"AW-FAT-WRITE-OK\n";
+
+    if let Err(reason) = write_file(source, base_lba, NAME, CONTENT) {
+        debug_write("AW_FATWRITE_FAIL reason=");
+        debug_write(reason);
+        debug_write("\n");
+        return;
+    }
+    debug_write("AW_FATWRITE_WROTE\n");
+
+    // Read it back through the ordinary reader.
+    let mut boot = [0u8; SECTOR_SIZE];
+    if source.read_sector(base_lba, &mut boot).is_err() {
+        debug_write("AW_FATWRITE_FAIL reason=reread_boot\n");
+        return;
+    }
+    let Some(geometry) = parse_geometry(&boot) else {
+        debug_write("AW_FATWRITE_FAIL reason=reread_bpb\n");
+        return;
+    };
+    let found = find_file(source, base_lba, &geometry, NAME);
+    let (first_cluster, size) = match found {
+        Ok(Some(file)) => file,
+        _ => {
+            debug_write("AW_FATWRITE_FAIL reason=not_found_after_write\n");
+            return;
+        }
+    };
+    match read_file(source, base_lba, &geometry, first_cluster, size) {
+        Ok(contents) if slices_equal(&contents, CONTENT) => {
+            debug_write("AW_FATWRITE_READBACK_OK\n");
+            debug_write("AW_FATWRITE_PROOF_OK\n");
+        }
+        Ok(_) => debug_write("AW_FATWRITE_FAIL reason=content_mismatch\n"),
+        Err(reason) => {
+            debug_write("AW_FATWRITE_FAIL reason=");
+            debug_write(reason);
+            debug_write("\n");
+        }
+    }
+}

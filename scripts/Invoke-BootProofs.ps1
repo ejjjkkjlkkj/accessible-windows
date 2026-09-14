@@ -17,7 +17,10 @@
 [CmdletBinding()]
 param(
     [string]$Qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe',
-    [ValidateRange(5, 300)][int]$TimeoutSeconds = 90
+    [ValidateRange(5, 300)][int]$TimeoutSeconds = 90,
+    # Optional: run only the named configurations (e.g. -Only fat-write). Staging
+    # still builds every disk image; only the boot runs are filtered. Empty = all.
+    [string[]]$Only = @()
 )
 
 Set-StrictMode -Version Latest
@@ -57,6 +60,13 @@ if ($LASTEXITCODE -ne 0) { throw 'building the GPT test disk failed' }
 # never be a data disk. Recreated blank each run.
 $ahciScratch = Join-Path $repoRoot 'target/ahci-scratch.img'
 [System.IO.File]::WriteAllBytes($ahciScratch, (New-Object byte[] (1024 * 1024)))
+
+# A dedicated FAT16 scratch disk for the filesystem-write proof: a fresh, valid
+# FAT16 volume (so it has free clusters and a free root slot). The proof creates a
+# file on it, so it must be its own disk, recreated each run - never a data disk.
+$fatScratch = Join-Path $repoRoot 'target/fat-write-scratch.img'
+& $python.Source (Join-Path $PSScriptRoot 'build_bootable_image.py') '--fat-only' $fatScratch $fatStage
+if ($LASTEXITCODE -ne 0) { throw 'building the FAT16 write-scratch disk failed' }
 
 # Where the serial config routes COM1, so its banner can be checked host-side.
 $serialFile = Join-Path $repoRoot 'target/serial-com1.log'
@@ -547,9 +557,40 @@ $configurations = @(
             'AW_NATIVE_KERNEL_PANIC'
         )
     }
+    @{
+        # Filesystem write: create a file on a FAT16 volume (allocate a free cluster,
+        # write the data, chain the FAT in every copy, add a root-directory entry) and
+        # read it back through the ordinary reader. This is the installer foundation.
+        # Its own scratch FAT16 disk, recreated each run: it modifies the filesystem,
+        # so it must never touch a data disk. Gated behind fat-write-smoke-test.
+        Name     = 'fat-write'
+        Features = @('fat-write-smoke-test')
+        QemuArgs = @(
+            '-device', 'ich9-ahci,id=sata0'
+            '-drive', "if=none,id=fatscratch,file=$fatScratch,format=raw"
+            '-device', 'ide-hd,drive=fatscratch,bus=sata0.0'
+        )
+        Required = @(
+            'AW_FATWRITE_BEGIN'
+            'AW_FATWRITE_WROTE'
+            'AW_FATWRITE_READBACK_OK'
+            'AW_FATWRITE_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_FATWRITE_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
 )
 
 $failures = @()
+
+if ($Only.Count -gt 0) {
+    $configurations = @($configurations | Where-Object { $Only -contains $_.Name })
+    if ($configurations.Count -eq 0) { throw "no configuration matched -Only: $($Only -join ', ')" }
+}
 
 foreach ($configuration in $configurations) {
     Write-Host "== $($configuration.Name) =="

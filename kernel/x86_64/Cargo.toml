@@ -27,6 +27,10 @@ ap-scheduler-smoke-test = []
 # Test-only: it overwrites LBA 0, so it must only ever run against a scratch disk,
 # never a boot or data disk. Never enabled in the normal boot path.
 ahci-write-smoke-test = []
+# Creates a file in a FAT16 filesystem (allocate a cluster, chain the FAT, add the
+# directory entry) and reads it back. Test-only, scratch disk only: it modifies the
+# filesystem. Never enabled in the normal boot path.
+fat-write-smoke-test = []
 # Drives the MSI delivery proof with QEMU's `edu` test device. Never enabled in
 # a shipping image: it contains a driver for a device that only exists inside an
 # emulator.

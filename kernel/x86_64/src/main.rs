@@ -1514,6 +1514,15 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // Read the disk's own GPT partition table (read-only; reports unavailable
         // on a non-GPT disk, e.g. the write-smoke scratch disk).
         gpt::prove();
+        // Create a file on a FAT16 scratch disk and read it back (installer
+        // foundation). Scratch disk only: it modifies the filesystem, so it is
+        // gated out of the normal boot path and never touches a real disk.
+        #[cfg(feature = "fat-write-smoke-test")]
+        if let Some(port) = ahci::init() {
+            fat16::prove_fat_write(&port, 0);
+        } else {
+            debug_write("AW_FATWRITE_FAIL reason=no_ahci_port\n");
+        }
         #[cfg(feature = "msi-proof-device")]
         prove_msi_delivery(handoff);
 
