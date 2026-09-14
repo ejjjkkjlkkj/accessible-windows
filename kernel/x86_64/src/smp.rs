@@ -215,6 +215,15 @@ extern "C" fn ap_rust_entry() -> ! {
         block.set_ist1_bounds(t.ist1_start, t.ist1_top);
     }
 
+    // Dedicated build only: one application processor runs the cooperative
+    // scheduler, proving threads context switch on a CPU other than the bootstrap
+    // processor before it goes on to report online and idle normally.
+    #[cfg(feature = "ap-scheduler-smoke-test")]
+    if cpu == 1 {
+        // SAFETY: CPL0 on this AP, interrupts masked, run once on this AP.
+        unsafe { crate::scheduler::prove_ap_scheduler(cpu) };
+    }
+
     // Dedicated build only: one application processor deliberately double-faults,
     // before it reports online, to prove the #DF resolves on *its own* per-CPU
     // IST1 (dossier section 5.3). It never returns, so bring-up sees it stay

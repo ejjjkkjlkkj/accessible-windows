@@ -20,6 +20,9 @@ double-fault-smoke-test = []
 # Brings up one application processor that deliberately double-faults, to prove
 # the fault resolves on that CPU's own per-CPU IST1. Test-only.
 ap-double-fault-smoke-test = []
+# Runs the cooperative scheduler on an application processor, to prove threads
+# context switch on a CPU other than the bootstrap processor. Test-only.
+ap-scheduler-smoke-test = []
 # Drives the MSI delivery proof with QEMU's `edu` test device. Never enabled in
 # a shipping image: it contains a driver for a device that only exists inside an
 # emulator.

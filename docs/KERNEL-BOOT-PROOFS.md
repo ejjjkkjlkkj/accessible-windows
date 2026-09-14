@@ -84,7 +84,7 @@ kernel ELF for symbol-level triage.
 | Per-CPU interrupt counters | PASS | `AW_PERCPU_BSP ... timer_ticks>=8 device_ticks>=8`, counted into the block of the CPU that ran the ISR |
 | Per-CPU timer armed on an AP | PASS | `AW_PERCPU_AP_TIMER_OK aps=3` (`smp`); each AP arms its own Local APIC timer, idles under `sti`/`hlt`, and its own block's `timer_ticks` advances |
 | Per-CPU #DF on an AP's IST | PASS | `AW_DOUBLE_FAULT_IST_OK` (`ap-double-fault-smoke`); an application processor forces a real #DF and the fault frame lands inside *that CPU's own* IST1 range, range-checked against the per-CPU block's bounds (not the bootstrap processor's) |
-| Scheduler / anything running on an AP | TO BUILD | APs park in `hlt` |
+| Scheduler / anything running on an AP | PASS | `AW_AP_SCHED_PROOF_OK cpu=1 threads=2` (`ap-scheduler-smoke`); an application processor runs two kernel threads that context switch and take turns, before going on to report online and idle under its own timer - it no longer only parks in `hlt` |
 | Ring 3 entry (`iretq` to CPL3) | PASS | `AW_RING3_PROOF_OK`; a mapped user page runs at CPL3, its syscall's saved RIP lands inside the user page |
 | Versioned syscall ABI (`sysret`) | PASS | `AW_SYSCALL_ABI_PROOF_OK version=1`; dispatch table, `SYS_ADD`=5, `SYS_EXIT`, each returning via `sysret` |
 | Validated user-pointer copy | PASS | `AW_SYSCALL_WRITE copied=13`; `SYS_WRITE` bounds-checks the user pointer and copies it in with SMAP `stac`/`clac` |

@@ -321,6 +321,53 @@ pub fn set_user_slot_frame(frame_rsp: u64) {
     PREEMPT_RSP[1].store(frame_rsp, Ordering::Relaxed);
 }
 
+/// Prove cooperative multitasking runs on an application processor, not just the
+/// bootstrap processor: two kernel threads context switch on this CPU and take
+/// turns until the whole run has yielded enough (dossier section 8 - "anything
+/// running on an AP").
+///
+/// It reuses the same context switch and thread state as the bootstrap proof; by
+/// the time an AP runs this the bootstrap processor has long finished with them,
+/// and only one AP runs it, so the shared statics need no lock.
+///
+/// # Safety
+/// CPL0 on the application processor that calls it, once, with interrupts masked.
+#[cfg(feature = "ap-scheduler-smoke-test")]
+pub unsafe fn prove_ap_scheduler(cpu: usize) {
+    debug_write("AW_AP_SCHED_BEGIN cpu=");
+    debug_write_u64(cpu as u64);
+    debug_write("\n");
+
+    for count in &COUNTS {
+        count.store(0, Ordering::Relaxed);
+    }
+    TOTAL_YIELDS.store(0, Ordering::Relaxed);
+    SWITCHES.store(0, Ordering::Relaxed);
+    init_thread(0, thread0);
+    init_thread(1, thread1);
+    NUM_THREADS.store(2, Ordering::Relaxed);
+    CURRENT.store(0, Ordering::Relaxed);
+
+    // SAFETY: save this AP's context into MAIN_RSP and switch to thread 0; the
+    // threads hand control back here once TARGET_YIELDS is reached.
+    unsafe { aw_context_switch(MAIN_RSP.as_ptr(), THREAD_RSP[0].load(Ordering::Relaxed)) };
+
+    let switches = SWITCHES.load(Ordering::Relaxed);
+    let total = TOTAL_YIELDS.load(Ordering::Relaxed);
+    let both_ran = COUNTS[0].load(Ordering::Relaxed) > 0 && COUNTS[1].load(Ordering::Relaxed) > 0;
+    if both_ran && total == TARGET_YIELDS {
+        debug_write("AW_AP_SCHED_PROOF_OK cpu=");
+        debug_write_u64(cpu as u64);
+        debug_write(" threads=2 switches=");
+        debug_write_u64(u64::from(switches));
+        debug_write("\n");
+    } else {
+        debug_write("AW_AP_SCHED_FAIL cpu=");
+        debug_write_u64(cpu as u64);
+        debug_write("\n");
+    }
+}
+
 /// Lay out a thread's initial stack as if it had just been interrupted, so the
 /// timer ISR's own `pop`/`iretq` epilogue starts it at `entry` with interrupts
 /// enabled. The layout mirrors the ISR prologue exactly: fifteen general-purpose

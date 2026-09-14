@@ -415,6 +415,31 @@ $configurations = @(
         )
         Forbidden = @('AW_DOUBLE_FAULT_IST_FAIL', 'AW_NATIVE_KERNEL_PANIC')
     }
+    @{
+        # Cooperative scheduling on an application processor: one AP runs two
+        # kernel threads that context switch and take turns, before it goes on to
+        # report online and idle under its own timer like any other AP. This proves
+        # threads run on a CPU other than the bootstrap processor - the AP no longer
+        # only parks in hlt.
+        Name     = 'ap-scheduler-smoke'
+        Features = @('ap-scheduler-smoke-test')
+        QemuArgs = @('-smp', '2')
+        TimeoutSeconds = 180
+        Required = @(
+            'AW_AP_SCHED_BEGIN cpu=1'
+            'AW_AP_SCHED_PROOF_OK cpu=1 threads=2'
+            'AW_SMP_ALL_ONLINE'
+            'AW_PERCPU_PROOF_OK cpus=2'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_AP_SCHED_FAIL'
+            'AW_SCHED_FAIL'
+            'AW_PERCPU_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
 )
 
 $failures = @()
