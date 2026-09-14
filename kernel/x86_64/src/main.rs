@@ -1518,6 +1518,16 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         } else {
             debug_write("AW_GPTWRITE_FAIL reason=no_ahci_port\n");
         }
+        // Format a blank scratch disk as FAT16, then create a file in it and read
+        // it back (the installer's format step). Runs before the read proves so the
+        // freshly written boot sector is what they see. Scratch disk only, gated
+        // out of the normal boot path; the 8 MiB scratch disk is 16384 sectors.
+        #[cfg(feature = "fat-format-smoke-test")]
+        if let Some(port) = ahci::init() {
+            fat16::prove_format(&port, 0, 16384);
+        } else {
+            debug_write("AW_MKFS_FAIL reason=no_ahci_port\n");
+        }
         #[cfg(not(feature = "ahci-write-smoke-test"))]
         ahci::prove();
         #[cfg(feature = "ahci-write-smoke-test")]

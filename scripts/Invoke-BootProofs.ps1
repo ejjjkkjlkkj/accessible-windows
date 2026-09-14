@@ -74,6 +74,12 @@ if ($LASTEXITCODE -ne 0) { throw 'building the FAT16 write-scratch disk failed' 
 $gptScratch = Join-Path $repoRoot 'target/gpt-write-scratch.img'
 [System.IO.File]::WriteAllBytes($gptScratch, (New-Object byte[] (16384 * 512)))
 
+# A blank 8 MiB (16384-sector) scratch disk for the FAT16 format (mkfs) proof: it
+# writes a fresh filesystem over the whole disk, so it must be its own blank disk,
+# recreated each run. The size must match what the kernel passes to prove_format.
+$mkfsScratch = Join-Path $repoRoot 'target/mkfs-scratch.img'
+[System.IO.File]::WriteAllBytes($mkfsScratch, (New-Object byte[] (16384 * 512)))
+
 # Where the serial config routes COM1, so its banner can be checked host-side.
 $serialFile = Join-Path $repoRoot 'target/serial-com1.log'
 if (Test-Path -LiteralPath $serialFile) { Remove-Item -LiteralPath $serialFile -Force }
@@ -620,6 +626,34 @@ $configurations = @(
         Forbidden = @(
             'AW_GPTWRITE_FAIL'
             'AW_GPT_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
+        # FAT16 format (mkfs): write a fresh, empty FAT16 filesystem onto a blank
+        # scratch disk - boot sector/BPB, two FATs with their reserved entries, a
+        # zeroed root directory - then create a file in it with the ordinary writer
+        # and read it back with the ordinary reader. Together with the GPT writer,
+        # the kernel can now build a whole disk from blank: the installer's format
+        # step. Its own blank scratch disk, recreated each run; gated behind
+        # fat-format-smoke-test so it never touches a data disk.
+        Name     = 'mkfs'
+        Features = @('fat-format-smoke-test')
+        QemuArgs = @(
+            '-device', 'ich9-ahci,id=sata0'
+            '-drive', "if=none,id=mkfsscratch,file=$mkfsScratch,format=raw"
+            '-device', 'ide-hd,drive=mkfsscratch,bus=sata0.0'
+        )
+        Required = @(
+            'AW_MKFS_BEGIN sectors=16384'
+            'AW_MKFS_FORMATTED'
+            'AW_MKFS_READBACK_OK'
+            'AW_MKFS_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_MKFS_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )

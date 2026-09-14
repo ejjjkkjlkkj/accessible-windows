@@ -43,7 +43,7 @@ try {
         # --workspace` never sees it. Lint every feature combination that ships.
         Push-Location 'kernel/x86_64'
         try {
-            foreach ($features in @('', 'msi-proof-device', 'exception-smoke-test', 'exception-smoke-test,double-fault-smoke-test', 'ap-double-fault-smoke-test', 'ap-scheduler-smoke-test', 'ahci-write-smoke-test', 'fat-write-smoke-test', 'gpt-write-smoke-test')) {
+            foreach ($features in @('', 'msi-proof-device', 'exception-smoke-test', 'exception-smoke-test,double-fault-smoke-test', 'ap-double-fault-smoke-test', 'ap-scheduler-smoke-test', 'ahci-write-smoke-test', 'fat-write-smoke-test', 'gpt-write-smoke-test', 'fat-format-smoke-test')) {
                 $arguments = @('clippy', '--locked', '--target', 'x86_64-unknown-none')
                 if ($features) { $arguments += @('--features', $features) }
                 $arguments += @('--', '-D', 'warnings')

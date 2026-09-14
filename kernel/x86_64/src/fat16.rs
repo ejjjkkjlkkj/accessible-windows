@@ -279,19 +279,19 @@ pub fn prove_partition<S: SectorSource>(source: &S, base_lba: u64) {
 
 /// A sink for 512-byte sectors, the write counterpart of [`SectorSource`]. Shared
 /// by the filesystem writer and the GPT writer.
-#[cfg(any(feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test"))]
+#[cfg(any(feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test", feature = "fat-format-smoke-test"))]
 pub trait SectorSink {
     fn write_sector(&self, lba: u64, data: &[u8; SECTOR_SIZE]) -> Result<(), &'static str>;
 }
 
-#[cfg(any(feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test"))]
+#[cfg(any(feature = "fat-write-smoke-test", feature = "gpt-write-smoke-test", feature = "fat-format-smoke-test"))]
 impl SectorSink for crate::ahci::AhciPort {
     fn write_sector(&self, lba: u64, data: &[u8; SECTOR_SIZE]) -> Result<(), &'static str> {
         crate::ahci::AhciPort::write_sector(self, lba, data)
     }
 }
 
-#[cfg(feature = "fat-write-smoke-test")]
+#[cfg(any(feature = "fat-write-smoke-test", feature = "fat-format-smoke-test"))]
 fn put_u16(buffer: &mut [u8], offset: usize, value: u16) {
     buffer[offset] = value as u8;
     buffer[offset + 1] = (value >> 8) as u8;
@@ -302,7 +302,7 @@ fn put_u16(buffer: &mut [u8], offset: usize, value: u16) {
 /// Allocates the first free cluster, writes the data into it, marks the cluster as
 /// end-of-chain in every FAT copy, and writes a root-directory entry. Fails if the
 /// file needs more than one cluster, or there is no free cluster or root slot.
-#[cfg(feature = "fat-write-smoke-test")]
+#[cfg(any(feature = "fat-write-smoke-test", feature = "fat-format-smoke-test"))]
 pub fn write_file<S: SectorSource + SectorSink>(
     source: &S,
     base_lba: u64,
@@ -436,6 +436,152 @@ pub fn prove_fat_write<S: SectorSource + SectorSink>(source: &S, base_lba: u64) 
         Ok(_) => debug_write("AW_FATWRITE_FAIL reason=content_mismatch\n"),
         Err(reason) => {
             debug_write("AW_FATWRITE_FAIL reason=");
+            debug_write(reason);
+            debug_write("\n");
+        }
+    }
+}
+
+// ---- FAT16 format / mkfs (roadmap Phase 3 "filesystem create") -------------
+//
+// Writing a file needed an existing filesystem; creating the filesystem itself is
+// what an installer does to a fresh partition. Lay down a valid FAT16 boot sector
+// (BPB), two zeroed FATs with their reserved first two entries, and a zeroed root
+// directory. Combined with the GPT writer, the kernel can now build a whole disk
+// from blank. Gated, scratch disk only: it overwrites the volume.
+
+/// Format `total_sectors` starting at `base_lba` as an empty FAT16 volume. Chooses
+/// one sector per cluster and 512 root entries, sizes the FAT to cover the data
+/// area, and fails if the resulting cluster count is not in the FAT16 range.
+#[cfg(feature = "fat-format-smoke-test")]
+pub fn format<S: SectorSink>(
+    sink: &S,
+    base_lba: u64,
+    total_sectors: u64,
+) -> Result<(), &'static str> {
+    const SPC: usize = 1; // sectors per cluster
+    const RESERVED: usize = 1;
+    const NUM_FATS: usize = 2;
+    const ROOT_ENTRIES: usize = 512;
+    let root_sectors = (ROOT_ENTRIES * 32).div_ceil(SECTOR_SIZE); // 32
+    let total = total_sectors as usize;
+    if total < RESERVED + root_sectors + 8 {
+        return Err("disk_too_small");
+    }
+    // Microsoft FAT-spec FAT-size computation for FAT16 (256 = bytes_per_sec / 2).
+    let tmp1 = total - (RESERVED + root_sectors);
+    let tmp2 = 256 * SPC + NUM_FATS;
+    let fat_sectors = tmp1.div_ceil(tmp2);
+    let data_sectors = total
+        .checked_sub(RESERVED + NUM_FATS * fat_sectors + root_sectors)
+        .ok_or("geometry_overflow")?;
+    let clusters = data_sectors / SPC;
+    if !(4085..65525).contains(&clusters) {
+        return Err("not_fat16_range");
+    }
+
+    // Boot sector / BPB.
+    let mut boot = [0u8; SECTOR_SIZE];
+    boot[0] = 0xeb;
+    boot[1] = 0x3c;
+    boot[2] = 0x90; // jump
+    boot[3..11].copy_from_slice(b"AWKERNEL");
+    put_u16(&mut boot, 0x0b, SECTOR_SIZE as u16);
+    boot[0x0d] = SPC as u8;
+    put_u16(&mut boot, 0x0e, RESERVED as u16);
+    boot[0x10] = NUM_FATS as u8;
+    put_u16(&mut boot, 0x11, ROOT_ENTRIES as u16);
+    if total < 0x1_0000 {
+        put_u16(&mut boot, 0x13, total as u16);
+    }
+    boot[0x15] = 0xf8; // media descriptor (fixed disk)
+    put_u16(&mut boot, 0x16, fat_sectors as u16);
+    put_u16(&mut boot, 0x18, 32); // sectors per track (nominal)
+    put_u16(&mut boot, 0x1a, 8); // heads (nominal)
+    boot[0x1c..0x20].copy_from_slice(&(base_lba as u32).to_le_bytes()); // hidden sectors
+    if total >= 0x1_0000 {
+        boot[0x20..0x24].copy_from_slice(&(total as u32).to_le_bytes());
+    }
+    boot[0x24] = 0x80; // BIOS drive number
+    boot[0x26] = 0x29; // extended boot signature
+    boot[0x27..0x2b].copy_from_slice(&0x4157_5f31u32.to_le_bytes()); // volume id
+    boot[0x2b..0x36].copy_from_slice(b"AWDISK     "); // 11-byte volume label
+    boot[0x36..0x3e].copy_from_slice(b"FAT16   "); // 8-byte fs type
+    boot[510] = 0x55;
+    boot[511] = 0xaa;
+    sink.write_sector(base_lba, &boot)?;
+
+    // Both FATs: first sector carries the two reserved entries, the rest are zero.
+    let mut first_fat = [0u8; SECTOR_SIZE];
+    put_u16(&mut first_fat, 0, 0xfff8); // FAT[0] = media | 0xFF00
+    put_u16(&mut first_fat, 2, 0xffff); // FAT[1] = end-of-chain
+    let zero = [0u8; SECTOR_SIZE];
+    for f in 0..NUM_FATS {
+        let fat_base = base_lba + (RESERVED + f * fat_sectors) as u64;
+        sink.write_sector(fat_base, &first_fat)?;
+        for s in 1..fat_sectors {
+            sink.write_sector(fat_base + s as u64, &zero)?;
+        }
+    }
+
+    // Root directory: all zero, so the first entry reads as end-of-directory.
+    let root_base = base_lba + (RESERVED + NUM_FATS * fat_sectors) as u64;
+    for s in 0..root_sectors {
+        sink.write_sector(root_base + s as u64, &zero)?;
+    }
+    Ok(())
+}
+
+/// Prove a FAT16 format: format a blank scratch volume, create a file in it with the
+/// existing writer, then read it back through the ordinary reader. Scratch disk
+/// only. Emits `AW_MKFS_*`.
+#[cfg(feature = "fat-format-smoke-test")]
+pub fn prove_format<S: SectorSource + SectorSink>(source: &S, base_lba: u64, total_sectors: u64) {
+    debug_write("AW_MKFS_BEGIN sectors=");
+    debug_write_u64(total_sectors);
+    debug_write("\n");
+
+    if let Err(reason) = format(source, base_lba, total_sectors) {
+        debug_write("AW_MKFS_FAIL reason=");
+        debug_write(reason);
+        debug_write("\n");
+        return;
+    }
+    debug_write("AW_MKFS_FORMATTED\n");
+
+    const NAME: &[u8; 11] = b"MKFSFILETXT";
+    const CONTENT: &[u8] = b"AW-MKFS-OK\n";
+    if let Err(reason) = write_file(source, base_lba, NAME, CONTENT) {
+        debug_write("AW_MKFS_FAIL reason=write_");
+        debug_write(reason);
+        debug_write("\n");
+        return;
+    }
+
+    let mut boot = [0u8; SECTOR_SIZE];
+    if source.read_sector(base_lba, &mut boot).is_err() {
+        debug_write("AW_MKFS_FAIL reason=reread_boot\n");
+        return;
+    }
+    let Some(geometry) = parse_geometry(&boot) else {
+        debug_write("AW_MKFS_FAIL reason=reread_bpb\n");
+        return;
+    };
+    let (first_cluster, size) = match find_file(source, base_lba, &geometry, NAME) {
+        Ok(Some(file)) => file,
+        _ => {
+            debug_write("AW_MKFS_FAIL reason=not_found\n");
+            return;
+        }
+    };
+    match read_file(source, base_lba, &geometry, first_cluster, size) {
+        Ok(contents) if slices_equal(&contents, CONTENT) => {
+            debug_write("AW_MKFS_READBACK_OK\n");
+            debug_write("AW_MKFS_PROOF_OK\n");
+        }
+        Ok(_) => debug_write("AW_MKFS_FAIL reason=content_mismatch\n"),
+        Err(reason) => {
+            debug_write("AW_MKFS_FAIL reason=read_");
             debug_write(reason);
             debug_write("\n");
         }
