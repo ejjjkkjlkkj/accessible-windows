@@ -114,6 +114,10 @@ $configurations = @(
             'AW_SCHED_THREAD id=1 count=10'
             'AW_SCHED_THREAD id=2 count=10'
             'AW_SCHED_PROOF_OK threads=3 switches=29'
+            # Preemptive scheduling: three threads that never yield are still
+            # switched, driven only by timer interrupts, in exactly twelve
+            # timer-driven context switches.
+            'AW_PREEMPT_PROOF_OK threads=3 switches=12'
             # CPU protection bits actually latched.
             'AW_SECURITY_ENFORCED wp=1 nx=1'
             'AW_SECURITY_BASELINE_OK'
@@ -176,6 +180,7 @@ $configurations = @(
             'AW_RING3_FAIL'
             'AW_SWAPGS_FAIL'
             'AW_SCHED_FAIL'
+            'AW_PREEMPT_FAIL'
             'AW_CLOCK_FAIL'
             'AW_GDT_SEGMENTS_FAIL'
             'AW_PERCPU_BSP_FAIL'

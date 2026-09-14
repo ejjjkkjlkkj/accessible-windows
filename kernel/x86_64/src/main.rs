@@ -1440,6 +1440,11 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
 
         install_bootstrap_per_cpu();
         prove_apic_timer_delivery();
+        // The timer gate is installed and x2APIC is live; prove threads that never
+        // yield are still switched by that timer. Leaves the timer masked and
+        // interrupts disabled again, as the device-routing proof below expects.
+        // SAFETY: CPL0 on the bootstrap processor, right after the timer proof.
+        unsafe { scheduler::prove_preemptive() };
         prove_device_interrupt_routing(handoff);
         bring_up_secondary_processors(handoff);
         prove_per_cpu_state();

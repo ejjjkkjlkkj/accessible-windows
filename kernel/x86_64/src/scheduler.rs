@@ -6,14 +6,14 @@
 //! Several kernel threads each run on their own stack and hand control on with
 //! `yield_now`; the switch saves the current thread's callee-saved registers and
 //! stack pointer and restores the next thread's, so each resumes exactly where
-//! it left off. It is cooperative for now (threads yield); wiring the same
-//! switch into the timer interrupt makes it preemptive, which is the next step.
+//! it left off. The preemptive half - threads switched by the timer interrupt
+//! without yielding - is built on the same idea further down (`prove_preemptive`).
 //!
 //! It runs on the bootstrap processor with interrupts masked, so the shared
 //! state needs no lock; the counters are atomics only so the assembly switch and
 //! the Rust readers agree on memory.
 
-use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use crate::{debug_write, debug_write_u64};
 
@@ -172,6 +172,178 @@ pub fn prove() {
     } else {
         debug_write("AW_SCHED_FAIL total=");
         debug_write_u64(u64::from(total));
+        debug_write("\n");
+    }
+}
+
+// ---- Preemptive scheduling (dossier section 8, roadmap P0) -----------------
+//
+// The cooperative switch above proves threads can be interleaved when they yield.
+// Preemption proves the harder half: threads that never yield are switched anyway,
+// driven only by the timer interrupt. The same timer ISR that counts ticks calls
+// `aw_preempt_pick` after signalling EOI; when preemption is active it saves the
+// interrupted thread's full register frame (the ISR already pushed it) and returns
+// another thread's saved frame, so the interrupt returns into a different thread.
+//
+// A runtime flag gates all of it: with the flag clear, `aw_preempt_pick` returns
+// the frame it was handed, so every other proof that takes a timer interrupt runs
+// exactly as before.
+
+/// Kernel selectors, matching the GDT the bootstrap processor reloaded
+/// (AW_GDT_SEGMENTS_RELOADED cs=0x08 ss=0x10).
+const KERNEL_CODE_SELECTOR: u64 = 0x08;
+const KERNEL_DATA_SELECTOR: u64 = 0x10;
+
+const PREEMPT_THREADS: usize = 3;
+/// Timer-driven switches to perform before handing control back to the kernel.
+/// Twelve lets each of the three threads run several times in strict rotation.
+const PREEMPT_LIMIT: u32 = 12;
+
+static mut PREEMPT_STACKS: [Stack; PREEMPT_THREADS] =
+    [const { Stack([0; STACK_SIZE]) }; PREEMPT_THREADS];
+
+/// Whether the timer ISR should switch threads. False everywhere except inside
+/// the preemption proof, so no other interrupt path is affected.
+static PREEMPT_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Saved full-frame RSP per slot. Slot 0 is the kernel that started the run
+/// (saved when it is first preempted); slots 1..=PREEMPT_THREADS are the threads.
+static PREEMPT_RSP: [AtomicU64; PREEMPT_THREADS + 1] =
+    [const { AtomicU64::new(0) }; PREEMPT_THREADS + 1];
+static PREEMPT_CURRENT: AtomicUsize = AtomicUsize::new(0);
+static PREEMPT_SWITCHES: AtomicU32 = AtomicU32::new(0);
+static PREEMPT_COUNTS: [AtomicU64; PREEMPT_THREADS] =
+    [const { AtomicU64::new(0) }; PREEMPT_THREADS];
+
+/// Called by the timer ISR after EOI, with the interrupted context's full-frame
+/// RSP. Returns the RSP to resume on - the same one when preemption is inactive,
+/// another thread's saved frame when it is active.
+#[unsafe(no_mangle)]
+extern "C" fn aw_preempt_pick(current_rsp: u64) -> u64 {
+    if !PREEMPT_ACTIVE.load(Ordering::Acquire) {
+        return current_rsp;
+    }
+    let current = PREEMPT_CURRENT.load(Ordering::Relaxed);
+    PREEMPT_RSP[current].store(current_rsp, Ordering::Relaxed);
+
+    let switches = PREEMPT_SWITCHES.fetch_add(1, Ordering::Relaxed) + 1;
+    let next = if switches >= PREEMPT_LIMIT {
+        // Enough preemptions: stop switching and return to the kernel (slot 0).
+        PREEMPT_ACTIVE.store(false, Ordering::Release);
+        0
+    } else {
+        1 + (switches as usize - 1) % PREEMPT_THREADS
+    };
+    PREEMPT_CURRENT.store(next, Ordering::Relaxed);
+    PREEMPT_RSP[next].load(Ordering::Relaxed)
+}
+
+/// Lay out a thread's initial stack as if it had just been interrupted, so the
+/// timer ISR's own `pop`/`iretq` epilogue starts it at `entry` with interrupts
+/// enabled. The layout mirrors the ISR prologue exactly: fifteen general-purpose
+/// registers, then the CPU's interrupt frame (rip, cs, rflags, rsp, ss).
+fn init_preempt_thread(index: usize, entry: extern "C" fn() -> !) {
+    // SAFETY: index < PREEMPT_THREADS; this addresses that thread's own stack.
+    let top = unsafe {
+        let base = core::ptr::addr_of_mut!(PREEMPT_STACKS)
+            .cast::<Stack>()
+            .add(index) as u64;
+        (base + STACK_SIZE as u64) & !0xf_u64
+    };
+    // 15 saved GP registers + 5 interrupt-frame slots = 20 qwords.
+    let frame = top - 20 * 8;
+    let slots = frame as *mut u64;
+    // SAFETY: [frame, top) is inside this thread's stack.
+    unsafe {
+        for offset in 0..15 {
+            slots.add(offset).write(0); // r15..rax, all zero
+        }
+        slots.add(15).write(entry as usize as u64); // rip
+        slots.add(16).write(KERNEL_CODE_SELECTOR); // cs
+        slots.add(17).write(0x202); // rflags: IF set, reserved bit 1
+        slots.add(18).write(frame); // rsp the thread runs on after iretq
+        slots.add(19).write(KERNEL_DATA_SELECTOR); // ss
+    }
+    PREEMPT_RSP[index + 1].store(frame, Ordering::Relaxed);
+}
+
+fn preempt_thread(id: usize) -> ! {
+    loop {
+        PREEMPT_COUNTS[id].fetch_add(1, Ordering::Relaxed);
+        core::hint::spin_loop();
+    }
+}
+
+extern "C" fn preempt_thread0() -> ! {
+    preempt_thread(0)
+}
+extern "C" fn preempt_thread1() -> ! {
+    preempt_thread(1)
+}
+extern "C" fn preempt_thread2() -> ! {
+    preempt_thread(2)
+}
+
+/// Prove preemptive multitasking: three threads that never yield are still
+/// interleaved, driven only by timer interrupts.
+///
+/// # Safety
+/// CPL0 on the bootstrap processor, after the APIC timer gate is installed and
+/// x2APIC is enabled. The timer is left masked with interrupts disabled on
+/// return, whatever the outcome.
+pub unsafe fn prove_preemptive() {
+    debug_write("AW_PREEMPT_BEGIN\n");
+
+    init_preempt_thread(0, preempt_thread0);
+    init_preempt_thread(1, preempt_thread1);
+    init_preempt_thread(2, preempt_thread2);
+    PREEMPT_CURRENT.store(0, Ordering::Relaxed);
+    PREEMPT_SWITCHES.store(0, Ordering::Relaxed);
+    for count in &PREEMPT_COUNTS {
+        count.store(0, Ordering::Relaxed);
+    }
+
+    PREEMPT_ACTIVE.store(true, Ordering::Release);
+    // SAFETY: CPL0; unmask the timer and enable interrupts so the ISR preempts
+    // this loop into the thread set. Once PREEMPT_LIMIT switches have happened the
+    // ISR returns here with the flag cleared and the loop falls through.
+    unsafe {
+        crate::apic_timer::set_timer_masked(false);
+        core::arch::asm!("sti", options(nomem, nostack, preserves_flags));
+    }
+    while PREEMPT_ACTIVE.load(Ordering::Acquire) {
+        core::hint::spin_loop();
+    }
+    // SAFETY: CPL0; restore the masked-timer, interrupts-disabled state the
+    // downstream bring-up expects.
+    unsafe {
+        core::arch::asm!("cli", options(nomem, nostack, preserves_flags));
+        crate::apic_timer::set_timer_masked(true);
+    }
+
+    let switches = PREEMPT_SWITCHES.load(Ordering::Relaxed);
+    let mut all_ran = true;
+    for (id, count_slot) in PREEMPT_COUNTS.iter().enumerate() {
+        let count = count_slot.load(Ordering::Relaxed);
+        debug_write("AW_PREEMPT_THREAD id=");
+        debug_write_u64(id as u64);
+        debug_write(" count=");
+        debug_write_u64(count);
+        debug_write("\n");
+        if count == 0 {
+            all_ran = false;
+        }
+    }
+
+    // Each thread advanced without ever yielding, and control came back after
+    // exactly PREEMPT_LIMIT timer-driven switches: the switching was the timer's
+    // doing, not the threads'.
+    if all_ran && switches == PREEMPT_LIMIT {
+        debug_write("AW_PREEMPT_PROOF_OK threads=3 switches=");
+        debug_write_u64(u64::from(switches));
+        debug_write("\n");
+    } else {
+        debug_write("AW_PREEMPT_FAIL switches=");
+        debug_write_u64(u64::from(switches));
         debug_write("\n");
     }
 }

@@ -64,7 +64,14 @@ aw_apic_timer_isr:
     # System V x86_64 requires RSP 16-byte aligned before CALL.
     and rsp, -16
     call aw_apic_timer_dispatch
-    mov rsp, rbx
+
+    # Preemption point: hand the saved full-frame RSP to the scheduler and resume
+    # on whatever frame it returns. With preemption inactive it returns this same
+    # RSP, so the path is byte-for-byte the old behaviour; when active it returns
+    # another thread's saved frame and this timer interrupt returns into it.
+    mov rdi, rbx
+    call aw_preempt_pick
+    mov rsp, rax
 
     pop r15
     pop r14

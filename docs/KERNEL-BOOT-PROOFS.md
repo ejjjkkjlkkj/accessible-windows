@@ -90,7 +90,7 @@ kernel ELF for symbol-level triage.
 | Validated user-pointer copy | PASS | `AW_SYSCALL_WRITE copied=13`; `SYS_WRITE` bounds-checks the user pointer and copies it in with SMAP `stac`/`clac` |
 | Cooperative scheduler / threads | PASS | `AW_SCHED_PROOF_OK threads=3 switches=29`; three kernel threads context switch and take ten turns each |
 | Monotonic TSC clock | PASS | `AW_CLOCK_PROOF_OK`; TSC monotonic, frequency calibrated against a PIT channel-2 one-shot |
-| Preemptive scheduling | TO BUILD | cooperative for now; wiring the switch into the timer interrupt makes it preemptive |
+| Preemptive scheduling | PASS | `AW_PREEMPT_PROOF_OK threads=3 switches=12`; three kernel threads that never yield are switched by the timer interrupt alone (each advances a counter), in exactly twelve timer-driven context switches, and the timer proof either side still passes |
 | Ring 3 preemption / user scheduler | TO BUILD | one-shot proof: the handler returns to the kernel, it does not schedule user threads |
 | User-page `swapgs` on entry | PASS | `AW_SWAPGS_PROOF_OK`; CPL3 runs on a distinct user `GS` base, and the syscall entry's `swapgs` makes `gs:[0]` reach this CPU's real per-CPU block (null if the swap were missing) |
 | Physical hardware boot | TO PROVE | never run on real hardware from this tree |
