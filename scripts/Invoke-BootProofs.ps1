@@ -196,6 +196,13 @@ $configurations = @(
         Name     = 'smp'
         Features = @()
         QemuArgs = @('-smp', '4')
+        # Four vCPUs under TCG, plus each application processor accumulating real
+        # Local APIC timer ticks and the PIT/TSC calibration, do not reach
+        # AW_NATIVE_KERNEL_IDLE inside the default budget: measured to need well
+        # over the 90 s the fast paths use, so it is given room under the 300 s cap
+        # Invoke-KernelBoot enforces. Raising this weakens no assertion - every
+        # required marker below must still appear.
+        TimeoutSeconds = 240
         Required = @(
             'AW_SMP_CPUS described=4 bsp_apic_id=0'
             'AW_SMP_AP_ONLINE cpu=1 apic_id=1 requested=1 tr=0x0000000000000018'
@@ -357,8 +364,19 @@ foreach ($configuration in $configurations) {
     if ($configuration.ContainsKey('QemuArgs')) { $qemuArgs = $configuration.QemuArgs }
     $serial = 'none'
     if ($configuration.ContainsKey('Serial')) { $serial = $configuration.Serial }
+    # The guest halts forever once it reaches AW_NATIVE_KERNEL_IDLE, so every run
+    # burns its whole timeout before QEMU is killed and the log is read: the
+    # timeout is therefore a *budget for the markers to appear*, not a deadline
+    # the guest races to beat. Most configs reach idle well inside the default,
+    # but a config may set its own larger budget when it legitimately needs one
+    # (SMP brings up four vCPUs and lets each application processor accumulate
+    # real timer ticks under TCG, which does not fit the default).
+    $cfgTimeout = $TimeoutSeconds
+    if ($configuration.ContainsKey('TimeoutSeconds')) {
+        $cfgTimeout = [math]::Max($TimeoutSeconds, [int]$configuration.TimeoutSeconds)
+    }
     $result = & $boot -Name $configuration.Name -Features $configuration.Features `
-        -QemuArgs $qemuArgs -Serial $serial -Qemu $Qemu -TimeoutSeconds $TimeoutSeconds
+        -QemuArgs $qemuArgs -Serial $serial -Qemu $Qemu -TimeoutSeconds $cfgTimeout
 
     $missing = @($configuration.Required | Where-Object { -not $result.Text.Contains($_) })
     $present = @($configuration.Forbidden | Where-Object { $result.Text.Contains($_) })
