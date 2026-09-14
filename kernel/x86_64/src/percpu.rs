@@ -33,6 +33,10 @@ pub struct PerCpu {
     timer_ticks: AtomicU64,
     /// Interrupts this CPU has taken from an I/O APIC routed device.
     device_ticks: AtomicU64,
+    /// This CPU's IST1 (#DF stack) bounds, so a fault handler can check the
+    /// frame landed on *this* CPU's emergency stack. Zero until set.
+    ist1_start: AtomicU64,
+    ist1_top: AtomicU64,
 }
 
 impl PerCpu {
@@ -43,6 +47,8 @@ impl PerCpu {
             apic_id: AtomicU32::new(u32::MAX),
             timer_ticks: AtomicU64::new(0),
             device_ticks: AtomicU64::new(0),
+            ist1_start: AtomicU64::new(0),
+            ist1_top: AtomicU64::new(0),
         }
     }
 
@@ -68,6 +74,24 @@ impl PerCpu {
     #[must_use]
     pub fn device_ticks(&self) -> u64 {
         self.device_ticks.load(Ordering::Acquire)
+    }
+
+    /// This CPU's IST1 (#DF stack) bounds `[start, top)`, or [`None`] if unset.
+    #[must_use]
+    pub fn ist1_bounds(&self) -> Option<(u64, u64)> {
+        let start = self.ist1_start.load(Ordering::Acquire);
+        let top = self.ist1_top.load(Ordering::Acquire);
+        if start == 0 || top == 0 {
+            return None;
+        }
+        Some((start, top))
+    }
+
+    /// Record this CPU's IST1 bounds so its own fault handler can range-check the
+    /// frame. Written once, by this CPU, during bring-up.
+    pub fn set_ist1_bounds(&self, start: u64, top: u64) {
+        self.ist1_start.store(start, Ordering::Release);
+        self.ist1_top.store(top, Ordering::Release);
     }
 }
 

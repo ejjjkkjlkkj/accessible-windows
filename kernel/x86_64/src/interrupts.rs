@@ -49,7 +49,7 @@ const EXCEPTION_IDT_ENTRY_COUNT: usize = 32;
 /// available for external/software interrupts.
 const IDT_ENTRY_COUNT: usize = aw_x86_interrupts::IDT_ENTRY_COUNT;
 const DOUBLE_FAULT_VECTOR: usize = 8;
-#[cfg(feature = "double-fault-smoke-test")]
+#[cfg(any(feature = "double-fault-smoke-test", feature = "ap-double-fault-smoke-test"))]
 const GENERAL_PROTECTION_VECTOR: usize = 13;
 const DOUBLE_FAULT_IST_INDEX: u8 = 1;
 const DOUBLE_FAULT_IST_STACK_SIZE: usize = 16 * 1024;
@@ -189,6 +189,7 @@ pub(crate) struct ApTables {
     pub task_register: u16,
     pub gdt_base: u64,
     pub tss_base: u64,
+    pub ist1_start: u64,
     pub ist1_top: u64,
 }
 
@@ -292,6 +293,7 @@ pub(crate) unsafe fn install_for_ap(cpu: usize) -> Option<ApTables> {
         task_register,
         gdt_base: gdt as u64,
         tss_base: tss as u64,
+        ist1_start: stack_start,
         ist1_top,
     })
 }
@@ -637,11 +639,26 @@ fn debug_exception_name(vector: u8) {
     debug_write(aw_x86_interrupts::exception_name(vector));
 }
 
-fn double_fault_ist_bounds() -> (u64, u64) {
+/// The bootstrap processor's own #DF IST bounds `[start, top)`.
+pub(crate) fn bootstrap_ist1_bounds() -> (u64, u64) {
     // SAFETY: only the address of the field is taken, never its contents.
     let start = unsafe { core::ptr::addr_of!((*core::ptr::addr_of!(DOUBLE_FAULT_IST_STACK)).stack) }
         as *const u8 as u64;
     (start, start + DOUBLE_FAULT_IST_STACK_SIZE as u64)
+}
+
+/// The #DF IST bounds to check a fault frame against: this CPU's own, taken from
+/// its per-CPU block when one is installed (an application processor, or the
+/// bootstrap processor once it has one), and the bootstrap static otherwise - so
+/// the early bootstrap double-fault smoke, which runs before any per-CPU block
+/// exists, still checks the right stack.
+fn double_fault_ist_bounds() -> (u64, u64) {
+    if let Some(block) = crate::percpu::current()
+        && let Some(bounds) = block.ist1_bounds()
+    {
+        return bounds;
+    }
+    bootstrap_ist1_bounds()
 }
 
 extern "sysv64" fn handle_exception(frame: *mut ExceptionFrame) {
@@ -990,7 +1007,7 @@ pub(crate) unsafe fn install_interrupt_gate(
 /// # Safety
 ///
 /// Only call in the dedicated smoke-test build after `install()`.
-#[cfg(feature = "double-fault-smoke-test")]
+#[cfg(any(feature = "double-fault-smoke-test", feature = "ap-double-fault-smoke-test"))]
 pub(crate) unsafe fn trigger_double_fault_smoke() -> ! {
     let tss_selector = match SegmentSelector::new(TSS_SELECTOR_INDEX, PrivilegeLevel::Ring0) {
         Some(value) => value,

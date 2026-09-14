@@ -665,6 +665,13 @@ fn install_bootstrap_per_cpu() {
 
     // SAFETY: CPL0, run once for the bootstrap processor's slot 0.
     if unsafe { percpu::install(0, apic_id) } {
+        // Record the bootstrap processor's own #DF IST bounds in its per-CPU block
+        // so its fault handler range-checks the same stack whether or not a block
+        // is installed.
+        if let Some(block) = percpu::by_index(0) {
+            let (start, top) = interrupts::bootstrap_ist1_bounds();
+            block.set_ist1_bounds(start, top);
+        }
         debug_write("AW_PERCPU_BSP_OK cpu=0 apic_id=");
         debug_write_u64(u64::from(apic_id));
         debug_write("\n");

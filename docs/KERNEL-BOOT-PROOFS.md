@@ -83,7 +83,7 @@ kernel ELF for symbol-level triage.
 | Per-CPU state via `GS` | PASS | `AW_PERCPU_PROOF_OK cpus=4` (`smp`); each CPU's block reached through `gs:[0]`, index/APIC id distinct per CPU |
 | Per-CPU interrupt counters | PASS | `AW_PERCPU_BSP ... timer_ticks>=8 device_ticks>=8`, counted into the block of the CPU that ran the ISR |
 | Per-CPU timer armed on an AP | PASS | `AW_PERCPU_AP_TIMER_OK aps=3` (`smp`); each AP arms its own Local APIC timer, idles under `sti`/`hlt`, and its own block's `timer_ticks` advances |
-| Per-CPU #DF on an AP's IST | TO PROVE | only the bootstrap processor's IST is proved by a real fault |
+| Per-CPU #DF on an AP's IST | PASS | `AW_DOUBLE_FAULT_IST_OK` (`ap-double-fault-smoke`); an application processor forces a real #DF and the fault frame lands inside *that CPU's own* IST1 range, range-checked against the per-CPU block's bounds (not the bootstrap processor's) |
 | Scheduler / anything running on an AP | TO BUILD | APs park in `hlt` |
 | Ring 3 entry (`iretq` to CPL3) | PASS | `AW_RING3_PROOF_OK`; a mapped user page runs at CPL3, its syscall's saved RIP lands inside the user page |
 | Versioned syscall ABI (`sysret`) | PASS | `AW_SYSCALL_ABI_PROOF_OK version=1`; dispatch table, `SYS_ADD`=5, `SYS_EXIT`, each returning via `sysret` |

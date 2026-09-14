@@ -207,6 +207,26 @@ extern "C" fn ap_rust_entry() -> ! {
     // SAFETY: CPL0 on this AP, run once, on its own unique slot below MAX_CPUS.
     let _ = unsafe { crate::percpu::install(cpu, apic_id) };
 
+    // Record this AP's own IST1 bounds so its #DF handler can confirm a fault
+    // lands on its own emergency stack rather than another CPU's.
+    if let Some(t) = tables.as_ref()
+        && let Some(block) = crate::percpu::by_index(cpu)
+    {
+        block.set_ist1_bounds(t.ist1_start, t.ist1_top);
+    }
+
+    // Dedicated build only: one application processor deliberately double-faults,
+    // before it reports online, to prove the #DF resolves on *its own* per-CPU
+    // IST1 (dossier section 5.3). It never returns, so bring-up sees it stay
+    // offline - which the ap-double-fault-smoke configuration expects.
+    #[cfg(feature = "ap-double-fault-smoke-test")]
+    if cpu == 1 {
+        crate::debug_write("AW_AP_DOUBLE_FAULT_SMOKE cpu=1\n");
+        // SAFETY: this AP has installed its own GDT/TSS/IST1 and per-CPU block, so
+        // the forced #DF resolves on its own IST1.
+        unsafe { crate::interrupts::trigger_double_fault_smoke() }
+    }
+
     if let Some(ApTables {
         task_register,
         gdt_base,

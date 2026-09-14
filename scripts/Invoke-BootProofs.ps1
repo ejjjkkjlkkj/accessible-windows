@@ -394,6 +394,27 @@ $configurations = @(
         )
         Forbidden = @('AW_DOUBLE_FAULT_IST_FAIL', 'AW_NATIVE_KERNEL_PANIC')
     }
+    @{
+        # One application processor deliberately double-faults, to prove the #DF
+        # resolves on that CPU's own per-CPU IST1 rather than the bootstrap
+        # processor's. The handler range-checks the frame against the current CPU's
+        # IST bounds (read from its per-CPU block), so AW_DOUBLE_FAULT_IST_OK here
+        # means the AP faulted onto its own stack. The AP faults before reporting
+        # online, so bring-up records it offline and the per-CPU timer proof skips
+        # it - hence AW_SMP_AP_NOT_ONLINE and AW_NATIVE_EXCEPTION are expected and
+        # not forbidden. The bootstrap processor still reaches idle.
+        Name     = 'ap-double-fault-smoke'
+        Features = @('ap-double-fault-smoke-test')
+        QemuArgs = @('-smp', '2')
+        TimeoutSeconds = 180
+        Required = @(
+            'AW_AP_DOUBLE_FAULT_SMOKE cpu=1'
+            'AW_NATIVE_EXCEPTION vector=8 name=double-fault'
+            'AW_DOUBLE_FAULT_IST_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @('AW_DOUBLE_FAULT_IST_FAIL', 'AW_NATIVE_KERNEL_PANIC')
+    }
 )
 
 $failures = @()
