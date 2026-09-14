@@ -25,8 +25,10 @@ use aw_x86_paging::PageTableFlags;
 
 use crate::interrupts::{USER_CODE_SELECTOR_RAW, USER_DATA_SELECTOR_RAW};
 use crate::local_apic::{rdmsr, wrmsr};
+use crate::virtio_blk::BlkDevice;
 use crate::{
-    debug_write, debug_write_hex_u64, debug_write_u64, frame_allocator, interrupts, page_mapper,
+    debug_write, debug_write_hex_u64, debug_write_u64, fat16, frame_allocator, interrupts,
+    page_mapper,
 };
 
 const IA32_EFER: u32 = 0xc000_0080;
@@ -46,6 +48,9 @@ const USER_PAGE_END: u64 = USER_CODE_VA + 0x1000;
 const SYS_VERSION: u64 = 0;
 const SYS_ADD: u64 = 1;
 const SYS_WRITE: u64 = 2;
+/// Report a scalar back to the kernel, no pointer involved: how a loaded userland
+/// program signals it ran, for the loader proof.
+const SYS_REPORT: u64 = 3;
 const SYS_EXIT: u64 = 0xff;
 const ABI_VERSION: u64 = 1;
 
@@ -114,6 +119,11 @@ static mut KERNEL_GS_AREA: GsArea = GsArea([KERNEL_GS_MAGIC, 0, 0, 0, 0, 0, 0, 0
 static mut USER_GS_AREA: GsArea = GsArea([0; 8]);
 /// The value the syscall handler read from `gs:[0]` after `swapgs`.
 static OBSERVED_KERNEL_GS: AtomicU64 = AtomicU64::new(0);
+
+// The value a loaded userland program reported through SYS_REPORT, for the loader
+// proof.
+static REPORTED_VALUE: AtomicU64 = AtomicU64::new(0);
+static REPORTED_SEEN: AtomicBool = AtomicBool::new(false);
 
 // Results captured for the proof.
 static ADD_RESULT: AtomicU64 = AtomicU64::new(0);
@@ -261,6 +271,11 @@ extern "C" fn aw_syscall_dispatch(number: u64, arg0: u64, arg1: u64) -> u64 {
             let copied = unsafe { copy_from_user(arg0, len) };
             WRITE_COPIED.store(copied as u64, Ordering::Relaxed);
             copied as u64
+        }
+        SYS_REPORT => {
+            REPORTED_VALUE.store(arg0, Ordering::Relaxed);
+            REPORTED_SEEN.store(true, Ordering::Relaxed);
+            arg0
         }
         SYS_EXIT => {
             SYSCALL_EXIT.store(1, Ordering::Relaxed);
@@ -531,4 +546,186 @@ pub unsafe fn prove_ring3_preemption() {
     } else {
         debug_write("AW_RING3_PREEMPT_FAIL reason=not_preempted\n");
     }
+}
+
+// ---- Userland ELF loader (dossier section 12, roadmap P0 step 7) ------------
+//
+// Ring 3 and the syscall ABI proved the privilege boundary with a hand-placed
+// routine; FAT16 proved a real file read. This joins them: it reads an ELF from
+// the disk, maps its PT_LOAD segments as user pages, and runs it at CPL3. The
+// loaded program reports a known value through SYS_REPORT and exits; control
+// returning to the kernel with that value proves the program on disk actually ran.
+
+/// 8.3 directory name of the userland program on the FAT16 disk.
+const USER_PROGRAM_NAME: &[u8; 11] = b"USERPROGELF";
+/// The value the loaded program reports, so the proof knows it was that program.
+const EXPECTED_REPORT: u64 = 0xc0de;
+/// User stack for the loaded program, above the identity map and other user VAs.
+const LOADER_STACK_VA: u64 = 0x4_1000_0000;
+const LOADER_STACK_TOP: u64 = LOADER_STACK_VA + 0x1000;
+
+fn elf_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?))
+}
+fn elf_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?))
+}
+fn elf_u64(bytes: &[u8], offset: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(bytes.get(offset..offset + 8)?.try_into().ok()?))
+}
+
+/// Map one PT_LOAD segment: a frame per page, the file bytes copied in through the
+/// frame's identity address and the tail zeroed, mapped at `p_vaddr` with user
+/// access and the segment's execute/write permission.
+fn map_segment(
+    image: &[u8],
+    p_offset: u64,
+    p_vaddr: u64,
+    p_filesz: u64,
+    p_memsz: u64,
+    exec: bool,
+    write: bool,
+) -> bool {
+    if p_vaddr & 0xfff != 0 {
+        return false; // this minimal loader only maps page-aligned segments
+    }
+    let mut flags = PageTableFlags::USER_ACCESSIBLE;
+    if write {
+        flags = flags.union(PageTableFlags::WRITABLE);
+    }
+    if !exec {
+        flags = flags.union(PageTableFlags::NO_EXECUTE);
+    }
+    let pages = (p_memsz as usize).div_ceil(4096);
+    for page in 0..pages {
+        let Some(frame) = frame_allocator::allocate() else {
+            return false;
+        };
+        // SAFETY: the frame's identity address is kernel-writable; fill the page.
+        unsafe {
+            let dst = frame as *mut u8;
+            for i in 0..4096usize {
+                let in_segment = page * 4096 + i;
+                let byte = if in_segment < p_filesz as usize {
+                    *image.get(p_offset as usize + in_segment).unwrap_or(&0)
+                } else {
+                    0
+                };
+                dst.add(i).write(byte);
+            }
+        }
+        // SAFETY: a fresh high user VA, backed by the frame just allocated.
+        if unsafe { page_mapper::map_page(p_vaddr + (page as u64) * 4096, frame, flags) }.is_err() {
+            return false;
+        }
+    }
+    true
+}
+
+/// Load a userland ELF from the FAT16 disk and run it at CPL3.
+///
+/// # Safety
+/// CPL0 on the bootstrap processor, after paging, the heap and the first Ring 3
+/// proof are up, with the virtio-block device brought up. Interrupts masked.
+pub unsafe fn prove_user_loader(device: &BlkDevice) {
+    debug_write("AW_USER_LOADER_BEGIN\n");
+    let Some(image) = fat16::load_file(device, USER_PROGRAM_NAME) else {
+        debug_write("AW_USER_LOADER_UNAVAILABLE reason=no_file\n");
+        return;
+    };
+
+    let magic_ok =
+        image.len() >= 64 && &image[0..4] == b"\x7fELF" && image[4] == 2 && image[5] == 1;
+    if !magic_ok || elf_u16(&image, 18) != Some(0x3e) {
+        debug_write("AW_USER_LOADER_FAIL reason=bad_elf\n");
+        return;
+    }
+    let entry = elf_u64(&image, 24).unwrap_or(0);
+    let phoff = elf_u64(&image, 32).unwrap_or(0) as usize;
+    let phentsize = elf_u16(&image, 54).unwrap_or(0) as usize;
+    let phnum = elf_u16(&image, 56).unwrap_or(0) as usize;
+    if phentsize < 56 || phnum == 0 {
+        debug_write("AW_USER_LOADER_FAIL reason=no_phdr\n");
+        return;
+    }
+
+    let mut loaded = 0;
+    for i in 0..phnum {
+        let ph = phoff + i * phentsize;
+        if elf_u32(&image, ph) != Some(1) {
+            continue; // PT_LOAD only
+        }
+        let p_flags = elf_u32(&image, ph + 4).unwrap_or(0);
+        let p_offset = elf_u64(&image, ph + 8).unwrap_or(0);
+        let p_vaddr = elf_u64(&image, ph + 16).unwrap_or(0);
+        let p_filesz = elf_u64(&image, ph + 32).unwrap_or(0);
+        let p_memsz = elf_u64(&image, ph + 40).unwrap_or(0);
+        if !map_segment(
+            &image,
+            p_offset,
+            p_vaddr,
+            p_filesz,
+            p_memsz,
+            p_flags & 1 != 0,
+            p_flags & 2 != 0,
+        ) {
+            debug_write("AW_USER_LOADER_FAIL reason=map_segment\n");
+            return;
+        }
+        loaded += 1;
+    }
+    if loaded == 0 {
+        debug_write("AW_USER_LOADER_FAIL reason=no_load_segment\n");
+        return;
+    }
+
+    let Some(stack_frame) = frame_allocator::allocate() else {
+        debug_write("AW_USER_LOADER_FAIL reason=no_stack\n");
+        return;
+    };
+    let stack_flags = PageTableFlags::USER_ACCESSIBLE
+        .union(PageTableFlags::WRITABLE)
+        .union(PageTableFlags::NO_EXECUTE);
+    // SAFETY: CPL0; the stack VA is unused and the frame was just allocated.
+    if unsafe { page_mapper::map_page(LOADER_STACK_VA, stack_frame, stack_flags) }.is_err() {
+        debug_write("AW_USER_LOADER_FAIL reason=map_stack\n");
+        return;
+    }
+
+    debug_write("AW_USER_LOADER_MAP_OK entry=");
+    debug_write_hex_u64(entry);
+    debug_write(" segments=");
+    debug_write_u64(loaded as u64);
+    debug_write("\n");
+
+    REPORTED_SEEN.store(false, Ordering::Relaxed);
+    SYSCALL_EXIT.store(0, Ordering::Relaxed);
+    let kernel_gs = crate::percpu::by_index(0)
+        .map(|block| core::ptr::from_ref(block) as u64)
+        .unwrap_or(0);
+    // SAFETY: CPL0; set rsp0, the syscall MSRs and the kernel GS shadow before CPL3.
+    unsafe {
+        interrupts::set_bootstrap_rsp0(ring0_stack_top());
+        KERNEL_SYSCALL_RSP.store(ring0_stack_top(), Ordering::Relaxed);
+        enable_syscall();
+        wrmsr(IA32_KERNEL_GS_BASE, kernel_gs);
+    }
+    // SAFETY: user pages mapped, MSRs and rsp0 set, interrupts masked.
+    unsafe { aw_enter_ring3(entry, LOADER_STACK_TOP) };
+
+    let seen = REPORTED_SEEN.load(Ordering::Relaxed);
+    let value = REPORTED_VALUE.load(Ordering::Relaxed);
+    debug_write("AW_USER_LOADER_REPORT seen=");
+    debug_write_u64(u64::from(seen));
+    debug_write(" value=");
+    debug_write_hex_u64(value);
+    debug_write("\n");
+    if seen && value == EXPECTED_REPORT {
+        debug_write("AW_USER_LOADER_PROOF_OK\n");
+    } else {
+        debug_write("AW_USER_LOADER_FAIL reason=no_report\n");
+    }
+
+    // SAFETY: CPL0; clear the GS shadow now the program has exited.
+    unsafe { wrmsr(IA32_KERNEL_GS_BASE, 0) };
 }

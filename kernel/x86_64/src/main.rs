@@ -1466,6 +1466,10 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
             Some(device) => {
                 virtio_blk::prove(&device);
                 fat16::prove(&device);
+                // Load a userland ELF off that same filesystem and run it at CPL3.
+                // SAFETY: CPL0; paging, heap and the first Ring 3 proof are up, and
+                // the device was just brought up.
+                unsafe { ring3::prove_user_loader(&device) };
             }
             None => debug_write("AW_VIRTIO_BLK_UNAVAILABLE reason=no_device\n"),
         }

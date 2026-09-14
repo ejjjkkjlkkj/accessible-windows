@@ -70,8 +70,12 @@ fn parse_geometry(boot: &[u8; SECTOR_SIZE]) -> Option<Geometry> {
     })
 }
 
-/// Scan the root directory for `TARGET_NAME`, returning (first cluster, size).
-fn find_file(device: &BlkDevice, geometry: &Geometry) -> Result<Option<(u32, u32)>, &'static str> {
+/// Scan the root directory for the 8.3 `name`, returning (first cluster, size).
+fn find_file(
+    device: &BlkDevice,
+    geometry: &Geometry,
+    name: &[u8; 11],
+) -> Result<Option<(u32, u32)>, &'static str> {
     let mut sector = [0u8; SECTOR_SIZE];
     for index in 0..geometry.root_sectors {
         device
@@ -84,7 +88,7 @@ fn find_file(device: &BlkDevice, geometry: &Geometry) -> Result<Option<(u32, u32
                 0x00 => return Ok(None), // no further entries
                 0xe5 => {}               // deleted
                 _ if entry[11] == 0x0f => {} // long-name entry
-                _ if slices_equal(&entry[0..11], TARGET_NAME) => {
+                _ if slices_equal(&entry[0..11], name) => {
                     let first_cluster =
                         u32::from(read_u16(entry, 0x1a)) | (u32::from(read_u16(entry, 0x14)) << 16);
                     let size = read_u32(entry, 0x1c);
@@ -137,6 +141,17 @@ fn read_file(
     Ok(contents)
 }
 
+/// Read a whole file named by its 8.3 directory name (e.g. `b"USERPROGELF"`),
+/// returning its bytes, or [`None`] if the volume cannot be parsed or the file is
+/// absent. The reusable entry point behind [`prove`], used by the userland loader.
+pub fn load_file(device: &BlkDevice, name: &[u8; 11]) -> Option<Vec<u8>> {
+    let mut boot = [0u8; SECTOR_SIZE];
+    device.read_sector(0, &mut boot).ok()?;
+    let geometry = parse_geometry(&boot)?;
+    let (first_cluster, size) = find_file(device, &geometry, name).ok()??;
+    read_file(device, &geometry, first_cluster, size).ok()
+}
+
 /// Prove a file read from a FAT16 filesystem on the virtio disk.
 pub fn prove(device: &BlkDevice) {
     debug_write("AW_FS_BEGIN\n");
@@ -151,7 +166,7 @@ pub fn prove(device: &BlkDevice) {
         return;
     };
 
-    let file = match find_file(device, &geometry) {
+    let file = match find_file(device, &geometry, TARGET_NAME) {
         Ok(Some(file)) => file,
         Ok(None) => {
             debug_write("AW_FS_FAIL reason=not_found\n");

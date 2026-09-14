@@ -36,6 +36,10 @@ New-Item -ItemType Directory -Path $fatStage -Force | Out-Null
     (Join-Path $fatStage 'HELLO.TXT'),
     [System.Text.Encoding]::ASCII.GetBytes("ACCESSIBLE-WINDOWS-FS-OK`n"))
 $python = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction Stop)
+# A hand-built userland ELF (USERPROG.ELF -> 8.3 "USERPROGELF"), for the loader
+# proof: the kernel reads it off this same disk and runs it at CPL3.
+& $python.Source (Join-Path $PSScriptRoot 'make-user-elf.py') (Join-Path $fatStage 'USERPROG.ELF')
+if ($LASTEXITCODE -ne 0) { throw 'building the userland test ELF failed' }
 & $python.Source (Join-Path $PSScriptRoot 'build_bootable_image.py') '--fat-only' $vblkDisk $fatStage
 if ($LASTEXITCODE -ne 0) { throw 'building the FAT16 test disk failed' }
 
@@ -314,12 +318,18 @@ $configurations = @(
             'AW_FS_FILE_FOUND size=25'
             'AW_FS_READ_OK'
             'AW_FS_PROOF_OK'
+            # A userland ELF read off that same filesystem, its PT_LOAD segment
+            # mapped and run at CPL3: it reports 0xC0DE through SYS_REPORT and exits.
+            'AW_USER_LOADER_MAP_OK entry='
+            'AW_USER_LOADER_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
             'AW_VIRTIO_BLK_FAIL'
             'AW_VIRTIO_BLK_UNAVAILABLE'
             'AW_FS_FAIL'
+            'AW_USER_LOADER_FAIL'
+            'AW_USER_LOADER_UNAVAILABLE'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )
