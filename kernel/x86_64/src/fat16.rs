@@ -15,6 +15,25 @@ use alloc::vec::Vec;
 use crate::virtio_blk::{BlkDevice, SECTOR_SIZE};
 use crate::{debug_write, debug_write_u64};
 
+/// A source of 512-byte sectors, so the FAT reader works on any block device: a
+/// whole disk (`base_lba` 0) or a partition at some LBA offset. Both the virtio
+/// block device and an AHCI port expose exactly this.
+pub trait SectorSource {
+    fn read_sector(&self, lba: u64, out: &mut [u8; SECTOR_SIZE]) -> Result<(), &'static str>;
+}
+
+impl SectorSource for BlkDevice {
+    fn read_sector(&self, lba: u64, out: &mut [u8; SECTOR_SIZE]) -> Result<(), &'static str> {
+        BlkDevice::read_sector(self, lba, out)
+    }
+}
+
+impl SectorSource for crate::ahci::AhciPort {
+    fn read_sector(&self, lba: u64, out: &mut [u8; SECTOR_SIZE]) -> Result<(), &'static str> {
+        crate::ahci::AhciPort::read_sector(self, lba, out)
+    }
+}
+
 /// The file the test disk carries, as an 8.3 directory name and its contents.
 const TARGET_NAME: &[u8; 11] = b"HELLO   TXT";
 const EXPECTED: &[u8] = b"ACCESSIBLE-WINDOWS-FS-OK\n";
@@ -71,15 +90,16 @@ fn parse_geometry(boot: &[u8; SECTOR_SIZE]) -> Option<Geometry> {
 }
 
 /// Scan the root directory for the 8.3 `name`, returning (first cluster, size).
-fn find_file(
-    device: &BlkDevice,
+fn find_file<S: SectorSource>(
+    source: &S,
+    base_lba: u64,
     geometry: &Geometry,
     name: &[u8; 11],
 ) -> Result<Option<(u32, u32)>, &'static str> {
     let mut sector = [0u8; SECTOR_SIZE];
     for index in 0..geometry.root_sectors {
-        device
-            .read_sector((geometry.root_start + index) as u64, &mut sector)
+        source
+            .read_sector(base_lba + (geometry.root_start + index) as u64, &mut sector)
             .map_err(|_| "read_root")?;
         let mut offset = 0;
         while offset < geometry.sector_size {
@@ -103,8 +123,9 @@ fn find_file(
 }
 
 /// Read the whole file by following its cluster chain through the FAT.
-fn read_file(
-    device: &BlkDevice,
+fn read_file<S: SectorSource>(
+    source: &S,
+    base_lba: u64,
     geometry: &Geometry,
     first_cluster: u32,
     size: u32,
@@ -113,8 +134,8 @@ fn read_file(
     let mut fat = Vec::new();
     let mut sector = [0u8; SECTOR_SIZE];
     for index in 0..geometry.fat_sectors {
-        device
-            .read_sector((geometry.fat_start + index) as u64, &mut sector)
+        source
+            .read_sector(base_lba + (geometry.fat_start + index) as u64, &mut sector)
             .map_err(|_| "read_fat")?;
         fat.extend_from_slice(&sector);
     }
@@ -125,8 +146,8 @@ fn read_file(
     while (2..0xfff8).contains(&cluster) && contents.len() < size as usize {
         let first_sector = geometry.data_start + (cluster as usize - 2) * geometry.sectors_per_cluster;
         for index in 0..geometry.sectors_per_cluster {
-            device
-                .read_sector((first_sector + index) as u64, &mut sector)
+            source
+                .read_sector(base_lba + (first_sector + index) as u64, &mut sector)
                 .map_err(|_| "read_data")?;
             contents.extend_from_slice(&sector);
         }
@@ -148,8 +169,8 @@ pub fn load_file(device: &BlkDevice, name: &[u8; 11]) -> Option<Vec<u8>> {
     let mut boot = [0u8; SECTOR_SIZE];
     device.read_sector(0, &mut boot).ok()?;
     let geometry = parse_geometry(&boot)?;
-    let (first_cluster, size) = find_file(device, &geometry, name).ok()??;
-    read_file(device, &geometry, first_cluster, size).ok()
+    let (first_cluster, size) = find_file(device, 0, &geometry, name).ok()??;
+    read_file(device, 0, &geometry, first_cluster, size).ok()
 }
 
 /// Prove a file read from a FAT16 filesystem on the virtio disk.
@@ -166,7 +187,7 @@ pub fn prove(device: &BlkDevice) {
         return;
     };
 
-    let file = match find_file(device, &geometry, TARGET_NAME) {
+    let file = match find_file(device, 0, &geometry, TARGET_NAME) {
         Ok(Some(file)) => file,
         Ok(None) => {
             debug_write("AW_FS_FAIL reason=not_found\n");
@@ -184,7 +205,7 @@ pub fn prove(device: &BlkDevice) {
     debug_write_u64(u64::from(size));
     debug_write("\n");
 
-    let contents = match read_file(device, &geometry, first_cluster, size) {
+    let contents = match read_file(device, 0, &geometry, first_cluster, size) {
         Ok(contents) => contents,
         Err(reason) => {
             debug_write("AW_FS_FAIL reason=");
@@ -199,5 +220,52 @@ pub fn prove(device: &BlkDevice) {
         debug_write("AW_FS_PROOF_OK\n");
     } else {
         debug_write("AW_FS_FAIL reason=content_mismatch\n");
+    }
+}
+
+/// Prove a file read from a FAT16 filesystem that starts at `base_lba` on any
+/// sector source - e.g. the ESP located on a real GPT disk over AHCI. Reports
+/// unavailable (not failed) if the partition is not FAT16, so it is safe to try on
+/// any partition. Emits `AW_FSPART_*` markers.
+pub fn prove_partition<S: SectorSource>(source: &S, base_lba: u64) {
+    debug_write("AW_FSPART_BEGIN base_lba=");
+    debug_write_u64(base_lba);
+    debug_write("\n");
+
+    let mut boot = [0u8; SECTOR_SIZE];
+    if source.read_sector(base_lba, &mut boot).is_err() {
+        debug_write("AW_FSPART_UNAVAILABLE reason=read_boot\n");
+        return;
+    }
+    let Some(geometry) = parse_geometry(&boot) else {
+        debug_write("AW_FSPART_UNAVAILABLE reason=not_fat16\n");
+        return;
+    };
+
+    let (first_cluster, size) = match find_file(source, base_lba, &geometry, TARGET_NAME) {
+        Ok(Some(file)) => file,
+        Ok(None) => {
+            debug_write("AW_FSPART_UNAVAILABLE reason=not_found\n");
+            return;
+        }
+        Err(reason) => {
+            debug_write("AW_FSPART_FAIL reason=");
+            debug_write(reason);
+            debug_write("\n");
+            return;
+        }
+    };
+
+    match read_file(source, base_lba, &geometry, first_cluster, size) {
+        Ok(contents) if slices_equal(&contents, EXPECTED) => {
+            debug_write("AW_FSPART_READ_OK\n");
+            debug_write("AW_FSPART_PROOF_OK\n");
+        }
+        Ok(_) => debug_write("AW_FSPART_FAIL reason=content_mismatch\n"),
+        Err(reason) => {
+            debug_write("AW_FSPART_FAIL reason=");
+            debug_write(reason);
+            debug_write("\n");
+        }
     }
 }

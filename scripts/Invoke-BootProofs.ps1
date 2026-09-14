@@ -535,10 +535,14 @@ $configurations = @(
             'AW_GPT_HEADER_OK'
             'AW_GPT_PARTITION index=0'
             'AW_GPT_PROOF_OK'
+            # The full storage stack: read HELLO.TXT from the ESP's own FAT16, at the
+            # partition offset the GPT reported (AHCI -> GPT -> partition -> FAT).
+            'AW_FSPART_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
             'AW_GPT_FAIL'
+            'AW_FSPART_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )

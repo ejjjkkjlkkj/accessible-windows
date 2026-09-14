@@ -129,6 +129,12 @@ pub fn prove() {
         debug_write_u64(last_lba);
         debug_write(if is_esp { " esp=1\n" } else { " esp=0\n" });
         debug_write("AW_GPT_PROOF_OK\n");
+        // Read a file from the ESP's own FAT16 filesystem, at its partition offset:
+        // the full storage stack (AHCI -> GPT -> partition -> FAT -> file) on a real
+        // disk layout, the way an installed system's files are reached.
+        if is_esp {
+            crate::fat16::prove_partition(&port, first_lba);
+        }
         return;
     }
 
