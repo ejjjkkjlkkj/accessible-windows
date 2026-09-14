@@ -11,6 +11,7 @@
 extern crate alloc;
 
 mod acpi;
+mod ahci;
 mod apic_timer;
 mod clock;
 mod device_irq;
@@ -1502,6 +1503,8 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         }
         debug_write("AW_VIRTIO_NET_BEGIN\n");
         virtio_net::prove();
+        // A real SATA controller (AHCI), the kind VMware and physical PCs use.
+        ahci::prove();
         #[cfg(feature = "msi-proof-device")]
         prove_msi_delivery(handoff);
 

@@ -461,6 +461,32 @@ $configurations = @(
             'AW_NATIVE_KERNEL_PANIC'
         )
     }
+    @{
+        # A real SATA controller: bring up an AHCI HBA, find the port with a disk,
+        # and read LBA 0 by DMA (READ DMA EXT), checking the 0x55AA boot signature
+        # the disk actually returned. This is the controller model VMware and most
+        # physical PCs expose SATA disks through. An explicit ich9-ahci carries the
+        # disk (q35's built-in AHCI has no disk); the driver scans every HBA.
+        Name     = 'ahci'
+        Features = @()
+        QemuArgs = @(
+            '-device', 'ich9-ahci,id=sata0'
+            '-drive', "if=none,id=ahcidisk,file=$vblkDisk,format=raw"
+            '-device', 'ide-hd,drive=ahcidisk,bus=sata0.0'
+        )
+        Required = @(
+            'AW_AHCI_FOUND'
+            'AW_AHCI_PORT_PRESENT'
+            'AW_AHCI_READ_OK sector=0'
+            'AW_AHCI_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_AHCI_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
 )
 
 $failures = @()
