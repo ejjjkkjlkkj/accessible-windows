@@ -224,6 +224,16 @@ $configurations = @(
             'AW_SR_SPEAK "Install, button, 1 of 2, installs to the selected disk"'
             'AW_SR_SPEAK "Recovery options, button, 2 of 2"'
             'AW_SR_EVENT "not checked"'
+            # Keyboard-only navigation with spoken feedback: Tab across the four
+            # focus stops in order (skipping a heading, static text and a disabled
+            # control), wrap from the last back to the first, then Shift+Tab back.
+            'AW_SR_TAB "Enable screen reader at boot, check box, checked, 1 of 4"'
+            'AW_SR_TAB "Speech rate, slider, 40%, 2 of 4"'
+            'AW_SR_TAB "Install, button, 3 of 4"'
+            'AW_SR_TAB "Recovery, button, 4 of 4"'
+            'AW_SR_TAB_WRAP "Enable screen reader at boot, check box, checked, 1 of 4"'
+            'AW_SR_SHIFT_TAB "Recovery, button, 4 of 4"'
+            'AW_SR_NAV_PROOF_OK'
             'AW_SR_PROOF_OK'
             # Rest of bring-up still clean.
             'AW_MEMORY_MAP_VALIDATE_OK'

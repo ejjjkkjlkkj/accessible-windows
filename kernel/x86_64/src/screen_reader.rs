@@ -18,7 +18,7 @@
 //! unchanged, inside the real kernel.
 
 use aw_accessibility::{validate_node, NodeId, Rect, Role, SemanticNode, State};
-use aw_screen_reader::{announce_event, announce_focus, FocusContext};
+use aw_screen_reader::{announce_event, announce_focus, FocusContext, FocusRing, NavCommand};
 
 use crate::debug_write;
 
@@ -165,5 +165,105 @@ pub fn prove() {
     debug_write(event);
     debug_write("\"\n");
 
+    if !prove_keyboard_navigation() {
+        return;
+    }
+
     debug_write("AW_SR_PROOF_OK\n");
+}
+
+/// Emit one navigation utterance under `marker`, or fail the proof. Returns false
+/// when the ring has no focusable control (which must never happen here).
+fn speak_navigation(ring: &FocusRing<'_>, marker: &str) -> bool {
+    let mut buffer = [0u8; 256];
+    let text = ring.announce_current(&mut buffer);
+    if text.is_empty() {
+        debug_write("AW_SR_FAIL reason=empty_navigation\n");
+        return false;
+    }
+    debug_write(marker);
+    debug_write(" \"");
+    debug_write(text);
+    debug_write("\"\n");
+    true
+}
+
+/// Prove keyboard-only navigation with spoken feedback: Tab through the
+/// installer's controls in order - skipping a heading, static text and a disabled
+/// control - wrap from the last focus stop back to the first, and Shift+Tab
+/// backward, speaking each landing. This is the operable loop a blind user needs,
+/// proven with no pointer and no visual cue.
+fn prove_keyboard_navigation() -> bool {
+    // The same screen as a tab order: non-focusable nodes and one disabled control
+    // are present so the navigation must skip them.
+    let controls = [
+        node(10, Role::Heading, "Setup", "", "", 0),
+        node(
+            11,
+            Role::StaticText,
+            "Welcome to Accessible Windows setup",
+            "",
+            "",
+            0,
+        ),
+        node(
+            12,
+            Role::CheckBox,
+            "Enable screen reader at boot",
+            "",
+            "",
+            State::FOCUSABLE | State::CHECKED,
+        ),
+        node(13, Role::Slider, "Speech rate", "40%", "", State::FOCUSABLE),
+        node(14, Role::Button, "Install", "", "", State::FOCUSABLE),
+        node(
+            15,
+            Role::Button,
+            "Advanced options",
+            "",
+            "",
+            State::FOCUSABLE | State::DISABLED,
+        ),
+        node(16, Role::Button, "Recovery", "", "", State::FOCUSABLE),
+    ];
+
+    let mut ring = FocusRing::new(&controls);
+    if ring.stop_count() != 4 {
+        debug_write("AW_SR_FAIL reason=wrong_stop_count\n");
+        return false;
+    }
+
+    // Tab forward across the four focus stops, in order, skipping the rest.
+    for _ in 0..4 {
+        if ring.navigate(NavCommand::Next).is_none() {
+            debug_write("AW_SR_FAIL reason=navigation_lost\n");
+            return false;
+        }
+        if !speak_navigation(&ring, "AW_SR_TAB") {
+            return false;
+        }
+    }
+
+    // One more Tab wraps from the last stop back to the first.
+    ring.navigate(NavCommand::Next);
+    if ring.current_index() != Some(2) {
+        debug_write("AW_SR_FAIL reason=no_wrap\n");
+        return false;
+    }
+    if !speak_navigation(&ring, "AW_SR_TAB_WRAP") {
+        return false;
+    }
+
+    // Shift+Tab moves back to the previous stop (wrapping to the last).
+    ring.navigate(NavCommand::Previous);
+    if ring.current_index() != Some(6) {
+        debug_write("AW_SR_FAIL reason=bad_reverse\n");
+        return false;
+    }
+    if !speak_navigation(&ring, "AW_SR_SHIFT_TAB") {
+        return false;
+    }
+
+    debug_write("AW_SR_NAV_PROOF_OK\n");
+    true
 }

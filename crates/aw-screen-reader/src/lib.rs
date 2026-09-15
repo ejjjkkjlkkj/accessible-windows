@@ -42,6 +42,9 @@
 
 use aw_accessibility::{AccessibilityEvent, Role, SemanticNode, State};
 
+mod focus;
+pub use focus::{FocusRing, NavCommand};
+
 /// A speech utterance being composed into a fixed byte buffer.
 ///
 /// Phrases are appended with [`Utterance::phrase`]; the first non-empty phrase
