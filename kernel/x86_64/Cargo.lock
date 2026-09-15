@@ -11,6 +11,10 @@ name = "aw-acpi"
 version = "0.1.0"
 
 [[package]]
+name = "aw-braille"
+version = "0.1.0"
+
+[[package]]
 name = "aw-kernel-core"
 version = "0.1.0"
 
@@ -20,6 +24,7 @@ version = "0.1.0"
 dependencies = [
  "aw-accessibility",
  "aw-acpi",
+ "aw-braille",
  "aw-kernel-core",
  "aw-memory",
  "aw-pci",

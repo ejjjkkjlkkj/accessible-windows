@@ -28,6 +28,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aw-braille"
+version = "0.1.0"
+
+[[package]]
 name = "aw-fs-core"
 version = "0.1.0"
 

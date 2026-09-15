@@ -5,6 +5,7 @@ members = [
     "crates/aw-acpi",
     "crates/aw-app-compat",
     "crates/aw-bootstate",
+    "crates/aw-braille",
     "crates/aw-fs-core",
     "crates/aw-generation",
     "crates/aw-guest-vm",

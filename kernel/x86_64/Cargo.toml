@@ -8,6 +8,7 @@ build = "build.rs"
 [dependencies]
 aw-accessibility = { path = "../../crates/aw-accessibility" }
 aw-acpi = { path = "../../crates/aw-acpi" }
+aw-braille = { path = "../../crates/aw-braille" }
 aw-kernel-core = { path = "../../crates/aw-kernel-core" }
 aw-memory = { path = "../../crates/aw-memory" }
 aw-pci = { path = "../../crates/aw-pci" }

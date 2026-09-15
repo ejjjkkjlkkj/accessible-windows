@@ -235,6 +235,11 @@ $configurations = @(
             'AW_SR_SHIFT_TAB "Recovery, button, 4 of 4"'
             'AW_SR_NAV_PROOF_OK'
             'AW_SR_PROOF_OK'
+            # The same control rendered to braille for a refreshable display:
+            # semantic node -> utterance -> Grade 1 six-dot cells, checked against
+            # the known pattern (capital sign, install, comma, space, button).
+            'AW_BRAILLE_CELLS 20 0a 1d 0e 1e 01 07 07 02 00 03 25 1e 1e 15 1d'
+            'AW_BRAILLE_PROOF_OK'
             # Rest of bring-up still clean.
             'AW_MEMORY_MAP_VALIDATE_OK'
             'AW_BOOTSTRAP_PAGE_ALLOC_OK'
@@ -260,6 +265,7 @@ $configurations = @(
             'AW_CLOCK_FAIL'
             'AW_RTC_FAIL'
             'AW_SR_FAIL'
+            'AW_BRAILLE_FAIL'
             'AW_GDT_SEGMENTS_FAIL'
             'AW_PERCPU_BSP_FAIL'
             'AW_PERCPU_FAIL'

@@ -13,6 +13,7 @@ extern crate alloc;
 mod acpi;
 mod ahci;
 mod apic_timer;
+mod braille;
 mod clock;
 mod device_irq;
 mod fat16;
@@ -1499,6 +1500,9 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // build its accessible tree, validate the invariants, and emit the exact
         // utterance for each control. Device-free nonvisual delivery evidence.
         screen_reader::prove();
+        // Render a spoken control to braille cells for a refreshable display:
+        // semantic node -> utterance -> Grade 1 braille. Also device-free.
+        braille::prove();
         debug_write("AW_VIRTIO_BLK_BEGIN\n");
         match virtio_blk::init() {
             Some(device) => {
