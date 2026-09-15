@@ -37,6 +37,7 @@ mod pci_config;
 mod percpu;
 mod pit;
 mod ring3;
+mod rtc;
 mod scheduler;
 mod security_baseline;
 mod serial;
@@ -1489,6 +1490,9 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         bring_up_secondary_processors(handoff);
         prove_per_cpu_state();
         clock::prove();
+        // Read the wall-clock date/time from the CMOS RTC (read-only, safe on any
+        // machine, so it runs on the normal boot path alongside the TSC clock).
+        rtc::prove();
         debug_write("AW_VIRTIO_BLK_BEGIN\n");
         match virtio_blk::init() {
             Some(device) => {

@@ -211,6 +211,8 @@ $configurations = @(
             'AW_CLOCK_MONOTONIC_OK'
             'AW_CLOCK_CALIBRATED_OK khz='
             'AW_CLOCK_PROOF_OK'
+            # Wall-clock date/time read from the CMOS RTC.
+            'AW_RTC_PROOF_OK'
             # Rest of bring-up still clean.
             'AW_MEMORY_MAP_VALIDATE_OK'
             'AW_BOOTSTRAP_PAGE_ALLOC_OK'
@@ -234,6 +236,7 @@ $configurations = @(
             'AW_PREEMPT_FAIL'
             'AW_RING3_PREEMPT_FAIL'
             'AW_CLOCK_FAIL'
+            'AW_RTC_FAIL'
             'AW_GDT_SEGMENTS_FAIL'
             'AW_PERCPU_BSP_FAIL'
             'AW_PERCPU_FAIL'
