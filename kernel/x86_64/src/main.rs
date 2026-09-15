@@ -40,6 +40,7 @@ mod pit;
 mod ring3;
 mod rtc;
 mod scheduler;
+mod screen_reader;
 mod security_baseline;
 mod serial;
 mod smp;
@@ -1494,6 +1495,10 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // Read the wall-clock date/time from the CMOS RTC (read-only, safe on any
         // machine, so it runs on the normal boot path alongside the TSC clock).
         rtc::prove();
+        // Speak the installer's first screen through the native screen reader:
+        // build its accessible tree, validate the invariants, and emit the exact
+        // utterance for each control. Device-free nonvisual delivery evidence.
+        screen_reader::prove();
         debug_write("AW_VIRTIO_BLK_BEGIN\n");
         match virtio_blk::init() {
             Some(device) => {

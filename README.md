@@ -39,6 +39,9 @@ Bootstrap phase. The repository currently contains:
   compiled - see [docs/KERNEL-BOOT-PROOFS.md](docs/KERNEL-BOOT-PROOFS.md);
 - `no_std` crates for the kernel/boot contract and the accessibility semantic
   model;
+- a native screen-reader announcement engine that turns that semantic model
+  into the exact utterance spoken for each control, proven on the boot path by
+  voicing the installer's first screen (nonvisual delivery evidence);
 - architecture and accessibility specifications;
 - x64-only Rust CI on Linux, Windows and Intel macOS.
 

@@ -113,6 +113,13 @@ name = "aw-runtime-sources"
 version = "0.1.0"
 
 [[package]]
+name = "aw-screen-reader"
+version = "0.1.0"
+dependencies = [
+ "aw-accessibility",
+]
+
+[[package]]
 name = "aw-storefs"
 version = "0.1.0"
 dependencies = [

@@ -6,10 +6,12 @@ publish = false
 build = "build.rs"
 
 [dependencies]
+aw-accessibility = { path = "../../crates/aw-accessibility" }
 aw-acpi = { path = "../../crates/aw-acpi" }
 aw-kernel-core = { path = "../../crates/aw-kernel-core" }
 aw-memory = { path = "../../crates/aw-memory" }
 aw-pci = { path = "../../crates/aw-pci" }
+aw-screen-reader = { path = "../../crates/aw-screen-reader" }
 aw-x86-interrupts = { path = "../../crates/aw-x86-interrupts" }
 aw-x86-paging = { path = "../../crates/aw-x86-paging" }
 aw-x86-platform = { path = "../../crates/aw-x86-platform" }
