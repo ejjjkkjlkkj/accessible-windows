@@ -405,11 +405,15 @@ $configurations = @(
             'AW_VIRTIO_NET_ARP_SENT'
             'AW_VIRTIO_NET_ARP_REPLY_OK spa=10.0.2.2 sha='
             'AW_VIRTIO_NET_PROOF_OK'
+            'AW_VIRTIO_NET_ICMP_SENT'
+            'AW_VIRTIO_NET_ICMP_REPLY_OK src=10.0.2.2 id=ab01 seq=1'
+            'AW_VIRTIO_NET_ICMP_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
             'AW_VIRTIO_NET_UNAVAILABLE'
             'AW_VIRTIO_NET_FAIL'
+            'AW_VIRTIO_NET_ICMP_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )

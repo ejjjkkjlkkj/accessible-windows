@@ -77,6 +77,7 @@ kernel ELF for symbol-level triage.
 | Userland ELF loader | PASS | `AW_USER_LOADER_PROOF_OK` (`virtio-blk`); read `USERPROG.ELF` off the FAT16 disk, map its PT_LOAD segment as user pages, run it at CPL3, and see it report 0xC0DE through a syscall and exit |
 | Userland preemptive multitasking | PASS | `AW_USER_INIT_PROOF_OK` (`virtio-blk`); two spinner programs (`USERA.ELF`/`USERB.ELF`) loaded from disk, each on its own kernel stack, are preempted back and forth by the timer at CPL3 and their counters advance comparably - fair alternation, not one starved |
 | virtio-net ARP exchange (legacy) | PASS | `AW_VIRTIO_NET_PROOF_OK` (`net`); reads its MAC from config, `AW_VIRTIO_NET_QUIET_OK` shows the receive ring idle while nothing is sent, then an ARP request draws the SLIRP gateway's reply (`spa=10.0.2.2`) |
+| virtio-net ICMP echo (IPv4) | PASS | `AW_VIRTIO_NET_ICMP_PROOF_OK` (`net`); one layer up from ARP - a routed IPv4 datagram with its own header checksum carries an ICMP echo request to the gateway, addressed on the wire to the hardware address ARP just resolved, and the gateway's echo reply comes back with our exact identifier, sequence and 16-byte payload (`AW_VIRTIO_NET_ICMP_REPLY_OK`) |
 | 16550 serial console (COM1) | PASS | `AW_SERIAL_PROOF_OK` (`serial`); loopback self-test, then a banner appears in the host COM1 log |
 | APIC timer IRQ delivery | PASS | `AW_APIC_TIMER_FIRED`, `AW_APIC_TIMER_MONOTONIC_OK ticks>=8` |
 | APIC timer negative test | PASS | `AW_APIC_TIMER_MASKED_STOPPED` then `AW_APIC_TIMER_UNMASKED_RESUMED` |

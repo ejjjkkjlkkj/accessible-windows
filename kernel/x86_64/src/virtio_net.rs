@@ -19,6 +19,13 @@
 //!   gateway's hardware address - a frame the device could only have delivered by
 //!   really transmitting ours and receiving the answer.
 //!
+//! ARP stays at layer 2. The proof then goes one layer up: a routed IPv4
+//! datagram - with its own header checksum - carrying an ICMP echo request to
+//! the gateway (10.0.2.2), addressed on the wire to the hardware address ARP
+//! just resolved. Its reply is attributable more strongly still: the echo reply
+//! must carry back our exact identifier, sequence and 16-byte payload, so a
+//! matching reply can only be the gateway echoing the request we sent.
+//!
 //! Legacy virtio is little-endian (the guest's native order on x86) and its ring
 //! and buffers are addressed physically. Every structure the device touches lives
 //! in a `static` the identity map covers 1:1, so a virtual address is also the
@@ -191,9 +198,10 @@ const NET_HDR_LEN: usize = 10;
 /// One receive/transmit buffer: header plus a full standard Ethernet frame.
 const FRAME_CAP: usize = 1514;
 const BUF_LEN: usize = NET_HDR_LEN + FRAME_CAP;
-/// How many receive buffers to post. A handful is plenty for one ARP reply while
-/// tolerating any stray frame SLIRP might emit first.
-const RX_BUFFERS: usize = 4;
+/// How many receive buffers to post. Posted once, up front: enough for the ARP
+/// reply and then the ICMP echo reply, while tolerating any stray frame SLIRP
+/// might emit first. Each proof consumes one; the rest stay available.
+const RX_BUFFERS: usize = 8;
 
 /// Ring storage: descriptor table + available ring + (aligned) used ring, sized
 /// for `MAX_QUEUE`. Page aligned so its physical frame number is exact.
@@ -525,6 +533,182 @@ fn find_arp_reply(device: &NetDevice, used_now: u16, used_before: u16) -> Option
     None
 }
 
+// ---- ICMP echo proof ----------------------------------------------------
+//
+// One layer up from ARP: a routed IPv4 datagram carrying an ICMP echo request
+// to the gateway (10.0.2.2), addressed on the wire to the hardware address ARP
+// resolved. The reply must echo our exact identifier, sequence and payload, so a
+// match can only be the gateway echoing the request we sent.
+
+/// Bytes of the distinctive echo payload. Its presence, verbatim, in the reply
+/// is what makes the reply attributable to our request and not ambient traffic.
+const ICMP_PAYLOAD_LEN: usize = 16;
+const ICMP_PAYLOAD: [u8; ICMP_PAYLOAD_LEN] = *b"AW-ICMP-PROOF-01";
+/// Our echo identifier and sequence, carried through and matched in the reply.
+const ICMP_IDENT: u16 = 0xab01;
+const ICMP_SEQ: u16 = 1;
+const ETHERTYPE_IPV4: u16 = 0x0800;
+const IP_PROTO_ICMP: u8 = 1;
+/// IPv4 header length with no options, and the full ICMP echo length.
+const IP_HDR_LEN: usize = 20;
+const ICMP_LEN: usize = 8 + ICMP_PAYLOAD_LEN;
+
+/// The standard Internet checksum (RFC 1071): the 16-bit one's-complement of the
+/// one's-complement sum of the data taken as big-endian 16-bit words, a trailing
+/// odd byte padded with a zero low half.
+fn internet_checksum(data: &[u8]) -> u16 {
+    let mut sum: u32 = 0;
+    let (pairs, remainder) = data.as_chunks::<2>();
+    for pair in pairs {
+        sum += u32::from(u16::from_be_bytes(*pair));
+    }
+    if let [last] = remainder {
+        sum += u32::from(u16::from_be_bytes([*last, 0]));
+    }
+    while sum >> 16 != 0 {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    !(sum as u16)
+}
+
+/// Build an Ethernet + IPv4 + ICMP echo request to the gateway into `TX_BUF` just
+/// past the virtio-net header, and return its total length in bytes.
+fn build_icmp_echo(mac: &[u8; 6], gateway_mac: &[u8; 6]) -> usize {
+    const FRAME_LEN: usize = 14 + IP_HDR_LEN + ICMP_LEN;
+    let mut frame = [0u8; FRAME_LEN];
+
+    // Ethernet header: to the resolved gateway, from us, IPv4.
+    frame[0..6].copy_from_slice(gateway_mac);
+    frame[6..12].copy_from_slice(mac);
+    frame[12..14].copy_from_slice(&ETHERTYPE_IPV4.to_be_bytes());
+
+    // ICMP echo request. Built before the IP header so its checksum is settled
+    // before the IP total-length/checksum are computed over a stable payload.
+    {
+        let icmp = &mut frame[14 + IP_HDR_LEN..];
+        // Checksum field icmp[2..4] is left zero while it is summed over.
+        icmp[0] = 8; // type = echo request
+        icmp[1] = 0; // code
+        icmp[4..6].copy_from_slice(&ICMP_IDENT.to_be_bytes());
+        icmp[6..8].copy_from_slice(&ICMP_SEQ.to_be_bytes());
+        icmp[8..8 + ICMP_PAYLOAD_LEN].copy_from_slice(&ICMP_PAYLOAD);
+    }
+    let icmp_ck = internet_checksum(&frame[14 + IP_HDR_LEN..14 + IP_HDR_LEN + ICMP_LEN]);
+    frame[14 + IP_HDR_LEN + 2..14 + IP_HDR_LEN + 4].copy_from_slice(&icmp_ck.to_be_bytes());
+
+    // IPv4 header.
+    {
+        let ip = &mut frame[14..14 + IP_HDR_LEN];
+        // Header checksum field ip[10..12] is left zero while it is summed over.
+        ip[0] = 0x45; // version 4, IHL 5 (no options)
+        ip[1] = 0; // DSCP/ECN
+        ip[2..4].copy_from_slice(&((IP_HDR_LEN + ICMP_LEN) as u16).to_be_bytes());
+        ip[4..6].copy_from_slice(&0x0000u16.to_be_bytes()); // identification
+        ip[6..8].copy_from_slice(&0x4000u16.to_be_bytes()); // flags = DF, offset 0
+        ip[8] = 64; // TTL
+        ip[9] = IP_PROTO_ICMP;
+        ip[12..16].copy_from_slice(&GUEST_IP);
+        ip[16..20].copy_from_slice(&GATEWAY_IP);
+    }
+    let ip_ck = internet_checksum(&frame[14..14 + IP_HDR_LEN]);
+    frame[14 + 10..14 + 12].copy_from_slice(&ip_ck.to_be_bytes());
+
+    // Stage into TX_BUF past the virtio-net header.
+    let tx = core::ptr::addr_of_mut!(TX_BUF) as *mut u8;
+    // SAFETY: TX_BUF holds NET_HDR_LEN + FRAME_CAP >= NET_HDR_LEN + FRAME_LEN.
+    unsafe {
+        for (index, byte) in frame.iter().enumerate() {
+            tx.add(NET_HDR_LEN + index).write_volatile(*byte);
+        }
+    }
+    frame.len()
+}
+
+/// Scan the posted receive buffers for the gateway's ICMP echo reply: an IPv4
+/// datagram from 10.0.2.2 to us carrying an ICMP echo reply with our identifier,
+/// sequence and payload. Returns true on the first exact match.
+fn find_icmp_reply(device: &NetDevice, used_now: u16, used_before: u16) -> bool {
+    const NEED: usize = 14 + IP_HDR_LEN + ICMP_LEN;
+    let mut slot = used_before;
+    while slot != used_now {
+        let (id, len) = device.rx_used_entry(slot);
+        slot = slot.wrapping_add(1);
+        let index = id as usize;
+        if index >= RX_BUFFERS || (len as usize) < NET_HDR_LEN + NEED {
+            continue;
+        }
+        // SAFETY: RX_BUFS[index] was written by the device up to `len` bytes.
+        let buf = unsafe { core::ptr::addr_of!(RX_BUFS[index]) as *const u8 };
+        let mut frame = [0u8; NEED];
+        // SAFETY: reading NEED bytes past the 10-byte net header, within `len`.
+        unsafe {
+            for (offset, byte) in frame.iter_mut().enumerate() {
+                *byte = buf.add(NET_HDR_LEN + offset).read_volatile();
+            }
+        }
+        if u16::from_be_bytes([frame[12], frame[13]]) != ETHERTYPE_IPV4 {
+            continue;
+        }
+        let ihl = usize::from(frame[14] & 0x0f) * 4;
+        if frame[14] >> 4 != 4 || ihl != IP_HDR_LEN || frame[14 + 9] != IP_PROTO_ICMP {
+            continue;
+        }
+        let src = [frame[14 + 12], frame[14 + 13], frame[14 + 14], frame[14 + 15]];
+        let dst = [frame[14 + 16], frame[14 + 17], frame[14 + 18], frame[14 + 19]];
+        if src != GATEWAY_IP || dst != GUEST_IP {
+            continue;
+        }
+        let icmp = &frame[14 + IP_HDR_LEN..];
+        let ident = u16::from_be_bytes([icmp[4], icmp[5]]);
+        let seq = u16::from_be_bytes([icmp[6], icmp[7]]);
+        if icmp[0] == 0 // echo reply
+            && icmp[1] == 0
+            && ident == ICMP_IDENT
+            && seq == ICMP_SEQ
+            && icmp[8..8 + ICMP_PAYLOAD_LEN] == ICMP_PAYLOAD
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Send one ICMP echo to the gateway and match its reply. The ARP proof already
+/// posted the receive buffers and resolved the gateway hardware address; this
+/// reuses both. Attribution is the exact identifier/sequence/payload echoed back,
+/// so no separate quiet window is needed here.
+fn prove_icmp(device: &NetDevice, gateway_mac: &[u8; 6]) {
+    let used_before = device.rx_used_index();
+    let frame_len = build_icmp_echo(&device.mac, gateway_mac);
+    if let Err(reason) = device.transmit(frame_len) {
+        debug_write("AW_VIRTIO_NET_ICMP_FAIL reason=");
+        debug_write(reason);
+        debug_write("\n");
+        return;
+    }
+    debug_write("AW_VIRTIO_NET_ICMP_SENT\n");
+
+    let mut budget = 200_000_000u32;
+    let matched = loop {
+        let used_now = device.rx_used_index();
+        if used_now != used_before && find_icmp_reply(device, used_now, used_before) {
+            break true;
+        }
+        budget -= 1;
+        if budget == 0 {
+            break false;
+        }
+        core::hint::spin_loop();
+    };
+
+    if matched {
+        debug_write("AW_VIRTIO_NET_ICMP_REPLY_OK src=10.0.2.2 id=ab01 seq=1\n");
+        debug_write("AW_VIRTIO_NET_ICMP_PROOF_OK\n");
+    } else {
+        debug_write("AW_VIRTIO_NET_ICMP_FAIL reason=no_echo_reply\n");
+    }
+}
+
 /// Emit a MAC as `xx:xx:xx:xx:xx:xx`, two lowercase hex digits per byte, with no
 /// `0x` prefix - the form the proof marker matches against.
 fn write_mac(mac: &[u8; 6]) {
@@ -601,13 +785,20 @@ pub fn prove() {
         core::hint::spin_loop();
     };
 
-    match reply {
+    let gateway_mac = match reply {
         Some(mac) => {
             debug_write("AW_VIRTIO_NET_ARP_REPLY_OK spa=10.0.2.2 sha=");
             write_mac(&mac);
             debug_write("\n");
             debug_write("AW_VIRTIO_NET_PROOF_OK\n");
+            mac
         }
-        None => debug_write("AW_VIRTIO_NET_FAIL reason=no_arp_reply\n"),
-    }
+        None => {
+            debug_write("AW_VIRTIO_NET_FAIL reason=no_arp_reply\n");
+            return;
+        }
+    };
+
+    // One layer up: a routed IPv4 + ICMP echo to the gateway ARP just resolved.
+    prove_icmp(&device, &gateway_mac);
 }
