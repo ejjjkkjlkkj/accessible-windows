@@ -553,10 +553,10 @@ const IP_PROTO_ICMP: u8 = 1;
 const IP_HDR_LEN: usize = 20;
 const ICMP_LEN: usize = 8 + ICMP_PAYLOAD_LEN;
 
-/// The standard Internet checksum (RFC 1071): the 16-bit one's-complement of the
-/// one's-complement sum of the data taken as big-endian 16-bit words, a trailing
-/// odd byte padded with a zero low half.
-fn internet_checksum(data: &[u8]) -> u16 {
+/// Partial one's-complement sum of `data` as big-endian 16-bit words, a trailing
+/// odd byte padded with a zero low half. Returned unfolded so several regions
+/// (e.g. a UDP pseudo-header and its payload) can be accumulated before folding.
+fn checksum_sum(data: &[u8]) -> u32 {
     let mut sum: u32 = 0;
     let (pairs, remainder) = data.as_chunks::<2>();
     for pair in pairs {
@@ -565,10 +565,20 @@ fn internet_checksum(data: &[u8]) -> u16 {
     if let [last] = remainder {
         sum += u32::from(u16::from_be_bytes([*last, 0]));
     }
+    sum
+}
+
+/// Fold a partial sum into the final 16-bit one's-complement checksum.
+fn checksum_fold(mut sum: u32) -> u16 {
     while sum >> 16 != 0 {
         sum = (sum & 0xffff) + (sum >> 16);
     }
     !(sum as u16)
+}
+
+/// The standard Internet checksum (RFC 1071) over one contiguous region.
+fn internet_checksum(data: &[u8]) -> u16 {
+    checksum_fold(checksum_sum(data))
 }
 
 /// Build an Ethernet + IPv4 + ICMP echo request to the gateway into `TX_BUF` just
@@ -709,6 +719,266 @@ fn prove_icmp(device: &NetDevice, gateway_mac: &[u8; 6]) {
     }
 }
 
+// ---- DHCP (UDP) proof ---------------------------------------------------
+//
+// ICMP proved a routed IPv4 round-trip; UDP is the next layer up. With no
+// address yet, the guest broadcasts a DHCPDISCOVER to SLIRP's built-in DHCP
+// server (UDP port 67 at 10.0.2.2) and matches its DHCPOFFER. The offer is
+// attributable by the 32-bit transaction id we chose, echoed back verbatim, and
+// it carries the address SLIRP leases us (yiaddr 10.0.2.15) - a real UDP
+// application exchange, checksum included, not a status bit.
+
+const IP_PROTO_UDP: u8 = 17;
+const DHCP_CLIENT_PORT: u16 = 68;
+const DHCP_SERVER_PORT: u16 = 67;
+const DHCP_MAGIC: u32 = 0x6382_5363;
+/// Our transaction id: distinctive so the offer that echoes it is unmistakably
+/// the answer to our discover ("AW" then 0x0d01).
+const DHCP_XID: u32 = 0x4157_0d01;
+const DHCP_MSG_DISCOVER: u8 = 1;
+const DHCP_MSG_OFFER: u8 = 2;
+const DHCP_OPT_MSG_TYPE: u8 = 53;
+const DHCP_OPT_PARAM_LIST: u8 = 55;
+const DHCP_OPT_END: u8 = 255;
+const DHCP_OPT_PAD: u8 = 0;
+/// Offsets inside the frame (Ethernet, IPv4, UDP, BOOTP).
+const UDP_OFF: usize = 14 + IP_HDR_LEN; // 34
+const BOOTP_OFF: usize = UDP_OFF + 8; // 42
+const BOOTP_XID_OFF: usize = BOOTP_OFF + 4; // 46
+const BOOTP_YIADDR_OFF: usize = BOOTP_OFF + 16; // 58
+const BOOTP_CHADDR_OFF: usize = BOOTP_OFF + 28; // 70
+const BOOTP_MAGIC_OFF: usize = BOOTP_OFF + 236; // 278
+const DHCP_OPTIONS_OFF: usize = BOOTP_MAGIC_OFF + 4; // 282
+
+/// The Internet-broadcast IPv4 and hardware addresses.
+const BROADCAST_IP: [u8; 4] = [255, 255, 255, 255];
+const BROADCAST_MAC: [u8; 6] = [0xff; 6];
+
+/// UDP checksum over IPv4: the Internet checksum of the pseudo-header (source and
+/// destination address, a zero byte, the protocol, and the UDP length) followed
+/// by the UDP header and data. A computed zero is sent as 0xffff (RFC 768).
+fn udp_checksum(src: &[u8; 4], dst: &[u8; 4], udp: &[u8]) -> u16 {
+    let mut sum = checksum_sum(src) + checksum_sum(dst);
+    sum += u32::from(IP_PROTO_UDP); // zero byte (high) + protocol (low)
+    sum += udp.len() as u32; // UDP length in the pseudo-header
+    sum += checksum_sum(udp); // the UDP header (checksum field zero) and data
+    let folded = checksum_fold(sum);
+    if folded == 0 { 0xffff } else { folded }
+}
+
+/// Build a broadcast DHCPDISCOVER into `TX_BUF` just past the virtio-net header,
+/// and return its total length in bytes.
+fn build_dhcp_discover(mac: &[u8; 6]) -> usize {
+    // BOOTP fixed area (236) + magic cookie (4) + options.
+    // Options: message-type=DISCOVER, a parameter request list, then end.
+    const OPTIONS: [u8; 9] = [
+        DHCP_OPT_MSG_TYPE,
+        1,
+        DHCP_MSG_DISCOVER,
+        DHCP_OPT_PARAM_LIST,
+        3,
+        1, // subnet mask
+        3, // router
+        6, // DNS
+        DHCP_OPT_END,
+    ];
+    const FRAME_LEN: usize = DHCP_OPTIONS_OFF + OPTIONS.len();
+    const UDP_LEN: usize = FRAME_LEN - UDP_OFF;
+    const IP_TOTAL: usize = FRAME_LEN - 14;
+    let mut frame = [0u8; FRAME_LEN];
+
+    // Ethernet: broadcast, from us, IPv4.
+    frame[0..6].copy_from_slice(&BROADCAST_MAC);
+    frame[6..12].copy_from_slice(mac);
+    frame[12..14].copy_from_slice(&ETHERTYPE_IPV4.to_be_bytes());
+
+    // BOOTP request.
+    frame[BOOTP_OFF] = 1; // op = BOOTREQUEST
+    frame[BOOTP_OFF + 1] = 1; // htype = Ethernet
+    frame[BOOTP_OFF + 2] = 6; // hlen
+    frame[BOOTP_XID_OFF..BOOTP_XID_OFF + 4].copy_from_slice(&DHCP_XID.to_be_bytes());
+    // flags: broadcast, so the server replies to the broadcast address (we have
+    // no unicast IP to receive at yet).
+    frame[BOOTP_OFF + 10..BOOTP_OFF + 12].copy_from_slice(&0x8000u16.to_be_bytes());
+    frame[BOOTP_CHADDR_OFF..BOOTP_CHADDR_OFF + 6].copy_from_slice(mac);
+    frame[BOOTP_MAGIC_OFF..BOOTP_MAGIC_OFF + 4].copy_from_slice(&DHCP_MAGIC.to_be_bytes());
+    frame[DHCP_OPTIONS_OFF..FRAME_LEN].copy_from_slice(&OPTIONS);
+
+    // UDP header (checksum field left zero while it is summed over).
+    frame[UDP_OFF..UDP_OFF + 2].copy_from_slice(&DHCP_CLIENT_PORT.to_be_bytes());
+    frame[UDP_OFF + 2..UDP_OFF + 4].copy_from_slice(&DHCP_SERVER_PORT.to_be_bytes());
+    frame[UDP_OFF + 4..UDP_OFF + 6].copy_from_slice(&(UDP_LEN as u16).to_be_bytes());
+    let udp_ck = udp_checksum(&[0, 0, 0, 0], &BROADCAST_IP, &frame[UDP_OFF..FRAME_LEN]);
+    frame[UDP_OFF + 6..UDP_OFF + 8].copy_from_slice(&udp_ck.to_be_bytes());
+
+    // IPv4 header (checksum field left zero while it is summed over).
+    frame[14] = 0x45; // version 4, IHL 5
+    frame[16..18].copy_from_slice(&(IP_TOTAL as u16).to_be_bytes());
+    frame[22] = 64; // TTL
+    frame[23] = IP_PROTO_UDP;
+    // source 0.0.0.0 stays zero; destination is the broadcast address.
+    frame[30..34].copy_from_slice(&BROADCAST_IP);
+    let ip_ck = internet_checksum(&frame[14..14 + IP_HDR_LEN]);
+    frame[24..26].copy_from_slice(&ip_ck.to_be_bytes());
+
+    let tx = core::ptr::addr_of_mut!(TX_BUF) as *mut u8;
+    // SAFETY: TX_BUF holds NET_HDR_LEN + FRAME_CAP >= NET_HDR_LEN + FRAME_LEN.
+    unsafe {
+        for (index, byte) in frame.iter().enumerate() {
+            tx.add(NET_HDR_LEN + index).write_volatile(*byte);
+        }
+    }
+    frame.len()
+}
+
+/// Walk the DHCP options in `frame[..avail]` and return the message-type value
+/// (option 53), if present and in bounds.
+fn dhcp_message_type(frame: &[u8], avail: usize) -> Option<u8> {
+    let mut index = DHCP_OPTIONS_OFF;
+    while index < avail {
+        let option = frame[index];
+        if option == DHCP_OPT_END {
+            break;
+        }
+        if option == DHCP_OPT_PAD {
+            index += 1;
+            continue;
+        }
+        if index + 2 > avail {
+            break;
+        }
+        let length = usize::from(frame[index + 1]);
+        if index + 2 + length > avail {
+            break;
+        }
+        if option == DHCP_OPT_MSG_TYPE && length >= 1 {
+            return Some(frame[index + 2]);
+        }
+        index += 2 + length;
+    }
+    None
+}
+
+/// Scan the posted receive buffers for the DHCPOFFER: a UDP datagram from the
+/// server (port 67) to the client port carrying our transaction id, the magic
+/// cookie and message-type OFFER. Returns the offered address (yiaddr).
+fn find_dhcp_offer(device: &NetDevice, used_now: u16, used_before: u16) -> Option<[u8; 4]> {
+    /// How much of each receive buffer to inspect: enough for the BOOTP fixed
+    /// area, the magic cookie and the server's options.
+    const SCAN: usize = 384;
+    let mut slot = used_before;
+    while slot != used_now {
+        let (id, len) = device.rx_used_entry(slot);
+        slot = slot.wrapping_add(1);
+        let index = id as usize;
+        let frame_len = (len as usize).saturating_sub(NET_HDR_LEN);
+        if index >= RX_BUFFERS || frame_len <= DHCP_OPTIONS_OFF {
+            continue;
+        }
+        let avail = frame_len.min(SCAN);
+        // SAFETY: RX_BUFS[index] was written by the device up to `len` bytes.
+        let buf = unsafe { core::ptr::addr_of!(RX_BUFS[index]) as *const u8 };
+        let mut frame = [0u8; SCAN];
+        // SAFETY: reading `avail` bytes past the 10-byte net header, within `len`.
+        unsafe {
+            for (offset, byte) in frame[..avail].iter_mut().enumerate() {
+                *byte = buf.add(NET_HDR_LEN + offset).read_volatile();
+            }
+        }
+        if u16::from_be_bytes([frame[12], frame[13]]) != ETHERTYPE_IPV4 {
+            continue;
+        }
+        let ihl = usize::from(frame[14] & 0x0f) * 4;
+        if frame[14] >> 4 != 4 || ihl != IP_HDR_LEN || frame[14 + 9] != IP_PROTO_UDP {
+            continue;
+        }
+        let src_port = u16::from_be_bytes([frame[UDP_OFF], frame[UDP_OFF + 1]]);
+        let dst_port = u16::from_be_bytes([frame[UDP_OFF + 2], frame[UDP_OFF + 3]]);
+        if src_port != DHCP_SERVER_PORT || dst_port != DHCP_CLIENT_PORT {
+            continue;
+        }
+        let xid = u32::from_be_bytes([
+            frame[BOOTP_XID_OFF],
+            frame[BOOTP_XID_OFF + 1],
+            frame[BOOTP_XID_OFF + 2],
+            frame[BOOTP_XID_OFF + 3],
+        ]);
+        let magic = u32::from_be_bytes([
+            frame[BOOTP_MAGIC_OFF],
+            frame[BOOTP_MAGIC_OFF + 1],
+            frame[BOOTP_MAGIC_OFF + 2],
+            frame[BOOTP_MAGIC_OFF + 3],
+        ]);
+        if frame[BOOTP_OFF] != 2 || xid != DHCP_XID || magic != DHCP_MAGIC {
+            continue;
+        }
+        if dhcp_message_type(&frame, avail) != Some(DHCP_MSG_OFFER) {
+            continue;
+        }
+        return Some([
+            frame[BOOTP_YIADDR_OFF],
+            frame[BOOTP_YIADDR_OFF + 1],
+            frame[BOOTP_YIADDR_OFF + 2],
+            frame[BOOTP_YIADDR_OFF + 3],
+        ]);
+    }
+    None
+}
+
+/// Emit an IPv4 address as dotted decimal.
+fn write_ipv4(addr: &[u8; 4]) {
+    for (index, octet) in addr.iter().enumerate() {
+        if index != 0 {
+            debug_write(".");
+        }
+        debug_write_u64(u64::from(*octet));
+    }
+}
+
+/// Broadcast a DHCPDISCOVER and match the server's DHCPOFFER. The receive buffers
+/// the ARP proof posted are reused; attribution is the transaction id echoed
+/// back, so no separate quiet window is needed here.
+fn prove_dhcp(device: &NetDevice) {
+    let used_before = device.rx_used_index();
+    let frame_len = build_dhcp_discover(&device.mac);
+    if let Err(reason) = device.transmit(frame_len) {
+        debug_write("AW_VIRTIO_NET_DHCP_FAIL reason=");
+        debug_write(reason);
+        debug_write("\n");
+        return;
+    }
+    debug_write("AW_VIRTIO_NET_DHCP_DISCOVER_SENT\n");
+
+    let mut budget = 200_000_000u32;
+    let offer = loop {
+        let used_now = device.rx_used_index();
+        if used_now != used_before
+            && let Some(yiaddr) = find_dhcp_offer(device, used_now, used_before)
+        {
+            break Some(yiaddr);
+        }
+        budget -= 1;
+        if budget == 0 {
+            break None;
+        }
+        core::hint::spin_loop();
+    };
+
+    match offer {
+        Some(yiaddr) => {
+            debug_write("AW_VIRTIO_NET_DHCP_OFFER_OK yiaddr=");
+            write_ipv4(&yiaddr);
+            debug_write("\n");
+            if yiaddr == GUEST_IP {
+                debug_write("AW_VIRTIO_NET_DHCP_PROOF_OK\n");
+            } else {
+                debug_write("AW_VIRTIO_NET_DHCP_FAIL reason=unexpected_yiaddr\n");
+            }
+        }
+        None => debug_write("AW_VIRTIO_NET_DHCP_FAIL reason=no_offer\n"),
+    }
+}
+
 /// Emit a MAC as `xx:xx:xx:xx:xx:xx`, two lowercase hex digits per byte, with no
 /// `0x` prefix - the form the proof marker matches against.
 fn write_mac(mac: &[u8; 6]) {
@@ -801,4 +1071,6 @@ pub fn prove() {
 
     // One layer up: a routed IPv4 + ICMP echo to the gateway ARP just resolved.
     prove_icmp(&device, &gateway_mac);
+    // One layer up again: a UDP DHCP exchange with SLIRP's built-in server.
+    prove_dhcp(&device);
 }
