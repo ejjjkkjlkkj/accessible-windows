@@ -73,7 +73,7 @@
 - [ ] ACPI table enumeration beyond MCFG
 - [ ] MADT/APIC topology parsing
 - [ ] PCI bridge-aware enumeration
-- [ ] NVMe controller initialization and identify
+- [x] NVMe controller initialization and identify
 - [ ] NVMe read/write
 - [ ] AHCI controller initialization
 - [ ] AHCI/SATA read/write

@@ -423,6 +423,32 @@ $configurations = @(
         )
     }
     @{
+        # NVMe: the interface modern PCs boot their SSDs through, and the first
+        # memory-mapped (not port-mapped) controller. Bring up the admin queue
+        # pair, enable the controller, issue IDENTIFY CONTROLLER, and read the
+        # model number it wrote back by DMA - real content, not a status bit. The
+        # backing image is only ever read by this identify proof.
+        Name     = 'nvme'
+        Features = @()
+        QemuArgs = @(
+            '-drive', "file=$vblkDisk,if=none,id=nvm,format=raw"
+            '-device', 'nvme,drive=nvm,serial=AWNVME01'
+        )
+        Required = @(
+            'AW_NVME_FOUND'
+            'AW_NVME_ENABLED depth='
+            'AW_NVME_IDENTIFY_OK model=QEMU NVMe Ctrl'
+            'AW_NVME_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_NVME_UNAVAILABLE'
+            'AW_NVME_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
         # A real 16550 UART console on COM1: an internal loopback test proves the
         # device, then a banner is emitted on the real line and checked in the
         # host-side serial log - output that actually left the guest.
