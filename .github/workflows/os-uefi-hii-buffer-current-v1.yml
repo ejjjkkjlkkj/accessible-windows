@@ -55,14 +55,14 @@ jobs:
           ast.parse(src)
           for token in [
               "c.emit(b'\\x41\\xff\\x54\\x24\\x18')",
-              "c.emit(b'\\x41\\xff\\x54\\x24\\x50')",
-              "c.emit(b'\\x41\\xff\\x97\\x98\\x00\\x00\\x00')",
-              "c.emit(b'\\xff\\x11')",
+              "c.emit(b'\\xff\\x51\\x08')",
               "c.emit(b'\\xff\\x51\\x20')",
+              "hex_utf16_nibble",
+              "config_boundary_scan",
               "HII_CONFIG_ROUTING_PROTOCOL=PASS",
               "HII_HANDLE_LIST=PASS",
-              "HII_CONFIG_ACCESS_PROTOCOL=PASS",
-              "CONFIG_ACCESS_EXTRACT=PASS",
+              "HII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS",
+              "CONFIG_ROUTING_EXPORT_CONFIG=PASS",
               "CONFIG_TO_BLOCK=PASS",
               "BUFFER_VARSTORE_MATCH=PASS",
               "CURRENT_VALUE_READ=PASS",
@@ -70,12 +70,16 @@ jobs:
               "OS_UEFI_HII_BUFFER_CURRENT_BUILD=PASS",
           ]:
               assert token in src,token
-          # ConfigAccess.RouteConfig is method +8. It is forbidden in this stage.
-          assert "c.emit(b'\\xff\\x51\\x08')" not in src
+          # Routing.ExportConfig is method +8 and Routing.ConfigToBlock is +0x20.
+          # Routing.RouteConfig is +0x10 and must remain absent.
+          assert "c.emit(b'\\xff\\x51\\x10')" not in src
+          # Direct ConfigAccess ExtractConfig (call [rcx]) must remain absent.
+          assert "c.emit(b'\\xff\\x11')" not in src
           proof=set((root/'os-uefi-hii-buffer-current-v1.labproof').read_text().splitlines())
           for line in [
               'storage-opcode = 0x24 EFI_IFR_VARSTORE',
-              'storage-read-service = EFI_HII_CONFIG_ACCESS_PROTOCOL.ExtractConfig',
+              'storage-read-service = EFI_HII_CONFIG_ROUTING_PROTOCOL.ExportConfig',
+              'external-caller-routing = required by UEFI; direct EFI_HII_CONFIG_ACCESS_PROTOCOL invocation is not used',
               'route-config-call = forbidden',
               'runtime-variable-read = forbidden',
               'set-variable-call = forbidden',
@@ -121,8 +125,8 @@ jobs:
               b'VARSTORE_DEFINITION_MATCH=PASS\r\n',
               b'HII_CONFIG_ROUTING_PROTOCOL=PASS\r\n',
               b'HII_HANDLE_LIST=PASS\r\n',
-              b'HII_CONFIG_ACCESS_PROTOCOL=PASS\r\n',
-              b'CONFIG_ACCESS_EXTRACT=PASS\r\n',
+              b'HII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS\r\n',
+              b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\r\n',
               b'CONFIG_TO_BLOCK=PASS\r\n',
               b'BUFFER_VARSTORE_MATCH=PASS\r\n',
               b'CURRENT_VALUE_READ=PASS\r\n',
@@ -133,7 +137,7 @@ jobs:
               assert token in image,token
           print('HII_BUFFER_CURRENT_STATIC=PASS')
           print('BUFFER_VARSTORE_24=REQUIRED')
-          print('EXTRACT_CONFIG=BOUND_READ_ONLY')
+          print('EXPORT_CONFIG=BOUND_READ_ONLY')
           print('CONFIG_TO_BLOCK=BOUND_READ_ONLY')
           print('ROUTE_CONFIG=ABSENT_BY_CONTRACT')
           print('W_X=BLOCKED')
@@ -188,8 +192,8 @@ jobs:
               b'VARSTORE_DEFINITION_MATCH=PASS\r\n',
               b'HII_CONFIG_ROUTING_PROTOCOL=PASS\r\n',
               b'HII_HANDLE_LIST=PASS\r\n',
-              b'HII_CONFIG_ACCESS_PROTOCOL=PASS\r\n',
-              b'CONFIG_ACCESS_EXTRACT=PASS\r\n',
+              b'HII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS\r\n',
+              b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\r\n',
               b'CONFIG_TO_BLOCK=PASS\r\n',
               b'BUFFER_VARSTORE_MATCH=PASS\r\n',
               b'CURRENT_VALUE_READ=PASS\r\n',
@@ -266,7 +270,7 @@ jobs:
             echo 'firmware = OVMF'
             echo 'machine = q35'
             cat "$root/current.txt"
-            echo 'read-service = HII Config Access ExtractConfig plus ConfigToBlock'
+            echo 'read-service = HII Config Routing ExportConfig plus ConfigToBlock'
             echo 'route-config-call = false'
             echo 'runtime-variable-read = false'
             echo 'set-variable-call = false'
@@ -331,7 +335,7 @@ jobs:
               f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
               f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
               "proof-buffer-current-value = PASS\n"
-              "proof-read-service = HII Config Access ExtractConfig plus ConfigToBlock\n"
+              "proof-read-service = HII Config Routing ExportConfig plus ConfigToBlock\n"
               f"proof-question-text = {vals['question-text']}\n"
               f"proof-question-id = {vals['question-id']}\n"
               f"proof-varstore-id = {vals['varstore-id']}\n"
