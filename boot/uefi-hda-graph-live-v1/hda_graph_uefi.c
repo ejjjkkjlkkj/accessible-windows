@@ -119,15 +119,24 @@ static u32 immediate(u32 command) {
     mmio16w(0x68, 2);
     return response;
 }
+static u32 encode_verb12(u8 cad, u8 nid, u16 verb, u8 payload) {
+    return ((u32)cad << 28) | ((u32)nid << 20) |
+           ((u32)verb << 8) | payload;
+}
 static u32 verb12(u8 nid, u16 verb, u8 payload) {
-    return immediate(((u32)g_cad << 28) | ((u32)nid << 20) |
-                     ((u32)verb << 8) | payload);
+    return immediate(encode_verb12(g_cad, nid, verb, payload));
 }
 static u32 get_param(u8 nid, u8 param) {
     return verb12(nid, 0xf00, param);
 }
 static u32 get_conn_entry(u8 nid, u8 index) {
     return verb12(nid, 0xf02, index);
+}
+static u32 get_conn_select(u8 nid) {
+    return verb12(nid, 0xf01, 0);
+}
+static u32 set_conn_select(u8 nid, u8 index) {
+    return verb12(nid, 0x701, index);
 }
 
 static void clear_graph(void) {
@@ -264,6 +273,31 @@ static int find_route(u8 pin, u8 *dac_out, u8 *selector_count_out) {
     return 1;
 }
 
+static int apply_route(u8 pin, u8 dac, u8 *applied_out) {
+    u8 applied = 0;
+    u8 cur = dac;
+    while (cur != pin) {
+        u8 child = g_parent[cur];
+        if (child == INVALID_NID) return 0;
+        if (g_conn_count[child] > 1) {
+            u8 type = g_type[child];
+            if (type == WIDGET_MIXER) {
+            } else if (selectable(type)) {
+                u8 index = g_route_index[cur];
+                if (set_conn_select(child, index) == INVALID_RESP) return 0;
+                u32 readback = get_conn_select(child);
+                if (readback == INVALID_RESP || (u8)readback != index) return 0;
+                ++applied;
+            } else {
+                return 0;
+            }
+        }
+        cur = child;
+    }
+    *applied_out = applied;
+    return 1;
+}
+
 static int graph_selftest(void) {
     clear_graph();
     g_type[0x14] = WIDGET_PIN;
@@ -285,6 +319,7 @@ static int graph_selftest(void) {
     if (!find_route(0x14, &dac, &selectors)) return 0;
     if (dac != 0x02 || selectors != 1 || g_depth[dac] != 3) return 0;
     if (g_route_index[dac] != 1) return 0;
+    if (encode_verb12(2, 0x14, 0x701, 3) != 0x21470103u) return 0;
     return 1;
 }
 
@@ -433,10 +468,18 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     }
 
     marker("HDA_GRAPH_SEARCH_LIVE=PASS");
+    u8 applied = 0;
+    if (!apply_route(pin, dac, &applied) || applied != selectors) {
+        marker("STATUS=BLOCKED");
+        marker("REASON=HDA_SELECTOR_APPLY_OR_READBACK_FAILED");
+        return 1;
+    }
+    marker("HDA_SELECTOR_APPLY_LIVE=PASS");
     serial_puts("HDA_PIN_NID=0x"); serial_hex8(pin); serial_puts("\r\n");
     serial_puts("HDA_DAC_NID=0x"); serial_hex8(dac); serial_puts("\r\n");
     serial_puts("HDA_ROUTE_DEPTH=0x"); serial_hex8(g_depth[dac]); serial_puts("\r\n");
     serial_puts("HDA_SELECTOR_WRITES_REQUIRED=0x"); serial_hex8(selectors); serial_puts("\r\n");
+    serial_puts("HDA_SELECTOR_WRITES_APPLIED=0x"); serial_hex8(applied); serial_puts("\r\n");
     marker("HDA_SELECTOR_PLAN=PASS");
     marker("PHYSICAL_ASUS_M1603QA_SPEECH=NOT_ESTABLISHED");
     marker("STATUS=PASS");

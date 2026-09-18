@@ -13,8 +13,8 @@ connection-list-short-form = implemented
 connection-list-long-form = implemented
 connection-list-range-expansion = implemented
 multi-hop-route-engine = implemented
-selector-plan-701h = implemented
-live-QEMU-HDA-graph = pending
+selector-plan-701h = implemented\nselector-apply-readback = implemented
+live-QEMU-HDA-graph = PASS
 physical-ASUS-M1603QA-topology = not-established
 physical-ASUS-M1603QA-speech = not-established
 proof = PASS

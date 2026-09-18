@@ -37,7 +37,11 @@ jobs:
               'previous_was_range',
               'static int find_route',
               'static int graph_selftest',
+              'static int apply_route',
               'static int discover_live_graph',
+              'encode_verb12(2, 0x14, 0x701, 3)',
+              'get_conn_select',
+              'set_conn_select',
               'WIDGET_MIXER',
               'WIDGET_SELECTOR',
               'verb12(nid, 0xf02, index)',
@@ -166,12 +170,15 @@ jobs:
           dac=re.search(r'HDA_DAC_NID=0x([0-9A-F]{2})',text)
           depth=re.search(r'HDA_ROUTE_DEPTH=0x([0-9A-F]{2})',text)
           selectors=re.search(r'HDA_SELECTOR_WRITES_REQUIRED=0x([0-9A-F]{2})',text)
-          assert pin and dac and depth and selectors
+          applied=re.search(r'HDA_SELECTOR_WRITES_APPLIED=0x([0-9A-F]{2})',text)
+          assert pin and dac and depth and selectors and applied
+          assert int(applied.group(1),16) == int(selectors.group(1),16)
           metrics=(
               f"pin-nid=0x{pin.group(1)}\n"
               f"dac-nid=0x{dac.group(1)}\n"
               f"route-depth={int(depth.group(1),16)}\n"
               f"selector-writes-required={int(selectors.group(1),16)}\n"
+              f"selector-writes-applied={int(applied.group(1),16)}\n"
           )
           Path('boot/uefi-hda-graph-live-v1/graph-metrics.txt').write_text(metrics)
           print(metrics,end='')
@@ -234,6 +241,7 @@ jobs:
               'proof-live-HDA-connection-decode = PASS',
               'proof-live-HDA-graph-search = PASS',
               'proof-live-selector-plan = PASS',
+              'proof-live-selector-apply-readback = PASS',
               'proof-physical-ASUS-M1603QA-speech = not-established',
               f"proof-live-metrics = {metrics}",
               f"proof-efi-sha256 = {hashlib.sha256(efi).hexdigest()}",
