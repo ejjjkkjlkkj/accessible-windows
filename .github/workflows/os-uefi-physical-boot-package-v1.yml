@@ -31,15 +31,19 @@ jobs:
           mkdir -p "$out"
           python "$src/generate_units.py" "$out/speech_units.c" "$out/speech-unit-metadata.txt"
           flags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
-          clang $flags -DQEV_INTERACTIVE_REPEAT=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main.obj"
+          clang $flags -DQEV_INTERACTIVE_NAV=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main.obj"
           clang $flags -c "$out/speech_units.c" -o "$out/units.obj"
           lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$out/BOOTX64.EFI" "$out/main.obj" "$out/units.obj"
           test -s "$out/BOOTX64.EFI"
           grep -aF 'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3' "$out/BOOTX64.EFI"
           grep -aF 'HDA_CODEC_SELECTION=REALTEK_10EC_0256' "$out/BOOTX64.EFI"
           grep -aF 'HDA_CODEC_VENDOR_DEVICE=0x' "$out/BOOTX64.EFI"
-          grep -aF 'HII_GRAPH_REPEAT_KEY=WAIT_R' "$out/BOOTX64.EFI"
-          grep -aF 'HII_GRAPH_REPEAT_SPEECH_DMA=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_READY=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_KEY=UP' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_KEY=DOWN' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_KEY=R' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_EXIT=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_SPEECH_DMA=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_SPEECH_DMA_REUSE=PASS' "$out/BOOTX64.EFI"
           grep -aF 'BOOT_MEDIA_PERSISTENT_PROOF=PASS' "$out/BOOTX64.EFI"
           grep -aF 'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$out/BOOTX64.EFI"
@@ -165,7 +169,7 @@ jobs:
             printf '%s\r\n' \
               'QEVARYNOX-PHYSICAL-BOOT=PENDING' \
               'EXPECTED_PROOF=QEVARYNOX-PHYSICAL-PROOF.TXT' \
-              'PHYSICAL_CONTROL=PRESS_R_TO_REPEAT' \
+              'PHYSICAL_CONTROL=UP_DOWN_NAVIGATE_R_REPEAT_ESC_EXIT' \
               'FIRMWARE_NVRAM_WRITE=FORBIDDEN' \
               'AUDIBLE_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' > "$out/PENDING.TXT"
             touch -t 202601010000 "$out/PENDING.TXT"
@@ -209,7 +213,8 @@ jobs:
           EXPECTED_CONTROLLER=PCI_1022_15E3
           EXPECTED_CODEC=HDAUDIO_10EC_0256
           CODEC_VERIFICATION=NATIVE_HDA_GET_PARAMETER_00
-          INTERACTIVE_CONTROL=R_REPEAT
+          INTERACTIVE_CONTROL=UP_DOWN_NAVIGATE_R_REPEAT_ESC_EXIT
+          NAVIGATION_PROOF=UP_DOWN_R_ESC
           DMA_REUSE=REQUIRED
           PROOF_FILE=QEVARYNOX-PHYSICAL-PROOF.TXT
           AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION
