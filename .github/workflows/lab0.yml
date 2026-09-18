@@ -3,9 +3,6 @@ on:
   push:
     branches: [os]
     paths:
-      - 'lab0/**'
-      - '.github/workflows/lab0.yml'
-    paths:
       - 'lab0/mark0'
   workflow_dispatch:
 

@@ -4,9 +4,6 @@ on:
     branches: [os]
     paths:
       - 'lab0/mark0'
-      - '.github/workflows/lab1.yml'
-    paths:
-      - 'lab0/mark0'
   workflow_dispatch:
 
 permissions:

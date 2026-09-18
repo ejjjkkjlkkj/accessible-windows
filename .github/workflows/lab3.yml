@@ -4,11 +4,6 @@ on:
     branches: [os]
     paths:
       - 'lab0/mark0'
-      - 'lab2/relation0'
-      - 'lab3/inverted0'
-      - '.github/workflows/lab3.yml'
-    paths:
-      - 'lab0/mark0'
       - 'lab3/inverted0'
       - 'lab2/relation0'
   workflow_dispatch:
