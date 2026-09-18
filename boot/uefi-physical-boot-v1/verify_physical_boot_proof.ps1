@@ -30,9 +30,10 @@ $required=@(
   'HDA_OUTPUT_PATH_CONFIGURATION=PASS',
   'HII_GRAPH_SPEECH_DMA=PASS',
   'LPIB_PROGRESS=PASS',
-  'HII_GRAPH_REPEAT_KEY=PASS',
-  'HII_GRAPH_REPEAT_SPEECH_DMA=PASS',
-  'HII_GRAPH_REPEAT_LPIB_PROGRESS=PASS',
+  'HII_GRAPH_NAV_UP=PASS',
+  'HII_GRAPH_NAV_DOWN=PASS',
+  'HII_GRAPH_NAV_REPEAT=PASS',
+  'HII_GRAPH_NAV_EXIT=PASS',
   'HII_GRAPH_SPEECH_DMA_REUSE=PASS',
   'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION'
 )
@@ -51,6 +52,32 @@ $pin=[regex]::Match($raw,'(?m)^HDA_PIN_NID=(0x[0-9A-F]{2})$').Groups[1].Value
 $dac=[regex]::Match($raw,'(?m)^HDA_DAC_NID=(0x[0-9A-F]{2})$').Groups[1].Value
 $depth=[regex]::Match($raw,'(?m)^HDA_ROUTE_DEPTH=(0x[0-9A-F]{2})$').Groups[1].Value
 if(-not $pin -or -not $dac -or -not $depth){ throw 'Physical HDA route fields missing' }
+$navEvents=[regex]::Match($raw,'(?m)^HII_GRAPH_NAV_SPEECH_EVENTS=(0x[0-9A-F]{2})
+
+[pscustomobject]@{
+  Result='PASS'
+  ProofPath=$ProofPath
+  Controller='PCI 1022:15E3'
+  Codec='Realtek 10EC:0256 verified by native HDA verb'
+  PinNid=$pin
+  DacNid=$dac
+  RouteDepth=$depth
+  NativeUefiHdaExecution='PASS'
+  HiiNavigation='UP_DOWN_R_ESC_PASS'
+  NavigationSpeechEvents=$navEvents
+  DmaReuse='PASS'
+  AudiblePhysicalSpeaker='REQUIRES_HUMAN_CONFIRMATION'
+} | ConvertTo-Json -Depth 4
+
+'PHYSICAL_UEFI_HDA_EXECUTION=PASS'
+'PHYSICAL_UEFI_HII_NAVIGATION=PASS'
+'PHYSICAL_UEFI_INTERACTIVE_REPEAT=PASS'
+'PHYSICAL_UEFI_DMA_REUSE=PASS'
+'PHYSICAL_UEFI_SPEAKER_AUDIBLE=REQUIRES_HUMAN_CONFIRMATION'
+).Groups[1].Value
+if(-not $navEvents -or [Convert]::ToInt32($navEvents.Substring(2),16) -lt 3){
+  throw 'Physical HII navigation did not produce the required UP/DOWN/R speech events'
+}
 
 [pscustomobject]@{
   Result='PASS'
