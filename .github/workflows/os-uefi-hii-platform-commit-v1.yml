@@ -229,7 +229,7 @@ jobs:
               assert b'ROUTE_CONFIG=PASS\r\n' not in b
               target_value=raw_u32(last(br'NAV_NEXT_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})',b,'target value'))
               target_label=last(br'NAV_FOCUS_OPTION_TEXT=([^\r\n]+)',b,'target label').decode('ascii','replace').strip()
-              spoken=last(br'NAV_FOCUS_SPOKEN_PREFIX=([^\r\n]+)',b,'spoken prefix').decode('ascii','replace').strip()
+              spoken=last(br'NAV_FOCUS_SPOKEN_PREFIX=([0-9a-z]{1,8})\r\n',b,'spoken prefix').decode('ascii','replace').strip()
               assert target_value != initial_value,(initial_value,target_value)
               assert target_label and spoken,(target_label,spoken)
               print('PLATFORM_PRE_ENTER_CURRENT='+str(initial_value))
