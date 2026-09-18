@@ -155,11 +155,9 @@ pub fn validate_disjoint_allocations(
         .validate_structure()
         .map_err(AllocationPairError::SecondInvalid)?;
 
-    if first
-        .extent
-        .overlaps(second.extent)
-        .map_err(|error| AllocationPairError::FirstInvalid(AllocationRecordError::InvalidExtent(error)))?
-    {
+    if first.extent.overlaps(second.extent).map_err(|error| {
+        AllocationPairError::FirstInvalid(AllocationRecordError::InvalidExtent(error))
+    })? {
         return Err(AllocationPairError::Overlap);
     }
 
@@ -196,7 +194,9 @@ mod tests {
         let allocation = record(ALLOCATION_A, OWNER_A, 10, 0);
         assert_eq!(
             allocation.validate_structure(),
-            Err(AllocationRecordError::InvalidExtent(ExtentError::EmptyExtent))
+            Err(AllocationRecordError::InvalidExtent(
+                ExtentError::EmptyExtent
+            ))
         );
     }
 
