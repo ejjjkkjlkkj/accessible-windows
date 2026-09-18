@@ -8,10 +8,12 @@ use aw_abi::BootInfo;
 pub enum BringUpError {
     /// The boot handoff does not match ABI v1.
     InvalidBootInfo,
-    /// Mandatory accessibility capabilities were not present.
-    AccessibilityContractUnsatisfied {
-        /// Bitmask of required capabilities that were missing.
-        missing: u64,
+    /// Mandatory intrinsic human-I/O invariants were not present.
+    HumanIoContractUnsatisfied {
+        /// Mandatory channels that were absent.
+        missing_all: u64,
+        /// True when no member of the required-any output group was present.
+        missing_any: bool,
     },
 }
 
@@ -30,15 +32,19 @@ impl KernelFoundation {
         }
     }
 
-    /// Validates the boot ABI and accessibility contract before later initialization.
+    /// Validates the boot ABI and intrinsic human-I/O invariants.
     pub fn accept_boot_info(&mut self, boot_info: &BootInfo) -> Result<(), BringUpError> {
         if !boot_info.is_valid_v1() {
             return Err(BringUpError::InvalidBootInfo);
         }
 
-        let missing = boot_info.accessibility.missing();
-        if missing != 0 {
-            return Err(BringUpError::AccessibilityContractUnsatisfied { missing });
+        let missing_all = boot_info.human_io.missing_all();
+        let missing_any = boot_info.human_io.missing_any();
+        if missing_all != 0 || missing_any {
+            return Err(BringUpError::HumanIoContractUnsatisfied {
+                missing_all,
+                missing_any,
+            });
         }
 
         self.boot_contract_verified = true;
@@ -55,33 +61,44 @@ impl KernelFoundation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aw_abi::{AccessibilityContract, BootInfo, BootPhase, capability};
+    use aw_abi::{BootInfo, BootPhase, HumanIoContract, human_io};
 
     #[test]
-    fn refuses_boot_without_required_accessibility() {
+    fn refuses_visual_only_boot() {
         let info = BootInfo::new(
             BootPhase::Bootloader,
-            AccessibilityContract::new(
-                capability::KEYBOARD_INPUT | capability::SPEECH_OUTPUT,
-                capability::KEYBOARD_INPUT,
+            HumanIoContract::new(
+                human_io::KEYBOARD_INPUT | human_io::SEMANTIC_INTERACTION,
+                human_io::SPEECH_OUTPUT | human_io::BRAILLE_OUTPUT,
+                human_io::KEYBOARD_INPUT
+                    | human_io::SEMANTIC_INTERACTION
+                    | human_io::VISUAL_OUTPUT,
             ),
         );
+
         let mut kernel = KernelFoundation::new();
         assert_eq!(
             kernel.accept_boot_info(&info),
-            Err(BringUpError::AccessibilityContractUnsatisfied {
-                missing: capability::SPEECH_OUTPUT,
+            Err(BringUpError::HumanIoContractUnsatisfied {
+                missing_all: 0,
+                missing_any: true,
             })
         );
     }
 
     #[test]
-    fn accepts_valid_accessible_transition() {
-        let required = capability::KEYBOARD_INPUT | capability::SPEECH_OUTPUT;
+    fn accepts_native_non_visual_transition() {
+        let required_all = human_io::KEYBOARD_INPUT | human_io::SEMANTIC_INTERACTION;
+        let required_any = human_io::SPEECH_OUTPUT | human_io::BRAILLE_OUTPUT;
         let info = BootInfo::new(
             BootPhase::Bootloader,
-            AccessibilityContract::new(required, required),
+            HumanIoContract::new(
+                required_all,
+                required_any,
+                required_all | human_io::SPEECH_OUTPUT,
+            ),
         );
+
         let mut kernel = KernelFoundation::new();
         assert_eq!(kernel.accept_boot_info(&info), Ok(()));
         assert!(kernel.boot_contract_verified());

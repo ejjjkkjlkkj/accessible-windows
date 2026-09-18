@@ -1,13 +1,13 @@
 [workspace]
 members = [
     "crates/aw-abi",
-    "crates/aw-accessibility",
+    "crates/aw-core",
     "crates/aw-kernel",
     "boot/aw-uefi",
 ]
 default-members = [
     "crates/aw-abi",
-    "crates/aw-accessibility",
+    "crates/aw-core",
     "crates/aw-kernel",
 ]
 resolver = "3"

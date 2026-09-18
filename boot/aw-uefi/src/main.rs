@@ -2,8 +2,8 @@
 #![no_main]
 //! First UEFI entry point for the new OS branch.
 
-use aw_abi::{BootInfo, BootPhase};
-use aw_accessibility::AccessibilityState;
+use aw_abi::BootPhase;
+use aw_core::SystemState;
 use core::{ffi::c_void, panic::PanicInfo};
 
 const EFI_SUCCESS: usize = 0;
@@ -17,12 +17,13 @@ fn panic(_info: &PanicInfo<'_>) -> ! {
 
 /// UEFI entry point.
 ///
-/// The first milestone deliberately assumes no accessibility capability. Future
-/// firmware adapters must positively observe each capability before handoff.
+/// No human-I/O channel is assumed. Native firmware adapters must positively
+/// verify channels before a later milestone is permitted to hand off control to
+/// the kernel.
 #[unsafe(no_mangle)]
 pub extern "efiapi" fn efi_main(_image_handle: *mut c_void, _system_table: *mut c_void) -> usize {
-    let state = AccessibilityState::new(BootPhase::Bootloader);
-    let _boot_info = BootInfo::new(BootPhase::Bootloader, state.strict_contract());
+    let state = SystemState::new(BootPhase::Bootloader);
+    let _boot_info = state.boot_info();
 
     EFI_SUCCESS
 }

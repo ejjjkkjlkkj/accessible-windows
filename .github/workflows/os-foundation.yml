@@ -10,20 +10,52 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
+  architecture-policy:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: Install pinned Rust toolchain and targets
+      - name: Reject a separate accessibility subsystem
+        shell: bash
         run: |
-          rustup toolchain install 1.98.1 --profile minimal --component clippy --component rustfmt
-          rustup target add --toolchain 1.98.1 x86_64-unknown-none x86_64-unknown-uefi
+          test ! -e crates/aw-accessibility
+          ! find crates boot -type f \( -name '*.rs' -o -name 'Cargo.toml' \) -print0 |
+            xargs -0 grep -nEi 'UIAutomation|MSAA|IAccessible|AT-SPI|AXAPI|Android Accessibility|AccessKit|Electron|GTK|Qt' 
+      - name: Require architectural constitution
+        shell: bash
+        run: |
+          test -s docs/CONSTITUTION.md
+          grep -q "Accessibility is intrinsic" docs/CONSTITUTION.md
+          grep -q "GitHub Actions is authoritative" docs/CONSTITUTION.md
+
+  host-validation:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - windows-2025
+          - macos-15
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal --component clippy --component rustfmt
       - name: Formatting
         run: cargo +1.98.1 fmt --all -- --check
       - name: Host tests
         run: cargo +1.98.1 test --workspace --exclude aw-uefi
       - name: Clippy
         run: cargo +1.98.1 clippy --workspace --exclude aw-uefi --all-targets -- -D warnings
+
+  bare-metal-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain and targets
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component clippy --component rustfmt
+          rustup target add --toolchain 1.98.1 x86_64-unknown-none x86_64-unknown-uefi
       - name: Bare-metal kernel check
         run: cargo +1.98.1 check -p aw-kernel --target x86_64-unknown-none
       - name: UEFI check

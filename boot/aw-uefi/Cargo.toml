@@ -6,7 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 aw-abi = { path = "../../crates/aw-abi" }
-aw-accessibility = { path = "../../crates/aw-accessibility" }
+aw-core = { path = "../../crates/aw-core" }
 
 [[bin]]
 name = "aw-uefi"
