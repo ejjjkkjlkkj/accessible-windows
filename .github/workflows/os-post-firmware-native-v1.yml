@@ -29,7 +29,7 @@ jobs:
           image=bytes.fromhex(Path('boot/post-firmware-v1/qevarynox-post-firmware.hex').read_text())
           Path('boot/post-firmware-v1/BOOTX64.EFI').write_bytes(image)
           assert len(image)==2048
-          assert hashlib.sha256(image).hexdigest()=='662a0a9fdd011728b23acc0c1ca7ae8a1f5eda016c9c6f8a1c08679887839a35'
+          assert hashlib.sha256(image).hexdigest()=='45e4424c31a129c71653e1e6ae4197c575d9490030d414c9b56fb9afe8662c37'
 
           relation=Path('lab21/relation-compose0').read_bytes()
           assert relation==image[0x420:0x424]
@@ -67,6 +67,7 @@ jobs:
 
           assert struct.unpack_from('<Q',image,0x400)[0]==65536
           code=image[0x200:0x200+text_vsize]
+          assert code.startswith(bytes.fromhex('4989cc4989d54c8b7260'))
           getmap=bytes.fromhex('498b4638ffd04885c075')
           exitbs=bytes.fromhex('498b86e8000000ffd04885c075')
           gi=code.find(getmap)
@@ -236,7 +237,7 @@ jobs:
           for($i=0;$i -lt 2048;$i++) { $bytes[$i]=[Convert]::ToByte($hex.Substring($i*2,2),16) }
           [IO.File]::WriteAllBytes((Join-Path $PWD 'boot/post-firmware-v1/BOOTX64.EFI'),$bytes)
           $hash=(Get-FileHash -Algorithm SHA256 'boot/post-firmware-v1/BOOTX64.EFI').Hash.ToLowerInvariant()
-          if ($hash -ne '662a0a9fdd011728b23acc0c1ca7ae8a1f5eda016c9c6f8a1c08679887839a35') { throw "sha256=$hash" }
+          if ($hash -ne '45e4424c31a129c71653e1e6ae4197c575d9490030d414c9b56fb9afe8662c37') { throw "sha256=$hash" }
 
           $relation=[IO.File]::ReadAllBytes((Join-Path $PWD 'lab21/relation-compose0'))
           for($i=0;$i -lt 4;$i++) {
