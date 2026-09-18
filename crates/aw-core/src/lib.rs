@@ -305,9 +305,258 @@ impl SemanticEdgeV1 {
     }
 }
 
+
+/// Native identity for a cognitive-memory record.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub struct MemoryRecordId(u64);
+
+impl MemoryRecordId {
+    /// Reserved invalid identity.
+    pub const ZERO: Self = Self(0);
+
+    /// Creates a memory-record identity.
+    #[must_use]
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// Returns true for the reserved invalid identity.
+    #[must_use]
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// Native memory class.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryClass {
+    /// Short-lived active/working context.
+    Working = 1,
+    /// Event/history memory.
+    Episodic = 2,
+    /// Meaning and knowledge memory.
+    Semantic = 3,
+    /// Learned procedure or skill memory.
+    Procedural = 4,
+}
+
+/// Retention intent for native memory.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryRetention {
+    /// May disappear as soon as the active task ends.
+    Ephemeral = 1,
+    /// Retained for the current system/user session.
+    Session = 2,
+    /// Durable native memory.
+    Durable = 3,
+    /// Explicitly retained under user control.
+    UserPinned = 4,
+}
+
+/// Semantic links carried by a memory record.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MemoryLinksV1 {
+    /// Semantic subject this memory is about.
+    pub subject: SemanticObjectId,
+    /// Semantic content/meaning retained.
+    pub content: SemanticObjectId,
+    /// Semantic source/provenance describing where the memory came from.
+    pub provenance: SemanticObjectId,
+}
+
+impl MemoryLinksV1 {
+    /// Creates memory links.
+    #[must_use]
+    pub const fn new(
+        subject: SemanticObjectId,
+        content: SemanticObjectId,
+        provenance: SemanticObjectId,
+    ) -> Self {
+        Self {
+            subject,
+            content,
+            provenance,
+        }
+    }
+}
+
+/// Validation errors for native cognitive memory.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryRecordError {
+    /// Every memory record requires a nonzero identity.
+    MissingId,
+    /// Generation zero is reserved.
+    InvalidGeneration,
+    /// Subject semantic identity is required.
+    MissingSubject,
+    /// Content semantic identity is required.
+    MissingContent,
+    /// Provenance is mandatory; native memory must not silently invent origin.
+    MissingProvenance,
+    /// Confidence is expressed in parts-per-million and cannot exceed 1,000,000.
+    InvalidConfidence,
+    /// Reserved version-1 flags must remain zero.
+    ReservedFlagsSet,
+}
+
+/// Version-1 native cognitive-memory record.
+///
+/// Memory is versioned and provenance-bearing system state. This is a structural
+/// foundation only; it does not implement learning, retrieval or persistence.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemoryRecordV1 {
+    /// Identity of this immutable memory version.
+    pub id: MemoryRecordId,
+    /// Previous version or `MemoryRecordId::ZERO`.
+    pub previous_version: MemoryRecordId,
+    /// Monotonic memory generation.
+    pub generation: u64,
+    /// Cognitive memory class.
+    pub class: MemoryClass,
+    /// Retention intent.
+    pub retention: MemoryRetention,
+    /// Semantic subject/content/provenance links.
+    pub links: MemoryLinksV1,
+    /// Confidence in parts-per-million, from 0 through 1,000,000.
+    pub confidence_ppm: u32,
+    /// Reserved version-1 flags.
+    pub flags: u32,
+}
+
+impl MemoryRecordV1 {
+    /// Creates a version-1 native memory record.
+    #[must_use]
+    pub const fn new(
+        id: MemoryRecordId,
+        previous_version: MemoryRecordId,
+        generation: u64,
+        class: MemoryClass,
+        retention: MemoryRetention,
+        links: MemoryLinksV1,
+        confidence_ppm: u32,
+    ) -> Self {
+        Self {
+            id,
+            previous_version,
+            generation,
+            class,
+            retention,
+            links,
+            confidence_ppm,
+            flags: 0,
+        }
+    }
+
+    /// Validates native memory invariants.
+    pub const fn validate(&self) -> Result<(), MemoryRecordError> {
+        if self.id.is_zero() {
+            return Err(MemoryRecordError::MissingId);
+        }
+        if self.generation == 0 {
+            return Err(MemoryRecordError::InvalidGeneration);
+        }
+        if self.links.subject.is_zero() {
+            return Err(MemoryRecordError::MissingSubject);
+        }
+        if self.links.content.is_zero() {
+            return Err(MemoryRecordError::MissingContent);
+        }
+        if self.links.provenance.is_zero() {
+            return Err(MemoryRecordError::MissingProvenance);
+        }
+        if self.confidence_ppm > 1_000_000 {
+            return Err(MemoryRecordError::InvalidConfidence);
+        }
+        if self.flags != 0 {
+            return Err(MemoryRecordError::ReservedFlagsSet);
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn memory_links() -> MemoryLinksV1 {
+        MemoryLinksV1::new(
+            SemanticObjectId::new(100),
+            SemanticObjectId::new(101),
+            SemanticObjectId::new(102),
+        )
+    }
+
+    #[test]
+    fn memory_record_requires_provenance() {
+        let record = MemoryRecordV1::new(
+            MemoryRecordId::new(1),
+            MemoryRecordId::ZERO,
+            1,
+            MemoryClass::Episodic,
+            MemoryRetention::Durable,
+            MemoryLinksV1::new(
+                SemanticObjectId::new(100),
+                SemanticObjectId::new(101),
+                SemanticObjectId::ZERO,
+            ),
+            900_000,
+        );
+
+        assert_eq!(
+            record.validate(),
+            Err(MemoryRecordError::MissingProvenance)
+        );
+    }
+
+    #[test]
+    fn memory_record_rejects_invalid_confidence() {
+        let record = MemoryRecordV1::new(
+            MemoryRecordId::new(1),
+            MemoryRecordId::ZERO,
+            1,
+            MemoryClass::Semantic,
+            MemoryRetention::Durable,
+            memory_links(),
+            1_000_001,
+        );
+
+        assert_eq!(
+            record.validate(),
+            Err(MemoryRecordError::InvalidConfidence)
+        );
+    }
+
+    #[test]
+    fn memory_record_supports_versioned_user_controlled_memory() {
+        let first = MemoryRecordV1::new(
+            MemoryRecordId::new(1),
+            MemoryRecordId::ZERO,
+            1,
+            MemoryClass::Procedural,
+            MemoryRetention::UserPinned,
+            memory_links(),
+            800_000,
+        );
+        let second = MemoryRecordV1::new(
+            MemoryRecordId::new(2),
+            first.id,
+            2,
+            MemoryClass::Procedural,
+            MemoryRetention::UserPinned,
+            memory_links(),
+            900_000,
+        );
+
+        assert_eq!(first.validate(), Ok(()));
+        assert_eq!(second.validate(), Ok(()));
+        assert_eq!(second.previous_version, first.id);
+        assert_eq!(second.retention, MemoryRetention::UserPinned);
+    }
 
     #[test]
     fn semantic_interactive_object_requires_meaning_and_action() {
