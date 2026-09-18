@@ -394,6 +394,7 @@ jobs:
         run: |
           set -euo pipefail
           root=boot/uefi-screenreader-interactive-v1
+          builder="$root/build_uefi_screenreader_interactive.py"
 
           # Freeze evidence from this tested run before moving to the latest os tip.
           python - <<'PY'
@@ -435,6 +436,15 @@ jobs:
           # Preserve every commit that may have landed on os while this job was running.
           git fetch origin os
           git checkout -B os origin/os
+
+          tested_blob="$(git rev-parse \"${GITHUB_SHA}:${builder}\")"
+          current_blob="$(git rev-parse \"os:${builder}\")"
+          if [[ "$tested_blob" != "$current_blob" ]]; then
+            echo "UEFI_INTERACTIVE_PROOF_STALE_RUN=SKIP"
+            echo "tested-builder=$tested_blob"
+            echo "current-builder=$current_blob"
+            exit 0
+          fi
 
           python - <<'PY'
           from pathlib import Path
