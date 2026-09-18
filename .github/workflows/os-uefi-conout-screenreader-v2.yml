@@ -127,7 +127,12 @@ jobs:
               bytes.fromhex('6bc00c'),
               bytes.fromhex('b824000000'),
               bytes.fromhex('b825000000'),
-              bytes.fromhex('4589c4'),
+              bytes.fromhex('4154415541564157'),     # parent save r12-r15
+              bytes.fromhex('415f415e415d415cc3'),   # parent restore r15-r12
+              bytes.fromhex('41544155'),             # hook save r12-r13
+              bytes.fromhex('41bd40000000'),         # MAX_CHARS = 64
+              bytes.fromhex('4589c4'),               # play_clip saves duration in r12d
+              bytes.fromhex('4489e1'),               # Stall receives saved duration
               bytes.fromhex('66ba2602'),
               bytes.fromhex('66ba2c02'),
               b'ENGINE=RUNTIME_CHAR_SPEECH\r\n',
