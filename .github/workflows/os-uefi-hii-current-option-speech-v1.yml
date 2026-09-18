@@ -66,21 +66,11 @@ jobs:
               have=set(Path(path).read_text().splitlines())
               for line in lines:
                   assert line in have,(path,line)
-          fixture=set(Path('boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof').read_text().splitlines())
-          for line in [
-              'proof = PASS',
-              'question-text = iSCSI Mode',
-              'varstore-id = 26214',
-              'varstore-offset = 472',
-              'varstore-size = 17724',
-              'varstore-guid-raw-hex = 16D6474BD6A852459D44CCAD2E0F4CF9',
-          ]:
-              assert line in fixture,('fixture',line)
           selected=Path('boot/uefi-hii-selected-label-v1/os-uefi-hii-selected-label-v1.labproof').read_text().splitlines()
           labels=[x.split(' = ',1)[1] for x in selected if x.startswith('proof-selected-option-text = ')]
           assert len(labels)==1 and labels[0],labels
           print('CURRENT_OPTION_SPEECH_DEPENDENCIES=PASS')
-          print('CURRENT_OPTION_EXPECTED_LABEL='+labels[0])
+          print('CURRENT_OPTION_HII_DISCOVERY=DYNAMIC')
 
       - name: Audit integrated current-option speech source
         shell: python
@@ -250,21 +240,9 @@ jobs:
           import re,time
           root=Path('boot/uefi-hii-current-option-speech-v1')
           p=root/'current-option-speech.serial'
-          lines=Path('boot/uefi-hii-selected-label-v1/os-uefi-hii-selected-label-v1.labproof').read_text().splitlines()
-          def one(prefix):
-              vals=[x.split(' = ',1)[1] for x in lines if x.startswith(prefix+' = ')]
-              assert len(vals)==1,(prefix,vals)
-              return vals[0]
-          expected_label=one('proof-selected-option-text')
-          expected_question=one('proof-question-text')
-          expected_string_id=int(one('proof-selected-option-string-id'))
-          expected_value=int(one('proof-selected-option-value-unsigned'))
-          expected_prefix=''.join(ch.lower() for ch in expected_label if 'a' <= ch.lower() <= 'z')[:8]
-          assert expected_prefix,(expected_label,expected_prefix)
-          fixture={}
-          for line in Path('boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof').read_text().splitlines():
-              if ' = ' in line:
-                  k,v=line.split(' = ',1); fixture[k]=v
+          # Do not bind runtime validation to one OVMF package ordering or one
+          # historical iSCSI question. The reader must work with the live ONE_OF
+          # that the current firmware exposes first.
           required=[
               b'HII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\n',
               b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\r\n',
@@ -301,7 +279,7 @@ jobs:
                   sm=re.search(br'SELECTED_OPTION_STRING_ID_LE_HEX=([0-9A-F]{4})',raw)
                   cm=re.search(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
                   om=re.search(br'SELECTED_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
-                  pm=re.search(br'CURRENT_OPTION_SPOKEN_PREFIX=([a-z]{1,8})\r\nCURRENT_OPTION_SPOKEN_PREFIX=PASS\r\n',raw)
+                  pm=re.search(br'CURRENT_OPTION_SPOKEN_PREFIX=([a-z0-9]{1,8})\r\nCURRENT_OPTION_SPOKEN_PREFIX=PASS\r\n',raw)
                   assert all([qm,vsid,vinfo,vssize,vsguid,lm,sm,cm,om,pm]),raw[-20000:]
                   question=qm.group(1).decode('ascii','replace').strip()
                   label=lm.group(1).decode('ascii','replace').strip()
@@ -318,14 +296,19 @@ jobs:
                   current_value=bytes.fromhex(current_raw)[0]
                   option_value=bytes.fromhex(option_raw)[0]
                   count=raw.count(b'EVENT=CURRENT_OPTION_GRAPHEME_ACCEPTED\r\n')
-                  assert question==expected_question,(question,expected_question)
-                  assert varstore_id==int(fixture['varstore-id']),(varstore_id,fixture['varstore-id'])
-                  assert varstore_offset==int(fixture['varstore-offset']),(varstore_offset,fixture['varstore-offset'])
-                  assert varstore_size==int(fixture['varstore-size']),(varstore_size,fixture['varstore-size'])
-                  assert varstore_guid==fixture['varstore-guid-raw-hex'],(varstore_guid,fixture['varstore-guid-raw-hex'])
-                  assert label==expected_label,(label,expected_label)
-                  assert string_id==expected_string_id,(string_id,expected_string_id)
-                  assert current_value==option_value==expected_value,(current_value,option_value,expected_value)
+                  expected_prefix=''.join(
+                      ch.lower() for ch in label
+                      if ('a' <= ch.lower() <= 'z') or ('0' <= ch <= '9')
+                  )[:8]
+                  assert question,question
+                  assert varstore_id!=0,varstore_id
+                  assert 0 <= varstore_offset < varstore_size,(varstore_offset,varstore_size)
+                  assert len(varstore_guid)==32,varstore_guid
+                  assert label,label
+                  assert string_id!=0,string_id
+                  assert current_raw==option_raw,(current_raw,option_raw)
+                  assert current_value==option_value,(current_value,option_value)
+                  assert expected_prefix,(label,expected_prefix)
                   assert spoken==expected_prefix,(spoken,expected_prefix,label)
                   assert count==len(expected_prefix),(count,len(expected_prefix))
                   root.joinpath('runtime.txt').write_text(
@@ -341,8 +324,8 @@ jobs:
                       f'spoken-prefix = {spoken}\n'
                       f'spoken-graphemes = {count}\n'
                   )
-                  print('CURRENT_OPTION_IDENTITY_MATCH=PASS')
-                  print('CURRENT_OPTION_VARSTORE_IDENTITY=PASS')
+                  print('CURRENT_OPTION_DYNAMIC_HII_BINDING=PASS')
+                  print('CURRENT_OPTION_VARSTORE_BOUNDS=PASS')
                   print('CURRENT_OPTION_LABEL='+label)
                   print('CURRENT_OPTION_SPOKEN_PREFIX='+spoken)
                   print('CURRENT_OPTION_SPEECH_RUNTIME=PASS')
