@@ -117,7 +117,7 @@ def build():
   'matched_hii_handle':320,'block_size':328,'current_width':336,'current_raw':344,'config_boundary':352,
   'varstore_name_ptr':360,'varstore_name_remaining':368,
   'resolve_mode':372,'option_flags':373,'option_type':374,'option_width':375,
-  'option_value':376,'option_scope_depth':384,
+  'option_value':376,'option_scope_depth':384,'option_strings_ptr':392,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -394,6 +394,9 @@ def build():
  c.label('direct_scsu_found')
  c.emit(b'\x80\x3e\x00'); c.rel32(b'\x0f\x84','fail_string')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\x80\x38\x01'); c.rel32(b'\x0f\x84','selected_scsu_found')
+ # Preserve the exact Strings package/language that resolved the question.
+ # The selected option StringId must be decoded in that same language namespace.
+ c.lea_rax_data(L['strings_ptr']); c.emit(b'\x48\x8b\x00'); c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x89\x02')
  # Phase 0: resolve the live ONE_OF prompt, read its current Buffer Storage,
  # then select the child ONE_OF_OPTION whose typed value equals current_raw.
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x89\x32')
@@ -406,7 +409,7 @@ def build():
  serial('suffix')
  c.rel32(b'\xe8','resolve_current_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\xc6\x00\x01')
- c.lea_rdx_data(L['strings_first']); c.emit(b'\x48\x8b\x02')
+ c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x8b\x02')
  c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x02')
  c.rel32(b'\xe9','resolve_string_package')
 
@@ -419,6 +422,7 @@ def build():
  c.label('direct_ucs_found')
  c.emit(b'\x66\x83\x3e\x00'); c.rel32(b'\x0f\x84','fail_string')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\x80\x38\x01'); c.rel32(b'\x0f\x84','selected_ucs_found')
+ c.lea_rax_data(L['strings_ptr']); c.emit(b'\x48\x8b\x00'); c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x89\x02')
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x89\x32')
  c.rel32(b'\xe8','resolve_varstore'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
@@ -428,7 +432,7 @@ def build():
  serial('suffix')
  c.rel32(b'\xe8','resolve_current_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\xc6\x00\x01')
- c.lea_rdx_data(L['strings_first']); c.emit(b'\x48\x8b\x02')
+ c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x8b\x02')
  c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x02')
  c.rel32(b'\xe9','resolve_string_package')
 
