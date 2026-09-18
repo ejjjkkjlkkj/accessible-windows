@@ -1356,8 +1356,9 @@ def build():
  c.label('commit_request_bad'); serial('commit_request_fail'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
 
  c.label('commit_focused_option')
- # Internal helper calls UEFI services: reserve 32-byte shadow space plus 8-byte alignment.
- c.emit(b'\x48\x83\xec\x28')
+ # Internal helper calls UEFI services with six arguments: reserve 32-byte
+ # shadow space + 16 bytes for stack args 5/6 + 8 bytes for 16-byte alignment.
+ c.emit(b'\x48\x83\xec\x38')
  c.lea_rdi_data(L['current_data']); c.lea_rdx_data(L['varstore_info']); c.emit(b'\x0f\xb7\x02\x48\x01\xc7')
  c.lea_rsi_data(L['nav_option_raw']); c.lea_rdx_data(L['current_width']); c.emit(b'\x0f\xb6\x0a')
  c.label('commit_stage_copy'); c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','commit_stage_done')
@@ -1383,11 +1384,11 @@ def build():
  # cached live option label, then verify the committed value after rebooting the
  # exact same isolated VARS image in the workflow.
  c.lea_rax_data(L['commit_done']); c.emit(b'\xc6\x00\x01')
- c.emit(b'\x31\xc0\x48\x83\xc4\x28\xc3')
+ c.emit(b'\x31\xc0\x48\x83\xc4\x38\xc3')
  c.label('commit_block_bad'); serial('commit_block_fail'); c.rel32(b'\xe9','commit_return_fail')
  c.label('commit_route_bad'); serial('commit_route_fail'); c.rel32(b'\xe9','commit_return_fail')
  c.label('commit_verify_bad'); serial('commit_verify_fail')
- c.label('commit_return_fail'); c.emit(b'\xb8\x01\x00\x00\x00\x48\x83\xc4\x28\xc3')
+ c.label('commit_return_fail'); c.emit(b'\xb8\x01\x00\x00\x00\x48\x83\xc4\x38\xc3')
 
  c.label('resolve_next_option')
  # Re-scan only the direct children of the same scoped ONE_OF. The current
