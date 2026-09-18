@@ -274,6 +274,24 @@ pub enum ObjectDescriptorError {
     MissingPayloadRoot,
 }
 
+/// Physical roots referenced by a native object descriptor.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ObjectRootsV1 {
+    /// Root block of payload/extents; may be zero only for empty content.
+    pub payload: BlockAddress,
+    /// Root block for native relations/edges; zero means no relations.
+    pub relations: BlockAddress,
+}
+
+impl ObjectRootsV1 {
+    /// Creates object roots.
+    #[must_use]
+    pub const fn new(payload: BlockAddress, relations: BlockAddress) -> Self {
+        Self { payload, relations }
+    }
+}
+
 /// Version-1 descriptor for a persistent native object.
 ///
 /// A file or directory is not the primitive represented here. Higher-level
@@ -312,8 +330,7 @@ impl ObjectDescriptorV1 {
         generation: u64,
         kind: ObjectKind,
         logical_bytes: u64,
-        payload_root: BlockAddress,
-        relation_root: BlockAddress,
+        roots: ObjectRootsV1,
         semantic_descriptor: ObjectId,
     ) -> Self {
         Self {
@@ -323,8 +340,8 @@ impl ObjectDescriptorV1 {
             kind,
             flags: 0,
             logical_bytes,
-            payload_root,
-            relation_root,
+            payload_root: roots.payload,
+            relation_root: roots.relations,
             semantic_descriptor,
         }
     }
@@ -526,8 +543,7 @@ mod tests {
             41,
             ObjectKind::Payload,
             4096,
-            BlockAddress::new(300),
-            BlockAddress::ZERO,
+            ObjectRootsV1::new(BlockAddress::new(300), BlockAddress::ZERO),
             ObjectId::ZERO,
         );
 
@@ -545,8 +561,7 @@ mod tests {
             41,
             ObjectKind::Payload,
             1,
-            BlockAddress::ZERO,
-            BlockAddress::ZERO,
+            ObjectRootsV1::new(BlockAddress::ZERO, BlockAddress::ZERO),
             ID_B,
         );
 
@@ -564,8 +579,7 @@ mod tests {
             41,
             ObjectKind::Payload,
             4096,
-            BlockAddress::new(300),
-            BlockAddress::ZERO,
+            ObjectRootsV1::new(BlockAddress::new(300), BlockAddress::ZERO),
             ID_B,
         );
         let second = ObjectDescriptorV1::new(
@@ -574,8 +588,7 @@ mod tests {
             42,
             ObjectKind::Payload,
             8192,
-            BlockAddress::new(320),
-            BlockAddress::new(330),
+            ObjectRootsV1::new(BlockAddress::new(320), BlockAddress::new(330)),
             ID_B,
         );
 
