@@ -51,14 +51,20 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import ast
+          import ast,re
           src=Path('boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py').read_text()
           ast.parse(src)
+          labels=re.findall(r"c\.label\('([^']+)'\)",src)
+          duplicates=sorted({x for x in labels if labels.count(x)>1})
+          assert not duplicates,duplicates
           for token in [
               'WAIT_DOWN_SPEAK=False',
               'HII_NAVIGATION_KEY=WAIT_DOWN',
               'NAV_NEXT_OPTION_DIRECT_CHILD=PASS',
               'NAV_FOCUS_OPTION_TOKEN_ACTIVATED=PASS',
+              'NAV_FOCUS_OPTION_TEXT=',
+              'NAV_FOCUS_OPTION_STRING=PASS',
+              'NAV_FOCUS_LABEL_BINDING=PASS',
               'NAV_FOCUS_SOURCE=LIVE_DIRECT_SIBLING_HII_LABEL',
               'NAV_FOCUS_SPOKEN_PREFIX=',
               'EVENT=NAV_FOCUS_TEXT_COMMIT',
@@ -124,6 +130,9 @@ jobs:
               b'NAV_NEXT_OPTION_VALUE_RAW8_HEX=',
               b'NAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\n',
               b'NAV_FOCUS_OPTION_TOKEN_ACTIVATED=PASS\r\n',
+              b'NAV_FOCUS_OPTION_TEXT=',
+              b'NAV_FOCUS_OPTION_STRING=PASS\r\n',
+              b'NAV_FOCUS_LABEL_BINDING=PASS\r\n',
               b'NAV_FOCUS_SOURCE=PASS\r\n',
               b'NAV_FOCUS_SPOKEN_PREFIX=',
               b'NAV_FOCUS_TEXT_COMMIT\r\n',
@@ -216,6 +225,9 @@ jobs:
               b'HII_NAVIGATION_KEY=PASS\r\n',
               b'NAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\n',
               b'NAV_FOCUS_OPTION_TOKEN_ACTIVATED=PASS\r\n',
+              b'NAV_FOCUS_OPTION_TEXT=',
+              b'NAV_FOCUS_OPTION_STRING=PASS\r\n',
+              b'NAV_FOCUS_LABEL_BINDING=PASS\r\n',
               b'NAV_FOCUS_SOURCE=PASS\r\n',
               b'NAV_FOCUS_SPOKEN_PREFIX=PASS\r\n',
               b'NAV_FOCUS_TEXT_COMMIT\r\n',
@@ -233,7 +245,7 @@ jobs:
                   sel=re.search(br'SELECTED_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
                   navraw=re.search(br'NAV_NEXT_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
                   navtok=re.search(br'NAV_NEXT_OPTION_STRING_ID_LE_HEX=([0-9A-F]{4})',raw)
-                  label=re.search(br'SELECTED_OPTION_TEXT=([^\r\n]+)',raw)
+                  label=re.search(br'NAV_FOCUS_OPTION_TEXT=([^\r\n]+)',raw)
                   spoken=re.search(br'NAV_FOCUS_SPOKEN_PREFIX=([a-z]{1,8})\r\nNAV_FOCUS_SPOKEN_PREFIX=PASS\r\n',raw)
                   assert all([cur,sel,navraw,navtok,label,spoken]),raw[-20000:]
                   current=bytes.fromhex(cur.group(1).decode())[0]
