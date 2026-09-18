@@ -1275,7 +1275,12 @@ def build():
  c.emit(b'\x3c\x09'); c.rel32(b'\x0f\x85','prev_option_scope_advance')
  c.emit(b'\x41\x83\xfb\x01'); c.rel32(b'\x0f\x85','prev_option_scope_advance')
  c.lea_rdx_data(L['selected_option_ptr']); c.emit(b'\x4c\x3b\x0a'); c.rel32(b'\x0f\x85','prev_option_candidate')
- c.lea_rax_data(L['prev_option_ptr']); c.emit(b'\x4c\x8b\x08\x4d\x85\xc9'); c.rel32(b'\x0f\x85','prev_option_capture')
+ # Do not load prev_option_ptr into R9 merely to test it: R9 is the live IFR
+ # scan cursor.  In the first-option wrap case prev_option_ptr is zero, and
+ # clobbering R9 here would restart the scan near address zero.
+ c.lea_rax_data(L['prev_option_ptr']); c.emit(b'\x48\x83\x38\x00'); c.rel32(b'\x0f\x84','prev_option_mark_wrap')
+ c.emit(b'\x4c\x8b\x08'); c.rel32(b'\xe9','prev_option_capture')
+ c.label('prev_option_mark_wrap')
  c.lea_rdx_data(L['prev_wrap_flag']); c.emit(b'\xc6\x02\x01'); c.rel32(b'\xe9','prev_option_advance')
 
  c.label('prev_option_candidate')
