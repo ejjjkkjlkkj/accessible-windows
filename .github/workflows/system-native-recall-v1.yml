@@ -187,16 +187,23 @@ jobs:
             $invokePrev.Invoke()
             Wait-TraceCount 5
 
+            $window=$root.FindFirst([System.Windows.Automation.TreeScope]::Children,$procCond)
+            if (-not $window) { throw 'native recall window disappeared before keyboard previous' }
+            $previous=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$previousCond)
+            if (-not $previous) { throw 'fresh previous native episode control not found' }
             [void][NativeRecallWin32]::SetForegroundWindow([IntPtr]::new($window.Current.NativeWindowHandle))
             $previous.SetFocus()
             Start-Sleep -Milliseconds 250
-            if (-not $previous.Current.HasKeyboardFocus) { throw 'recall previous button keyboard focus failed' }
+            if (-not $previous.Current.HasKeyboardFocus) { throw 'fresh recall previous button keyboard focus failed' }
             [void]$ws.AppActivate([int]$p.Id)
             Start-Sleep -Milliseconds 200
-            if (-not $previous.Current.HasKeyboardFocus) { throw 'recall previous button lost keyboard focus' }
+            if (-not $previous.Current.HasKeyboardFocus) { throw 'fresh recall previous button lost keyboard focus' }
             $ws.SendKeys('{ENTER}')
             Wait-TraceCount 6
 
+            $previous=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$previousCond)
+            if (-not $previous) { throw 'fresh assistive previous control not found' }
+            $invokePrev=[System.Windows.Automation.InvokePattern]$previous.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
             $invokePrev.Invoke()
             Wait-TraceCount 7
 
