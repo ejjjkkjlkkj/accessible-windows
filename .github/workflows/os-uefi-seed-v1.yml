@@ -95,10 +95,9 @@ jobs:
           Remove-Item $debug -Force -ErrorAction SilentlyContinue
 
           $args=[Collections.Generic.List[string]]::new()
-          # Use the classic PC machine for this firmware-load proof so the
-          # firmware sees the ESP through its ubiquitous legacy disk path.
-          # The EFI image itself remains our directly byte-built AMD64 payload.
-          $args.Add('-machine'); $args.Add('pc')
+          # Match the EDK2/QEMU carrier path already proven by LAB26 on this
+          # exact AMD runner; only our directly byte-built EFI payload differs.
+          $args.Add('-machine'); $args.Add('q35,accel=tcg')
           $args.Add('-m'); $args.Add('256M')
           if ($vars -and (Test-Path $vars)) {
             $varsCopy=Join-Path $PWD 'uefi-runtime/vars.fd'
@@ -108,10 +107,9 @@ jobs:
           } else {
             $args.Add('-bios'); $args.Add($firmware)
           }
-          # Present the virtual FAT ESP through IDE instead of VirtIO.
-          # This removes dependency on an optional pre-boot VirtIO storage driver.
-          $args.Add('-drive'); $args.Add("if=ide,index=0,media=disk,format=raw,file=fat:rw:$esp")
-          $args.Add('-boot'); $args.Add('order=c,strict=off')
+          # Use the same firmware-visible virtual FAT path that LAB26 proves on
+          # both Linux OVMF and AMD-hosted EDK2.
+          $args.Add('-drive'); $args.Add("format=raw,file=fat:rw:$esp")
           $args.Add('-display'); $args.Add('none')
           $args.Add('-serial'); $args.Add('none')
           $args.Add('-monitor'); $args.Add('none')
