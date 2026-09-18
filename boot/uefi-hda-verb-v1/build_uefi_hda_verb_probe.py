@@ -64,7 +64,7 @@ def build():
  c.emit(b'\x44\x89\xe8\x83\xc8\x08'); c.rel32(b'\xe8','pci_read32')
  c.emit(b'\xc1\xe8\x10\x66\x3d\x03\x04'); c.rel32(b'\x0f\x84','found')
  c.label('scan_next')
- c.emit(b'\x41\xff\xc4\x41\x81\xfc\x00\x01\x00\x00'); c.rel32(b'\x0f\x82','scan')
+ c.emit(b'\x41\xff\xc4\x41\x81\xfc\x00\x00\x01\x00'); c.rel32(b'\x0f\x82','scan')
  c.rel32(b'\xe9','fail_no_hda')
 
  c.label('found')
