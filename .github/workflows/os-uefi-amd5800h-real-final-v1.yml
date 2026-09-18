@@ -563,7 +563,8 @@ jobs:
             try { $raw=[IO.File]::ReadAllText($serial); break } catch { Start-Sleep -Milliseconds 250 }
           }
           $raw | Set-Content (Join-Path $root 'vmware-graph-captured.txt') -Encoding ascii
-          if(-not ($raw -match 'HDA_GRAPH_SEARCH_LIVE=PASS' -and
+          if(-not ($raw -match 'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403' -and
+                   $raw -match 'HDA_GRAPH_SEARCH_LIVE=PASS' -and
                    $raw -match 'HDA_SELECTOR_APPLY_LIVE=PASS' -and
                    $raw -match 'HDA_OUTPUT_PATH_CONFIGURATION=PASS' -and
                    $raw -match 'LPIB_PROGRESS=PASS' -and
@@ -640,6 +641,7 @@ jobs:
             'HII_LANGUAGE_AND_STRING=PASS',
             'HII_PROMPT_TEXT=',
             'HII_PROMPT_SOURCE=PASS',
+            'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403',
             'HDA_MULTIHOP_EFI_SELFTEST=PASS',
             'HDA_RANGE_AND_SELECTOR_ENGINE=PASS',
             'NO_FIXED_WIDGET_NIDS=PASS',
@@ -666,6 +668,7 @@ jobs:
             'VMWARE_HII_DATABASE_PROTOCOL=PASS'
             'VMWARE_HII_STRING_PROTOCOL=PASS'
             'VMWARE_LIVE_HII_PROMPT_SOURCE=PASS'
+            'VMWARE_HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403'
             'VMWARE_HDA_GRAPH_ROUTE=PASS'
             'VMWARE_HDA_DMA_PROGRESS=PASS'
             'VMWARE_GRAPH_HDA_SPEECH=PASS'
@@ -739,11 +742,13 @@ jobs:
           $vm='NOT_FOUND'
           $vmSpeech='NOT_ESTABLISHED'
           $vmIntegrated='NOT_ESTABLISHED'
+          $vmControllerSelection='NOT_ESTABLISHED'
           if(Test-Path "$root/evidence/vmware-result.txt"){
             $vr=Get-Content "$root/evidence/vmware-result.txt" -Raw
             if($vr -match 'VMWARE_WORKSTATION=PASS'){ $vm='PASS' }
             if($vr -match 'VMWARE_FULL_HDA_SPEECH=PASS'){ $vmSpeech='PASS' }
             if($vr -match 'VMWARE_INTEGRATED_HII_HDA_SPEECH=PASS'){ $vmIntegrated='PASS' }
+            if($vr -match 'VMWARE_HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403'){ $vmControllerSelection='GENERIC_CLASS_0403' }
           }
           $sha=(Get-FileHash "$root/evidence/downspeech.EFI" -Algorithm SHA256).Hash.ToLowerInvariant()
           $manifest=(Get-FileHash "$root/evidence/manifest.sha256" -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -770,6 +775,7 @@ jobs:
           $lines += "proof-vmware-workstation = $vm"
           $lines += "proof-vmware-hda-graph-speech = $vmSpeech"
           $lines += "proof-vmware-integrated-hii-hda-speech = $vmIntegrated"
+          $lines += "proof-vmware-hda-controller-selection = $vmControllerSelection"
           $lines += 'proof-vmware-hii-source = live-integrated-hii-graph-prompt'
           $lines += 'proof-physical-host-reboot = false'
           $lines += 'proof-physical-host-firmware-mutation = false'
