@@ -65,6 +65,8 @@ jobs:
               assert not ((ch&0x80000000) and (ch&0x20000000)),hex(ch)
           for token in [
               b'HII_PROMPT_SOURCE=PASS',
+              b'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3',
+              b'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403',
               b'HDA_GRAPH_SEARCH_LIVE=PASS',
               b'HII_PROMPT_SPEECH_HDA=PASS',
               b'LPIB_PROGRESS=PASS',
@@ -107,6 +109,7 @@ jobs:
             b'IFR_PROMPT_STRING_ID=PASS\r\n',
             b'HII_PROMPT_TEXT=',
             b'HII_PROMPT_SOURCE=PASS\r\n',
+            b'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403\r\n',
             b'HDA_GRAPH_SEARCH_LIVE=PASS\r\n',
             b'HDA_SELECTOR_APPLY_LIVE=PASS\r\n',
             b'HDA_OUTPUT_PATH_CONFIGURATION=PASS\r\n',
@@ -114,6 +117,7 @@ jobs:
             b'HII_GRAPH_SPEECH_DMA=PASS\r\n',
             b'HII_PROMPT_SPEECH_HDA=PASS\r\n',
             b'LPIB_PROGRESS=PASS\r\n',
+            b'BOOT_MEDIA_PERSISTENT_PROOF=PASS\r\n',
             b'STATUS=PASS\r\n',
           ]
           end=time.time()+60
@@ -133,6 +137,25 @@ jobs:
           kill $qpid 2>/dev/null || true
           wait $qpid 2>/dev/null || true
           trap - EXIT
+
+      - name: Validate persistent boot-media proof
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-graph-prompt-speech-v1
+          proof="$root/esp/QEVARYNOX-PHYSICAL-PROOF.TXT"
+          test -s "$proof"
+          grep -F 'QEVARYNOX-UEFI-PHYSICAL-BOOT-PROOF-V1' "$proof"
+          grep -F 'STATUS=PASS' "$proof"
+          grep -F 'HII_PROMPT_SOURCE=PASS' "$proof"
+          grep -F 'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403' "$proof"
+          grep -F 'HDA_GRAPH_SEARCH_LIVE=PASS' "$proof"
+          grep -F 'HDA_SELECTOR_APPLY_LIVE=PASS' "$proof"
+          grep -F 'HDA_OUTPUT_PATH_CONFIGURATION=PASS' "$proof"
+          grep -F 'HII_GRAPH_SPEECH_DMA=PASS' "$proof"
+          grep -F 'LPIB_PROGRESS=PASS' "$proof"
+          grep -F 'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$proof"
+          cp "$proof" "$root/runtime-boot-media-proof.txt"
+          echo HII_GRAPH_BOOT_MEDIA_PERSISTENT_PROOF=PASS
 
       - name: Validate waveform
         shell: python
@@ -161,6 +184,7 @@ jobs:
             boot/uefi-hii-graph-prompt-speech-v1/BOOTX64.EFI
             boot/uefi-hii-graph-prompt-speech-v1/runtime.serial
             boot/uefi-hii-graph-prompt-speech-v1/runtime.wav
+            boot/uefi-hii-graph-prompt-speech-v1/runtime-boot-media-proof.txt
             boot/uefi-hii-graph-prompt-speech-v1/speech-unit-metadata.txt
             boot/uefi-hii-graph-prompt-speech-v1/build.sha256
           if-no-files-found: error
