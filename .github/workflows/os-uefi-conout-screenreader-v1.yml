@@ -335,8 +335,8 @@ jobs:
           git fetch origin os
           git checkout -B os origin/os
 
-          tested_blob="$(git rev-parse "\${GITHUB_SHA}:\${builder}")"
-          current_blob="$(git rev-parse "os:\${builder}")"
+          tested_blob="$(git rev-parse "${GITHUB_SHA}:${builder}")"
+          current_blob="$(git rev-parse "os:${builder}")"
           if [[ "$tested_blob" != "$current_blob" ]]; then
             echo "CONOUT_PROOF_STALE_RUN=SKIP"
             echo "tested-builder=$tested_blob"
