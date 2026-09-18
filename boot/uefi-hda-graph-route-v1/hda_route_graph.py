@@ -105,12 +105,15 @@ def expand_connection_entries(raw: Sequence[RawConnection]) -> tuple[int, ...]:
     """Expand HDA range entries into the logical ordered connection list."""
     out: list[int] = []
     previous_raw_nid: int | None = None
+    previous_was_range = False
     for index, entry in enumerate(raw):
         if entry.nid <= 0:
             raise HdaRouteError(f"invalid zero NID at entry {index}")
         if entry.range_end:
             if previous_raw_nid is None:
                 raise HdaRouteError("range end has no previous entry")
+            if previous_was_range:
+                raise HdaRouteError("consecutive range-end entries are invalid")
             if previous_raw_nid >= entry.nid:
                 raise HdaRouteError(
                     f"descending or empty NID range 0x{previous_raw_nid:x}..0x{entry.nid:x}"
@@ -118,6 +121,7 @@ def expand_connection_entries(raw: Sequence[RawConnection]) -> tuple[int, ...]:
             out.extend(range(previous_raw_nid + 1, entry.nid + 1))
         else:
             out.append(entry.nid)
+        previous_was_range = entry.range_end
         previous_raw_nid = entry.nid
     return tuple(out)
 
