@@ -413,7 +413,7 @@ def build_code(units: dict[str, bytes], off: dict[str, int]) -> bytes:
     c.rel32(b"\xe8", "dsp_write")
 
     c.emit(b"\x41\x6b\xcc\x7d")
-    c.emit(b"\x81\xc1\x90\xd0\x03\x00")
+    c.emit(b"\x81\xc1\xa8\x61\x00\x00")
     c.emit(b"\x49\x8b\x87\xf8\x00\x00\x00\xff\xd0")
     c.emit(b"\xc3")
 
