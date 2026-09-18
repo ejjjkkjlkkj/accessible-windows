@@ -1,0 +1,26 @@
+OS-UEFI-HII-UP-PROBE-V1
+role = native pre-OS read-only UP-arrow focus probe over direct EFI_IFR_ONE_OF_OPTION siblings
+system-foundation = true
+depends-on = OS-UEFI-HII-CURRENT-OPTION-SPEECH-V1
+depends-on = OS-UEFI-HII-ISCSI-FIXTURE-V1
+execution-domain = pre-OS UEFI
+artifact-format = PE32+ EFI application
+architecture = x86-64
+keyboard-protocol = EFI_SIMPLE_TEXT_INPUT_PROTOCOL.ReadKeyStroke
+keyboard-scan-code = SCAN_UP 0x0001
+current-option-anchor = exact direct ONE_OF_OPTION matched to live current Buffer-Storage value
+focus-rule = previous direct ONE_OF_OPTION sibling; first wraps to last direct sibling inside the exact same scoped ONE_OF
+nested-scope-policy = nested option-like opcodes are excluded
+focus-operation = read-only
+route-config-call = forbidden
+runtime-variable-read = forbidden
+set-variable-call = forbidden
+varstore-write = forbidden
+firmware-setting-mutation = forbidden
+focus-label-speech = not-established-in-this-stage
+down-arrow-navigation = established-separately
+physical-ASUS-up-navigation = not-established
+claim = success establishes that an UP EFI key event causes the native parser to move a read-only accessibility focus from the current direct ONE_OF_OPTION to the previous direct sibling with first-to-last wrap in the same ONE_OF scope
+claim = success does not change firmware state and does not yet establish speech of the newly focused sibling
+wrap-policy = first-direct-option wraps to last-direct-option
+proof = PENDING_CI
