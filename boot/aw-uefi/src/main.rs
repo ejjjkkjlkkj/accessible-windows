@@ -20,10 +20,7 @@ fn panic(_info: &PanicInfo<'_>) -> ! {
 /// The first milestone deliberately assumes no accessibility capability. Future
 /// firmware adapters must positively observe each capability before handoff.
 #[unsafe(no_mangle)]
-pub extern "efiapi" fn efi_main(
-    _image_handle: *mut c_void,
-    _system_table: *mut c_void,
-) -> usize {
+pub extern "efiapi" fn efi_main(_image_handle: *mut c_void, _system_table: *mut c_void) -> usize {
     let state = AccessibilityState::new(BootPhase::Bootloader);
     let _boot_info = BootInfo::new(BootPhase::Bootloader, state.strict_contract());
 

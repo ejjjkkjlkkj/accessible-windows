@@ -22,7 +22,9 @@ impl KernelFoundation {
     /// Creates an uninitialized kernel foundation.
     #[must_use]
     pub const fn new() -> Self {
-        Self { boot_contract_verified: false }
+        Self {
+            boot_contract_verified: false,
+        }
     }
 
     /// Validates the boot ABI and accessibility contract before later initialization.

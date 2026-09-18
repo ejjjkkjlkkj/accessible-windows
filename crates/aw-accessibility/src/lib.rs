@@ -17,7 +17,10 @@ impl AccessibilityState {
     /// Starts with no capabilities assumed to exist.
     #[must_use]
     pub const fn new(phase: BootPhase) -> Self {
-        Self { phase, available: 0 }
+        Self {
+            phase,
+            available: 0,
+        }
     }
 
     /// Returns the phase represented by this state.

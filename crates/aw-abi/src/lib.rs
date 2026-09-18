@@ -50,7 +50,10 @@ impl AccessibilityContract {
     /// Creates a new contract.
     #[must_use]
     pub const fn new(required: u64, available: u64) -> Self {
-        Self { required, available }
+        Self {
+            required,
+            available,
+        }
     }
 
     /// Returns the required capabilities that are not currently available.
