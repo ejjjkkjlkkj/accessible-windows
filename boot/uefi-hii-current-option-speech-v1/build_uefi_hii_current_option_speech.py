@@ -197,7 +197,7 @@ def build():
   'question_id':208,'varstore_id':210,'varstore_info':212,'question_flags':214,'oneof_flags':215,
   'varstore_opcode':216,'varstore_size':218,'varstore_attrs':220,'varstore_guid':224,
   'cfgacc_guid':240,'routing_guid':256,'routing_ptr':272,'config_ptr':280,
-  'driver_handle':288,'progress':296,'results':304,'match_pkg_size':312,
+  'driver_handle':288,'config_progress':296,'results':304,'match_pkg_size':312,
   'matched_hii_handle':320,'block_size':328,'current_width':336,'current_raw':344,'config_boundary':352,
   'varstore_name_ptr':360,'varstore_name_remaining':368,
   'question_ptr':376,'selected_option_token':384,'selected_option_type':386,'selected_option_raw':392,
@@ -1107,11 +1107,11 @@ def build():
 
  c.label('config_to_block_call')
  c.lea_rax_data(L['varstore_size']); c.emit(b'\x0f\xb7\x00'); c.lea_rdx_data(L['block_size']); c.emit(b'\x48\x89\x02')
- c.lea_rdx_data(L['progress']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00')
+ c.lea_rdx_data(L['config_progress']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00')
  c.lea_rax_data(L['routing_ptr']); c.emit(b'\x48\x8b\x08')
  c.lea_rdx_data(L['config_ptr']); c.emit(b'\x48\x8b\x12')
  c.lea_r8_data(L['current_data']); c.lea_r9_data(L['block_size'])
- c.lea_rax_data(L['progress']); c.emit(b'\x48\x89\x44\x24\x20')
+ c.lea_rax_data(L['config_progress']); c.emit(b'\x48\x89\x44\x24\x20')
  c.emit(b'\xff\x51\x20\x49\x89\xc2')
  # Restore the allocated ExportConfig string before any next candidate/free.
  c.lea_rax_data(L['config_boundary']); c.emit(b'\x48\x8b\x10\x48\x85\xd2'); c.rel32(b'\x0f\x84','config_restore_done')
