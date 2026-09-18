@@ -56,7 +56,7 @@ jobs:
           for token in [
               "c.emit(b'\\x41\\xff\\x54\\x24\\x18')",
               "c.emit(b'\\xff\\x51\\x08')",
-              "c.emit(b'\\xff\\x51\\x20')",
+              "c.emit(b'\\xff\\x51\\x20\\x49\\x89\\xc2')",
               "hex_utf16_nibble",
               "config_boundary_scan",
               "HII_CONFIG_ROUTING_PROTOCOL=PASS",
