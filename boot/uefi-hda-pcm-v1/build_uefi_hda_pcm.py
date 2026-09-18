@@ -116,7 +116,7 @@ def build():
  c.rel32(b'\xe9','fail_bad_hda')
  c.label('cadok'); serial('hda')
 
- verb(0,0x000f00)
+ verb(0,0x000f0000)
  c.emit(b'\x89\xc1\xc1\xe9\x10\x66\x81\xf9\xf4\x1a'); c.rel32(b'\x0f\x85','fail_vendor')
  serial('codec')
  verb(3,0x00070740)
