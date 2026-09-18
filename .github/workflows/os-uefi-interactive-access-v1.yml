@@ -41,10 +41,19 @@ jobs:
           assert data[pe:pe+4]==b'PE\0\0'
           coff=pe+4
           machine,nsects=struct.unpack_from('<HH',data,coff)
-          assert machine==0x8664 and nsects==2
+          assert machine==0x8664 and nsects==3
           opt=coff+20
           assert struct.unpack_from('<H',data,opt)[0]==0x20b
           assert struct.unpack_from('<H',data,opt+0x44)[0]==10
+          sec=opt+0xf0
+          data_sec=sec+40
+          assert data[sec:sec+8].rstrip(b'\0')==b'.text'
+          assert data[data_sec:data_sec+8].rstrip(b'\0')==b'.data'
+          text_chars=struct.unpack_from('<I',data,sec+0x24)[0]
+          data_chars=struct.unpack_from('<I',data,data_sec+0x24)[0]
+          assert not (text_chars & 0x80000000)
+          assert data_chars & 0x80000000
+          assert not (data_chars & 0x20000000)
 
           required=[
               b'QEVARYNOX-A11Y-UEFI-MENU-V1\r\n',
