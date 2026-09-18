@@ -20,7 +20,7 @@ MARKS={
  'selected_erreur': b'QEVARYNOX-UEFI-HDA-INTERACTIVE-SPEECH-V1\r\nEVENT=WORD_SELECTED\r\nWORD=ERREUR\r\nUNITS=e,r,eu,r\r\nEND\r\n',
  'controller': b'QEVARYNOX-UEFI-HDA-INTERACTIVE-SPEECH-V1\r\nHDA_CONTROLLER_CODEC=PASS\r\nEND\r\n',
  'topology': b'QEVARYNOX-UEFI-HDA-INTERACTIVE-SPEECH-V1\r\nAFG_RUNTIME_DISCOVERY=PASS\r\nAUTO_DAC_WIDGET=PASS\r\nAUTO_OUTPUT_PIN_WIDGET=PASS\r\nAUTO_PIN_TO_DAC_DIRECT_ROUTE=PASS\r\nNO_FIXED_WIDGET_NIDS=PASS\r\nEND\r\n',
- 'policy': b'QEVARYNOX-UEFI-HDA-INTERACTIVE-SPEECH-V1\r\nPIN_CONFIG_DEFAULT=PASS\r\nDAC_OUTPUT_AMP_VERIFY=PASS\r\nEND\r\n',
+ 'policy': b'QEVARYNOX-UEFI-HDA-INTERACTIVE-SPEECH-V1\r\nPIN_CONFIG_DEFAULT=PASS\r\nPIN_CAPABILITIES_QUERY=PASS\r\nEAPD_IF_SUPPORTED=PASS\r\nDAC_OUTPUT_AMP_VERIFY=PASS\r\nEND\r\n',
  'dma': b'QEVARYNOX-UEFI-HDA-INTERACTIVE-SPEECH-V1\r\nUNIT_BANK_COPY=PASS\r\nBDL_RUNTIME_WORD_SCHEDULE=PASS\r\nEND\r\n',
  'codec': b'QEVARYNOX-UEFI-HDA-INTERACTIVE-SPEECH-V1\r\nCODEC_DAC_STREAM=PASS\r\nCODEC_PIN_OUTPUT=PASS\r\nEND\r\n',
  'stream': b'QEVARYNOX-UEFI-HDA-INTERACTIVE-SPEECH-V1\r\nOUTPUT_STREAM_DESCRIPTOR=PASS\r\nFORMAT_48K_S16_STEREO=PASS\r\nBDL_ENTRIES=RUNTIME\r\nEND\r\n',
@@ -255,6 +255,14 @@ def build():
  # Apply runtime output policy to the selected pin and DAC.
  verb_data(L['pin_nid'],0x000f1c00)
  c.emit(b'\xc1\xe8\x14\x83\xe0\x0f\x83\xf8\x02'); c.rel32(b'\x0f\x87','fail_policy')
+ # Query Pin Capabilities. If EAPD is advertised (bit 16), enable it and
+ # read it back before speech. Unsupported pins take the verified skip path.
+ verb_data(L['pin_nid'],0x000f000c)
+ c.emit(b'\xa9\x00\x00\x01\x00'); c.rel32(b'\x0f\x84','eapd_done')
+ verb_data(L['pin_nid'],0x00070c02)
+ verb_data(L['pin_nid'],0x000f0c00)
+ c.emit(b'\xa8\x02'); c.rel32(b'\x0f\x84','fail_policy')
+ c.label('eapd_done')
  verb_data(L['dac_nid'],0x000f0012)
  c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x84','fail_policy')
  verb_data(L['dac_nid'],0x0003b040)
