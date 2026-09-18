@@ -181,9 +181,18 @@ jobs:
             if (-not $next.Current.HasKeyboardFocus) { throw 'recall next button lost keyboard focus' }
             $ws.SendKeys('{ENTER}')
             Wait-TraceCount 3
-            $ws.SendKeys('{ENTER}')
+
+            $window=$root.FindFirst([System.Windows.Automation.TreeScope]::Children,$procCond)
+            if (-not $window) { throw 'native recall window disappeared before second assistive next' }
+            $next=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$nextCond)
+            if (-not $next) { throw 'fresh next native episode control not found' }
+            $invokeNext=[System.Windows.Automation.InvokePattern]$next.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            $invokeNext.Invoke()
             Wait-TraceCount 4
 
+            $previous=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$previousCond)
+            if (-not $previous) { throw 'fresh previous control not found at episode4' }
+            $invokePrev=[System.Windows.Automation.InvokePattern]$previous.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
             $invokePrev.Invoke()
             Wait-TraceCount 5
 
@@ -225,7 +234,7 @@ jobs:
             @{carrier='startup';index='0';msg='Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'},
             @{carrier='assistive-next';index='1';msg='Episode 2 of 4: current exchange, goal identity, target identity, result identity'},
             @{carrier='keyboard-next';index='2';msg='Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'},
-            @{carrier='keyboard-next';index='3';msg='Episode 4 of 4: current identity, goal exchange, target identity, result identity'},
+            @{carrier='assistive-next';index='3';msg='Episode 4 of 4: current identity, goal exchange, target identity, result identity'},
             @{carrier='assistive-previous';index='2';msg='Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'},
             @{carrier='keyboard-previous';index='1';msg='Episode 2 of 4: current exchange, goal identity, target identity, result identity'},
             @{carrier='assistive-previous';index='0';msg='Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'}
@@ -337,10 +346,10 @@ jobs:
           expected=[
               ('startup',0,'Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'),
               ('assistive-next',1,'Episode 2 of 4: current exchange, goal identity, target identity, result identity'),
-              ('keyboard-right',2,'Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'),
-              ('keyboard-right',3,'Episode 4 of 4: current identity, goal exchange, target identity, result identity'),
+              ('keyboard-next',2,'Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'),
+              ('assistive-next',3,'Episode 4 of 4: current identity, goal exchange, target identity, result identity'),
               ('assistive-previous',2,'Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'),
-              ('keyboard-left',1,'Episode 2 of 4: current exchange, goal identity, target identity, result identity'),
+              ('keyboard-previous',1,'Episode 2 of 4: current exchange, goal identity, target identity, result identity'),
               ('assistive-previous',0,'Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'),
           ]
           for event,(carrier,index,message) in zip(events,expected):
