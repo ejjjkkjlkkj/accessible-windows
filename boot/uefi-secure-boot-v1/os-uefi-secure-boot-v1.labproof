@@ -1,0 +1,25 @@
+OS-UEFI-SECURE-BOOT-V1
+role = enforced Secure Boot gate for native pre-OS screen-reader EFI application
+system-foundation = true
+depends-on = OS-UEFI-HDA-INTERACTIVE-SPEECH-V1
+execution-domain = pre-OS UEFI
+artifact-format = PE32+ EFI application
+architecture = x86-64
+operating-system-required = false
+secure-boot-required = true
+secure-boot-firmware = OVMF Secure Boot
+secure-boot-key-model = ephemeral CI PK KEK plus project db signing certificate
+signed-image-source = OS-UEFI-HDA-INTERACTIVE-SPEECH-V1
+unsigned-negative-control = required
+signed-positive-control = required
+unsigned-image-must-not-execute = true
+signed-image-must-execute = true
+positive-runtime-marker = QEVARYNOX-UEFI-HDA-INTERACTIVE-SPEECH-V1
+positive-runtime-stage = EVENT=WAIT_KEY
+external-audio-driver-required = false
+AudioDxe-required = false
+physical-ASUS-Secure-Boot = not-established
+physical-ASUS-HDA-speech = not-established
+claim = success establishes that OVMF Secure Boot enforcement rejects the same unsigned screen-reader EFI image and accepts its db-signed form which reaches the native pre-OS interactive speech path
+claim = success does not establish firmware key enrollment or audible speech on the physical ASUS laptop
+proof = PENDING_CI
