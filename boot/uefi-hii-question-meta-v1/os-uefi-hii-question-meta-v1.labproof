@@ -1,0 +1,26 @@
+OS-UEFI-HII-QUESTION-META-V1
+role = native pre-OS read-only EFI_IFR_ONE_OF question header metadata resolution
+system-foundation = true
+depends-on = OS-UEFI-HII-PROMPT-V1
+execution-domain = pre-OS UEFI
+artifact-format = PE32+ EFI application
+architecture = x86-64
+operating-system-required = false
+external-screen-reader-required = false
+external-accessibility-api-required = false
+IFR-question-opcode = 0x05 EFI_IFR_ONE_OF
+question-prompt-resolution = native direct HII Strings-package decoder
+question-id-offset = opcode plus 6
+varstore-id-offset = opcode plus 8
+varstore-info-offset = opcode plus 10
+question-flags-offset = opcode plus 12
+oneof-flags-offset = opcode plus 13
+varstore-info-semantics = VarOffset or VarName StringId according to referenced VarStore kind
+varstore-definition-resolution = not-established-in-this-stage
+current-value-read = forbidden-in-this-stage
+varstore-write = forbidden
+firmware-setting-mutation = forbidden
+claim = success establishes a live ONE_OF question prompt plus its QuestionId VarStoreId VarStoreInfo and question/OneOf flags directly from firmware IFR
+claim = success does not establish the referenced VarStore definition current selection or any configuration mutation
+proof = PENDING_CI
+revalidation-request = 2026-09-18T22:16+02:00
