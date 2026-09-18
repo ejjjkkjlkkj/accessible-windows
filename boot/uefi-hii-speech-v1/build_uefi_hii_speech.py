@@ -142,7 +142,7 @@ def make_pcm():
 def build():
  pcm=make_pcm()
  data=bytearray(0x100)
- L={'maxaddr':0,'keybuf':8,'dac_nid':16,'pin_nid':20,'textbuf':32,'db_guid':64,'str_guid':80,'dbptr':96,'strptr':104,'handles_size':112,'handles_ptr':120,'pkg_size':128,'pkg_ptr':136,'langs_size':144,'langs_ptr':152,'string_size':160,'string_ptr':168,'token':176}
+ L={'maxaddr':0,'keybuf':8,'dac_nid':16,'pin_nid':20,'textbuf':32,'db_guid':64,'str_guid':80,'dbptr':96,'strptr':104,'handles_size':112,'handles_ptr':120,'pkg_size':128,'pkg_ptr':136,'langs_size':144,'langs_ptr':152,'string_size':160,'string_ptr':168,'token':176,'temp_handle':184,'handle_cursor':192,'handles_remaining':200}
  struct.pack_into('<Q',data,0,0xffffffff)
  struct.pack_into('<IHH8B',data,L['db_guid'],0xef9fc172,0xa1b2,0x4693,0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42)
  struct.pack_into('<IHH8B',data,L['str_guid'],0x0fd96974,0x23aa,0x4cdc,0xb9,0xcb,0x98,0xd1,0x77,0x50,0x32,0x2a)
