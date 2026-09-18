@@ -268,6 +268,9 @@ def build():
  c.rel32(b'\xe9','ifr_loop')
 
  c.label('ifr_question')
+ # ONE_OF owns its ONE_OF_OPTION children through an IFR scope. Reject an
+ # unscoped/malformed question before child-option traversal.
+ c.emit(b'\x41\xf6\x41\x01\x80'); c.rel32(b'\x0f\x84','ifr_next')
  # EFI_IFR_ONE_OF: OpHeader(2) + Statement(Prompt,Help=4) + QuestionId(2)
  # + VarStoreId(2) + VarStoreInfo(2) + QuestionFlags(1) + OneOfFlags(1).
  c.emit(b'\x83\xf9\x0e'); c.rel32(b'\x0f\x82','ifr_next')
