@@ -5,6 +5,10 @@ on:
     paths:
       - 'lab0/mark0'
       - 'lab2/relation0'
+      - '.github/workflows/lab2.yml'
+    paths:
+      - 'lab0/mark0'
+      - 'lab2/relation0'
   workflow_dispatch:
 
 permissions:

@@ -3,6 +3,13 @@ on:
   push:
     branches: [os]
     paths:
+      - 'lab0/mark0'
+      - 'lab2/relation0'
+      - 'lab3/inverted0'
+      - 'lab4/anchor0'
+      - 'lab5/anchor1'
+      - '.github/workflows/lab5.yml'
+    paths:
       - 'lab2/relation0'
       - 'lab4/anchor0'
       - 'lab5/anchor1'
