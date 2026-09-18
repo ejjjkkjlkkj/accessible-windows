@@ -1,0 +1,24 @@
+OS-UEFI-HII-REPEAT-SPEECH-V1
+role = native pre-OS repeat-current-option speech command gated by an explicit keyboard R key
+system-foundation = true
+depends-on = OS-UEFI-HII-CURRENT-OPTION-SPEECH-V1
+depends-on = OS-UEFI-HII-ISCSI-FIXTURE-V1
+execution-domain = pre-OS UEFI
+artifact-format = PE32+ EFI application
+architecture = x86-64
+keyboard-protocol = EFI_SIMPLE_TEXT_INPUT_PROTOCOL.ReadKeyStroke
+keyboard-unicode-key = R or r
+repeat-target = already resolved live current ONE_OF option label
+repeat-policy = no HDA speech is authorized until R or r is received
+speech-source = normalized Latin graphemes captured from the live current HII option label
+speech-synthesizer = first-party deterministic allophones
+audio-transport = native Intel HDA immediate verbs plus runtime BDL DMA
+route-config-call = forbidden
+runtime-variable-read = forbidden
+set-variable-call = forbidden
+varstore-write = forbidden
+firmware-setting-mutation = forbidden
+physical-ASUS-repeat-speech = not-established
+claim = success establishes that native UEFI resolves the live current HII option, waits for explicit R input, and only then repeats that option through native HDA speech
+claim = success does not establish physical ASUS keyboard or audio behavior
+proof = PENDING_CI
