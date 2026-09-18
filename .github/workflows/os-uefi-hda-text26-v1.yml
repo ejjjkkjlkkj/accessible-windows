@@ -95,7 +95,7 @@ jobs:
           grep -F 'full-utterance-pcm-assets=0' "$root/build.log"
           sha256sum "$root/BOOTX64.EFI"
 
-      - name: Audit native text and HDA machine path
+      - name: Audit native text26 and HDA machine path
         shell: python
         run: |
           from pathlib import Path
@@ -121,26 +121,25 @@ jobs:
               bytes.fromhex('663d0d00'),
               bytes.fromhex('6683c820'),
               bytes.fromhex('83ff08'),
-              bytes.fromhex('ffc7'),
-              bytes.fromhex('4189f2'),
-              bytes.fromhex('4189c3'),
+              bytes.fromhex('89d848c1e0044c01e8'),
+              bytes.fromhex('4189db41ffcb'),
               bytes.fromhex('8a0324fd8803'),
               b'EVENT=WAIT_TEXT\r\n',
-              b'CHAR=a\r\n',
-              b'CHAR=e\r\n',
-              b'CHAR=i\r\n',
-              b'CHAR=o\r\n',
-              b'CHAR=u\r\n',
+              b'SUPPORTED=a-z\r\n',
+              b'EVENT=GRAPHEME_ACCEPTED\r\n',
               b'TEXT_BUFFER=PASS\r\n',
               b'BDL_RUNTIME_TEXT_SCHEDULE=PASS\r\n',
               b'RUNTIME_TEXT_HDA=PASS\r\n',
+              b'AFG_RUNTIME_DISCOVERY=PASS\r\n',
+              b'NO_FIXED_WIDGET_NIDS=PASS\r\n',
           ]
           for token in required:
               assert token in image,token
-          print('HDA_TEXT_STATIC=PASS')
+          print('HDA_TEXT26_STATIC=PASS')
           print('EFI_TEXT_INPUT=BOUND')
           print('UTF16_BUFFER=BOUND')
-          print('DYNAMIC_BDL_APPEND=BOUND')
+          print('A_Z_BRANCH_MAP=BOUND')
+          print('ALLOPHONE_EXPANSION_BDL=BOUND')
           print('DYNAMIC_HDA_ROUTE=BOUND')
           print('EAPD_POLICY=BOUND')
           print('W_X=BLOCKED')
@@ -236,22 +235,21 @@ jobs:
           else:
               raise SystemExit('cannot connect monitor')
 
-          pos=0
+          accepted=0
+          marker=b'EVENT=GRAPHEME_ACCEPTED\r\n'
           for ch in seq:
               s.sendall(('sendkey '+ch+'\n').encode())
-              marker=('CHAR='+ch+'\r\n').encode()
+              accepted += 1
               end=time.time()+5
               while time.time()<end:
                   raw=p.read_bytes() if p.exists() else b''
-                  found=raw.find(marker,pos)
-                  if found>=0:
-                      pos=found+len(marker)
+                  if raw.count(marker) >= accepted:
                       break
                   if b'STATUS=BLOCKED\r\n' in raw:
                       raise SystemExit('blocked while typing: '+repr(raw[-4096:]))
                   time.sleep(.03)
               else:
-                  raise SystemExit('character not observed: '+ch)
+                  raise SystemExit('grapheme not accepted: '+ch)
           s.sendall(b'sendkey ret\n')
           time.sleep(.1)
           s.close()
@@ -335,7 +333,7 @@ jobs:
           text-zebra = PASS
           text-mwx = PASS
           UTF16-text-buffer = PASS
-          dynamic-BDL-per-grapheme = PASS
+          dynamic-BDL-per-expanded-allophone = PASS
           dynamic-HDA-route = PASS
           output-policy = PASS
           EAPD-if-supported = PASS
@@ -379,8 +377,8 @@ jobs:
 
           git fetch origin os
           git checkout -B os origin/os
-          [[ "$tested_builder" == "$(git rev-parse "os:$builder")" ]] || { echo HDA_TEXT_STALE_BUILDER=SKIP; exit 0; }
-          [[ "$tested_workflow" == "$(git rev-parse "os:$workflow")" ]] || { echo HDA_TEXT_STALE_WORKFLOW=SKIP; exit 0; }
+          [[ "$tested_builder" == "$(git rev-parse "os:$builder")" ]] || { echo HDA_TEXT26_STALE_BUILDER=SKIP; exit 0; }
+          [[ "$tested_workflow" == "$(git rev-parse "os:$workflow")" ]] || { echo HDA_TEXT26_STALE_WORKFLOW=SKIP; exit 0; }
 
           python - <<'PY'
           from pathlib import Path
@@ -409,7 +407,7 @@ jobs:
               "proof-runtime-text-zebra = PASS\n"
               "proof-runtime-text-mwx = PASS\n"
               "proof-UTF16-text-buffer = PASS\n"
-              "proof-dynamic-BDL-per-grapheme = PASS\n"
+              "proof-dynamic-BDL-per-expanded-allophone = PASS\n"
               "proof-dynamic-HDA-route = PASS\n"
               "proof-output-policy = PASS\n"
               "proof-EAPD-if-supported = PASS\n"
@@ -417,10 +415,10 @@ jobs:
               "proof-widget-NIDs-hardcoded = false\n"
               f"proof-wave-metrics = {metrics}\n"
               f"proof-efi-sha256 = {hashlib.sha256(efi).hexdigest()}\n"
-              f"proof-ae-wav-sha256 = {hashlib.sha256(ae).hexdigest()}\n"
-              f"proof-iou-wav-sha256 = {hashlib.sha256(iou).hexdigest()}\n"
-              f"proof-ae-serial-sha256 = {hashlib.sha256(aes).hexdigest()}\n"
-              f"proof-iou-serial-sha256 = {hashlib.sha256(ious).hexdigest()}\n"
+              f"proof-zebra-wav-sha256 = {hashlib.sha256(zebra).hexdigest()}\n"
+              f"proof-mwx-wav-sha256 = {hashlib.sha256(mwx).hexdigest()}\n"
+              f"proof-zebra-serial-sha256 = {hashlib.sha256(zebras).hexdigest()}\n"
+              f"proof-mwx-serial-sha256 = {hashlib.sha256(mwxs).hexdigest()}\n"
           )
           p.write_text(text)
           PY
@@ -429,5 +427,5 @@ jobs:
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add "$root/os-uefi-hda-text26-v1.labproof"
-          git commit -m "Record runtime EFI text HDA proof [skip ci]"
+          git commit -m "Record 26-letter runtime EFI text HDA proof [skip ci]"
           git push origin os
