@@ -120,8 +120,9 @@ jobs:
               $ids=@($props.DEVPKEY_Device_HardwareIds) + @($props.DEVPKEY_Device_CompatibleIds)
               $idText=($ids -join '|')
               $isAudioClass=($idText -match '(?i)PCI\\CC_0401|PCI\\CC_0403|PCI\\CC_040100|PCI\\CC_040300')
+              $hasPciClassCode=($idText -match '(?i)PCI\\CC_[0-9A-F]{4,6}')
               $isAudioName=("$($d.FriendlyName) $($props.DEVPKEY_Device_BusReportedDeviceDesc)" -match '(?i)audio|multimedia|sound|high definition')
-              if($isAudioClass -or $isAudioName) {
+              if($isAudioClass -or ((-not $hasPciClassCode) -and $isAudioName)) {
                 $pciAudio += [pscustomobject]@{
                   FriendlyName=$d.FriendlyName
                   Class=$d.Class
@@ -154,11 +155,15 @@ jobs:
           
           # A controller is the actual PCI audio function (class 04/01 or 04/03),
           # never an HDAUDIO codec child. This identity is what native UEFI scans.
-          $controllers=@($pci)
+          $controllers=@($pci | Sort-Object `
+            @{Expression={ if($_.InstanceId -match '(?i)PCI\\VEN_1022&DEV_15E3') { 0 } else { 1 } }}, `
+            @{Expression={$_.InstanceId}})
           $codecFacing=@($all | Where-Object {
-            $_.InstanceId -like 'HDAUDIO\*' -or
+            $_.InstanceId -like 'HDAUDIO\\*' -or
             $_.FriendlyName -match '(?i)realtek|codec|speaker|microphone'
-          })
+          } | Sort-Object `
+            @{Expression={ if($_.InstanceId -match '(?i)HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256') { 0 } else { 1 } }}, `
+            @{Expression={$_.InstanceId}})
           $summary=[ordered]@{
             runner=$env:RUNNER_NAME
             controller_count=$controllers.Count
