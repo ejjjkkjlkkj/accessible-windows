@@ -1,0 +1,24 @@
+LAB8
+role = external-witness-record
+system-foundation = false
+source-a = lab0/mark0
+source-b = lab3/inverted0
+reference-relation = lab2/relation0
+purpose = test exhaustive composition of two distinct externally imposed distinction exchanges
+coverage = all unordered pairs of distinct external carrier positions
+pair-count = 496
+adjacent-pair-count = 32
+separated-pair-count = 464
+expected-adjacent-relation-difference-count = 2
+expected-separated-relation-difference-count = 4
+expected-total-relation-differences = 1920
+ordering = external-carrier-only
+system-semantics = none
+proof = UNPROVEN
+human-facing = false
+accessibility-behavior = not-applicable
+accessibility-gate = any future human-facing state must be perceivable and operable without requiring vision at the same native layer
+claim = success would prove that two distinct external exchanges produce the same observed material regardless of application order
+claim = success would prove the resulting relation is unchanged by globally exchanging the two external labels
+claim = success would prove pair effects remain confined to the incident relation positions, with shared incident positions cancelling
+claim = success would not establish system-owned causality algebra logic time memory language instruction computation runtime cpu process api model or ui semantics
