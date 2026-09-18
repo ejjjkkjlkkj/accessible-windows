@@ -15,4 +15,8 @@ physical-host-uefi-variable-read = forbidden
 physical-host-uefi-variable-write = forbidden
 physical-ASUS-efivar-probe = not-established
 claim = PASS establishes that the first-party UEFI reader can distinguish EFI variable storage from buffer storage, obtain the variable through RuntimeServices GetVariable, bind a live ONE_OF current value to a live HII option, and complete without any write
-proof = PENDING_CI
+proof = NOT_APPLICABLE_NO_LIVE_EFI_VARSTORE_ONE_OF_IN_TEST_OVMF
+
+diagnostic = no live EFI_IFR_VARSTORE_EFI-backed ONE_OF was present in the tested Ubuntu OVMF HII database; discovery correctly ended with IFR_QUESTION_TOKEN_NOT_FOUND
+screen-reader-blocking = false
+fallback-backend = Buffer Storage 0x24 is proven and used by the complete screen-reader path
