@@ -266,6 +266,7 @@ jobs:
           set -euo pipefail
           root=boot/uefi-hda-probe-v1
           builder="$root/build_uefi_hda_probe.py"
+          workflow=".github/workflows/os-uefi-hda-probe-v1.yml"
 
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -276,7 +277,9 @@ jobs:
 
           tested_blob="$(git rev-parse \"${GITHUB_SHA}:${builder}\")"
           current_blob="$(git rev-parse \"HEAD:${builder}\")"
-          if [[ "$tested_blob" != "$current_blob" ]]; then
+          tested_workflow="$(git rev-parse \"${GITHUB_SHA}:${workflow}\")"
+          current_workflow="$(git rev-parse \"HEAD:${workflow}\")"
+          if [[ "$tested_blob" != "$current_blob" || "$tested_workflow" != "$current_workflow" ]]; then
             echo "HDA_PROOF_STALE_RUN=SKIP"
             exit 0
           fi
@@ -289,15 +292,18 @@ jobs:
           root=Path('boot/uefi-hda-probe-v1')
           proof=root/'os-uefi-hda-probe-v1.labproof'
           text=proof.read_text()
-          if 'proof = PASS' in text:
-              print('proof already persisted')
-              raise SystemExit(0)
-          if 'proof = PENDING_CI' not in text:
+          states=[line for line in text.splitlines() if line.startswith('proof = ')]
+          if len(states) != 1 or states[0] not in {'proof = PENDING_CI','proof = PASS'}:
               raise SystemExit('unexpected proof state')
 
           efi=(root/'BOOTX64.EFI').read_bytes()
           serial=(root/'hda.serial').read_bytes()
-          text=text.replace('proof = PENDING_CI','proof = PASS')
+          kept=[]
+          for line in text.splitlines():
+              if line.startswith('proof-') or line.startswith('revalidation-reason ='):
+                  continue
+              kept.append('proof = PASS' if line.startswith('proof = ') else line)
+          text='\n'.join(kept).rstrip()+'\n'
           text += (
               f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
               f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
