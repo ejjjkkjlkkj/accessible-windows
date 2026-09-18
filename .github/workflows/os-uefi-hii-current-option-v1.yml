@@ -116,6 +116,11 @@ jobs:
               "CURRENT_OPTION_TEXT=",
               "CURRENT_OPTION_STRING=PASS",
               "CURRENT_OPTION_RESOLUTION=PASS",
+              "CURRENT_OPTION_SPEECH_BUFFER=PASS",
+              "CURRENT_OPTION_SPEECH_PREFIX=",
+              "capture_speech_scsu",
+              "capture_speech_ucs",
+              "serial_speechbuf",
               "CONFIG_ROUTING_EXPORT_CONFIG=PASS",
               "CONFIG_TO_BLOCK=PASS",
               "CURRENT_VALUE_READ=PASS",
@@ -143,6 +148,7 @@ jobs:
               'set-variable-call = forbidden',
               'varstore-write = forbidden',
               'firmware-setting-mutation = forbidden',
+              'current-option-speech-buffer = first eight normalized Latin letters from live CURRENT_OPTION_TEXT in the same firmware execution',
               'selected-option-speech = not-established-in-this-stage',
           ]:
               assert line in proof,line
@@ -205,6 +211,9 @@ jobs:
               b'CURRENT_OPTION_TEXT=',
               b'CURRENT_OPTION_STRING=PASS\r\n',
               b'CURRENT_OPTION_RESOLUTION=PASS\r\n',
+              b'CURRENT_OPTION_SPEECH_BUFFER=PASS\r\n',
+              b'CURRENT_OPTION_SPEECH_PREFIX=',
+              b'CURRENT_OPTION_SPEECH_PREFIX=PASS\r\n',
           ]:
               assert token in image,token
           print('HII_CURRENT_OPTION_STATIC=PASS')
@@ -277,6 +286,8 @@ jobs:
               b'CURRENT_OPTION_METADATA=PASS\r\n',
               b'CURRENT_OPTION_STRING=PASS\r\n',
               b'CURRENT_OPTION_RESOLUTION=PASS\r\n',
+              b'CURRENT_OPTION_SPEECH_BUFFER=PASS\r\n',
+              b'CURRENT_OPTION_SPEECH_PREFIX=PASS\r\n',
               b'STATUS=PASS\r\n',
           ]
 
@@ -300,10 +311,12 @@ jobs:
               ow=re.search(br'CURRENT_OPTION_WIDTH_HEX=([0-9A-F]{2})',raw)
               ov=re.search(br'CURRENT_OPTION_RAW8_HEX=([0-9A-F]{16})',raw)
               text=re.search(br'CURRENT_OPTION_TEXT=([^\r\n]+)',raw)
+              speech=re.search(br'CURRENT_OPTION_SPEECH_PREFIX=([a-z]+)',raw)
 
-              if all([q,vsid,vinfo,vssize,vsguid,cw,cr,pretok,tok,of,ot,ow,ov,text]) and all(x in raw for x in required):
+              if all([q,vsid,vinfo,vssize,vsguid,cw,cr,pretok,tok,of,ot,ow,ov,text,speech]) and all(x in raw for x in required):
                   question=q.group(1).decode('ascii','replace').strip()
                   option_text=text.group(1).decode('ascii','replace').strip()
+                  speech_prefix=speech.group(1).decode('ascii')
                   pre_option_token=int.from_bytes(bytes.fromhex(pretok.group(1).decode()),'little')
                   option_token=int.from_bytes(bytes.fromhex(tok.group(1).decode()),'little')
                   current_width=int(cw.group(1),16)
@@ -349,6 +362,9 @@ jobs:
                   assert option_token==int(selected_proof['proof-selected-option-string-id']),(option_token,selected_proof['proof-selected-option-string-id'])
                   assert current in value_to_label,(current,value_to_label)
                   assert option_text==value_to_label[current],(option_text,value_to_label[current])
+                  expected_speech=''.join(ch.lower() for ch in option_text if 'a' <= ch.lower() <= 'z')[:8]
+                  assert speech_prefix==expected_speech,(speech_prefix,expected_speech)
+                  assert speech_prefix=='disabled',(speech_prefix,option_text)
 
                   root.joinpath('current-option.txt').write_text(
                       f'question-text = {question}\n'
@@ -366,6 +382,7 @@ jobs:
                       f'current-option-raw8-hex = {option_raw}\n'
                       f'current-option-value-unsigned = {option}\n'
                       f'current-option-text = {option_text}\n'
+                      f'current-option-speech-prefix = {speech_prefix}\n'
                   )
 
                   print('HII_CURRENT_OPTION_DIRECT_CHILD=PASS')
@@ -373,6 +390,8 @@ jobs:
                   print('HII_CURRENT_OPTION_VALUE_MATCH=PASS')
                   print('HII_CURRENT_OPTION_STRING_ID='+str(option_token))
                   print('HII_CURRENT_OPTION_TEXT='+option_text)
+                  print('HII_CURRENT_OPTION_SPEECH_PREFIX='+speech_prefix)
+                  print('HII_CURRENT_OPTION_SPEECH_BUFFER=PASS')
                   print('UEFI_HII_CURRENT_OPTION_RUNTIME=PASS')
                   break
               time.sleep(.1)
