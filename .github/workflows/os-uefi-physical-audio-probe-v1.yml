@@ -95,20 +95,21 @@ jobs:
             ConvertTo-Json -Depth 10 |
             Set-Content "$root/pnp-audio-devices.json" -Encoding utf8
 
+          $pciAudio=@()
           Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
-            Where-Object {
-              $_.InstanceId -like 'PCI\*' -and
-              ($_.FriendlyName -match '(?i)audio|multimedia|sound' -or $_.Class -eq 'MEDIA')
-            } |
+            Where-Object { $_.InstanceId -like 'PCI\*' } |
             ForEach-Object {
               $d=$_
               $props=[ordered]@{}
               foreach($key in @(
                 'DEVPKEY_Device_HardwareIds',
                 'DEVPKEY_Device_CompatibleIds',
+                'DEVPKEY_Device_LocationInfo',
                 'DEVPKEY_Device_LocationPaths',
                 'DEVPKEY_Device_BusReportedDeviceDesc',
-                'DEVPKEY_Device_Parent'
+                'DEVPKEY_Device_Parent',
+                'DEVPKEY_Device_Address',
+                'DEVPKEY_Device_BusNumber'
               )) {
                 try {
                   $props[$key]=(Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName $key -ErrorAction Stop).Data
@@ -116,16 +117,26 @@ jobs:
                   $props[$key]=$null
                 }
               }
-              [pscustomobject]@{
-                FriendlyName=$d.FriendlyName
-                Class=$d.Class
-                InstanceId=$d.InstanceId
-                Status=$d.Status
-                Properties=$props
+              $ids=@($props.DEVPKEY_Device_HardwareIds) + @($props.DEVPKEY_Device_CompatibleIds)
+              $idText=($ids -join '|')
+              $isAudioClass=($idText -match '(?i)PCI\\CC_0401|PCI\\CC_0403|PCI\\CC_040100|PCI\\CC_040300')
+              $isAudioName=("$($d.FriendlyName) $($props.DEVPKEY_Device_BusReportedDeviceDesc)" -match '(?i)audio|multimedia|sound|high definition')
+              if($isAudioClass -or $isAudioName) {
+                $pciAudio += [pscustomobject]@{
+                  FriendlyName=$d.FriendlyName
+                  Class=$d.Class
+                  InstanceId=$d.InstanceId
+                  Status=$d.Status
+                  AudioClassMatch=$isAudioClass
+                  Properties=$props
+                }
               }
-            } |
+            }
+          @($pciAudio) |
             ConvertTo-Json -Depth 10 |
             Set-Content "$root/pci-audio-candidates.json" -Encoding utf8
+          "PCI_AUDIO_CONTROLLER_CANDIDATES=$($pciAudio.Count)"
+          if($pciAudio.Count -lt 1) { throw 'No PCI audio-class controller candidate found' }
 
           pnputil /enum-devices /class MEDIA /connected /properties /drivers |
             Out-File "$root/pnputil-media.txt" -Encoding utf8
@@ -138,17 +149,16 @@ jobs:
           $ErrorActionPreference='Stop'
           $root='boot/uefi-physical-audio-v1/evidence'
           $pnp=Get-Content "$root/pnp-audio-devices.json" -Raw | ConvertFrom-Json
+          $pci=Get-Content "$root/pci-audio-candidates.json" -Raw | ConvertFrom-Json
           $all=@($pnp)
-
-          $controllers=@($all | Where-Object {
-            $_.InstanceId -like 'PCI\*' -or
-            $_.FriendlyName -match '(?i)high definition audio|hd audio|audio controller'
-          })
+          
+          # A controller is the actual PCI audio function (class 04/01 or 04/03),
+          # never an HDAUDIO codec child. This identity is what native UEFI scans.
+          $controllers=@($pci)
           $codecFacing=@($all | Where-Object {
             $_.InstanceId -like 'HDAUDIO\*' -or
             $_.FriendlyName -match '(?i)realtek|codec|speaker|microphone'
           })
-
           $summary=[ordered]@{
             runner=$env:RUNNER_NAME
             controller_count=$controllers.Count
@@ -273,6 +283,10 @@ jobs:
           $controllerId=One-Line $primaryController.InstanceId
           $controllerHwid=Join-Property $primaryController 'DEVPKEY_Device_HardwareIds'
           $controllerLocation=Join-Property $primaryController 'DEVPKEY_Device_LocationPaths'
+          $controllerParent=Join-Property $primaryController 'DEVPKEY_Device_Parent'
+          $controllerCompatible=Join-Property $primaryController 'DEVPKEY_Device_CompatibleIds'
+          $controllerAddress=Join-Property $primaryController 'DEVPKEY_Device_Address'
+          $controllerBus=Join-Property $primaryController 'DEVPKEY_Device_BusNumber'
           $codecName=One-Line $primaryCodec.FriendlyName
           $codecId=One-Line $primaryCodec.InstanceId
           $codecHwid=Join-Property $primaryCodec 'DEVPKEY_Device_HardwareIds'
@@ -309,6 +323,10 @@ jobs:
           $kept += "proof-primary-controller-instance-id = $controllerId"
           $kept += "proof-primary-controller-hardware-id = $controllerHwid"
           $kept += "proof-primary-controller-location-path = $controllerLocation"
+          $kept += "proof-primary-controller-parent = $controllerParent"
+          $kept += "proof-primary-controller-compatible-id = $controllerCompatible"
+          $kept += "proof-primary-controller-address = $controllerAddress"
+          $kept += "proof-primary-controller-bus = $controllerBus"
           $kept += "proof-primary-codec-name = $codecName"
           $kept += "proof-primary-codec-instance-id = $codecId"
           $kept += "proof-primary-codec-hardware-id = $codecHwid"
