@@ -346,6 +346,7 @@ jobs:
                   m=json.loads(f.readline())
                   if "return" in m: break
                   if "error" in m: raise SystemExit(repr(m))
+              f.close()
           req=[
               b"HII_NAVIGATION_KEY=PASS\r\n",
               b"NAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\n",
