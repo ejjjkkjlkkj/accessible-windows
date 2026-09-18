@@ -23,6 +23,8 @@ $required=@(
   'STATUS=PASS',
   'HII_PROMPT_SOURCE=PASS',
   'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3',
+  'HDA_CODEC_VENDOR_DEVICE=0x10EC0256',
+  'HDA_CODEC_SELECTION=REALTEK_10EC_0256',
   'HDA_GRAPH_SEARCH_LIVE=PASS',
   'HDA_SELECTOR_APPLY_LIVE=PASS',
   'HDA_OUTPUT_PATH_CONFIGURATION=PASS',
@@ -38,6 +40,9 @@ foreach($token in $required){
 if($raw -match 'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403'){
   throw 'Physical ASUS proof used generic/possibly HDMI controller instead of AMD 1022:15E3'
 }
+if($raw -match 'HDA_CODEC_SELECTION=GENERIC_RUNTIME'){
+  throw 'Physical ASUS proof did not bind the native codec to Realtek 10EC:0256'
+}
 $pin=[regex]::Match($raw,'(?m)^HDA_PIN_NID=(0x[0-9A-F]{2})$').Groups[1].Value
 $dac=[regex]::Match($raw,'(?m)^HDA_DAC_NID=(0x[0-9A-F]{2})$').Groups[1].Value
 $depth=[regex]::Match($raw,'(?m)^HDA_ROUTE_DEPTH=(0x[0-9A-F]{2})$').Groups[1].Value
@@ -47,7 +52,7 @@ if(-not $pin -or -not $dac -or -not $depth){ throw 'Physical HDA route fields mi
   Result='PASS'
   ProofPath=$ProofPath
   Controller='PCI 1022:15E3'
-  Codec='Realtek 10EC:0256 target'
+  Codec='Realtek 10EC:0256 verified by native HDA verb'
   PinNid=$pin
   DacNid=$dac
   RouteDepth=$depth
