@@ -30,14 +30,16 @@ jobs:
           for line in [
               'proof = PASS',
               'proof-live-current-option-identity = PASS',
-              'proof-current-option-label = Disabled',
-              'proof-current-value = 0',
-              'proof-spoken-prefix = disabled',
+              'proof-live-current-option-label = PASS',
               'proof-runtime-HDA-route = PASS',
               'proof-HDA-waveform = PASS',
+              'proof-current-label-hardcoded = false',
               'proof-setting-mutation = false',
           ]:
               assert line in current,line
+          for prefix in ['proof-current-option-label = ','proof-current-value = ','proof-spoken-prefix = ']:
+              vals=[x.split(' = ',1)[1] for x in current if x.startswith(prefix)]
+              assert len(vals)==1 and vals[0],(prefix,vals)
           proof=set(Path('boot/uefi-hii-repeat-speech-v1/os-uefi-hii-repeat-speech-v1.labproof').read_text().splitlines())
           for line in [
               'keyboard-unicode-key = R or r',
@@ -153,6 +155,14 @@ jobs:
           root=Path('boot/uefi-hii-repeat-speech-v1')
           serial=root/'repeat.serial'
           qmp=root/'qmp.sock'
+          proof=Path('boot/uefi-hii-current-option-speech-v1/os-uefi-hii-current-option-speech-v1.labproof').read_text().splitlines()
+          def one(prefix):
+              vals=[x.split(' = ',1)[1] for x in proof if x.startswith(prefix+' = ')]
+              if len(vals)!=1: raise SystemExit((prefix,vals))
+              return vals[0]
+          expected_value=int(one('proof-current-value'))
+          expected_label=one('proof-current-option-label')
+          expected_prefix=one('proof-spoken-prefix')
 
           end=time.time()+35
           while time.time()<end:
@@ -204,16 +214,16 @@ jobs:
               if all(x in raw for x in required):
                   cur=re.search(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
                   label=re.search(br'SELECTED_OPTION_TEXT=([^\r\n]+)',raw)
-                  spoken=re.search(br'CURRENT_OPTION_SPOKEN_PREFIX=([a-z]{1,8})\r\nCURRENT_OPTION_SPOKEN_PREFIX=PASS\r\n',raw)
+                  spoken=re.search(br'CURRENT_OPTION_SPOKEN_PREFIX=([a-z0-9]{1,8})\r\nCURRENT_OPTION_SPOKEN_PREFIX=PASS\r\n',raw)
                   assert cur and label and spoken,raw[-20000:]
-                  value=bytes.fromhex(cur.group(1).decode())[0]
+                  value=int.from_bytes(bytes.fromhex(cur.group(1).decode()),'little')
                   current_label=label.group(1).decode('ascii','replace').strip()
                   prefix=spoken.group(1).decode()
-                  assert value==0,value
-                  assert current_label=='Disabled',current_label
-                  assert prefix=='disabled',prefix
+                  assert value==expected_value,(value,expected_value)
+                  assert current_label==expected_label,(current_label,expected_label)
+                  assert prefix==expected_prefix,(prefix,expected_prefix)
                   count=raw.count(b'EVENT=CURRENT_OPTION_GRAPHEME_ACCEPTED\r\n')
-                  assert count==8,count
+                  assert count==len(expected_prefix),(count,len(expected_prefix))
                   root.joinpath('runtime.txt').write_text(
                       f'current-value = {value}\n'
                       f'current-option-label = {current_label}\n'
@@ -224,8 +234,8 @@ jobs:
                       'post-key-native-hda-speech = PASS\n'
                   )
                   print('REPEAT_KEY_RUNTIME=PASS')
-                  print('REPEAT_CURRENT_LABEL=Disabled')
-                  print('REPEAT_SPOKEN_PREFIX=disabled')
+                  print('REPEAT_CURRENT_LABEL='+current_label)
+                  print('REPEAT_SPOKEN_PREFIX='+prefix)
                   break
               time.sleep(.1)
           else:
@@ -283,7 +293,14 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re,time
-          p=Path('boot/uefi-hii-repeat-speech-v1/post.serial')
+          root=Path('boot/uefi-hii-repeat-speech-v1')
+          p=root/'post.serial'
+          vals={}
+          for line in (root/'runtime.txt').read_text().splitlines():
+              if ' = ' in line:
+                  k,v=line.split(' = ',1); vals[k]=v
+          expected_value=int(vals['current-value'])
+          expected_label=vals['current-option-label']
           end=time.time()+35
           while time.time()<end:
               raw=p.read_bytes() if p.exists() else b''
@@ -293,8 +310,10 @@ jobs:
                   cur=re.search(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
                   label=re.search(br'SELECTED_OPTION_TEXT=([^\r\n]+)',raw)
                   assert cur and label
-                  assert bytes.fromhex(cur.group(1).decode())[0]==0
-                  assert label.group(1).decode('ascii','replace').strip()=='Disabled'
+                  got_value=int.from_bytes(bytes.fromhex(cur.group(1).decode()),'little')
+                  got_label=label.group(1).decode('ascii','replace').strip()
+                  assert got_value==expected_value,(got_value,expected_value)
+                  assert got_label==expected_label,(got_label,expected_label)
                   print('REPEAT_POST_STATE_UNCHANGED=PASS')
                   break
               time.sleep(.1)
