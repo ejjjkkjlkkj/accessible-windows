@@ -6,6 +6,7 @@ from pathlib import Path
 TEXT_RVA=0x1000
 DATA_RVA=0x8000
 WAIT_REPEAT_KEY=False
+WAIT_DOWN_PROBE=False
 
 ROOT=Path(__file__).resolve().parents[2]
 SPEECH_BUILDER=ROOT/'boot'/'uefi-hii-option-speech-v1'/'build_uefi_hii_option_speech.py'
@@ -99,6 +100,13 @@ MARKS={
  'progress': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nLPIB_PROGRESS=PASS\r\nCURRENT_OPTION_SPEECH_HDA=PASS\r\nEND\r\n',
  'repeat_wait': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nACCESSIBILITY_REPEAT_KEY=WAIT_R\r\nEND\r\n',
  'repeat_accept': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nACCESSIBILITY_REPEAT_KEY=R\r\nACCESSIBILITY_REPEAT_KEY=PASS\r\nEND\r\n',
+ 'nav_wait': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_NAVIGATION_KEY=WAIT_DOWN\r\nEND\r\n',
+ 'nav_accept': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_NAVIGATION_KEY=DOWN\r\nHII_NAVIGATION_KEY=PASS\r\nEND\r\n',
+ 'nav_token': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_NEXT_OPTION_STRING_ID_LE_HEX=',
+ 'nav_type': b'\r\nNAV_NEXT_OPTION_TYPE_HEX=',
+ 'nav_raw': b'\r\nNAV_NEXT_OPTION_VALUE_RAW8_HEX=',
+ 'nav_done': b'\r\nNAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\nEND\r\n',
+ 'nav_fail': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=NAV_NEXT_OPTION_NOT_FOUND\r\nEND\r\n',
  'done': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=PASS\r\nEND\r\n',
  'no_hda': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_PCI_NOT_FOUND\r\nEND\r\n',
  'bad_hda': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_CONTROLLER_OR_CODEC_FAILED\r\nEND\r\n',
@@ -162,6 +170,7 @@ def build():
   'string_mode':400,
   'maxaddr':408,'dac_nid':416,'pin_nid':420,'speech_text_source':424,
   'textbuf':432,'text_count':452,'keybuf':456,
+  'selected_option_ptr':464,'nav_option_token':472,'nav_option_type':474,'nav_option_raw':480,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -180,8 +189,8 @@ def build():
 
  c=Code()
  c.emit(b'\x53\x55\x56\x57\x41\x54\x41\x55\x41\x56\x41\x57')
- if WAIT_REPEAT_KEY:
-  c.emit(b'\x48\x8b\x6a\x30')  # rbp=ConIn for accessibility repeat command
+ if WAIT_REPEAT_KEY or WAIT_DOWN_PROBE:
+  c.emit(b'\x48\x8b\x6a\x30')  # rbp=ConIn for accessibility keyboard commands
  c.emit(b'\x4c\x8b\x7a\x60')  # r15=BootServices
  c.emit(b'\x48\x83\xec\x68\xfc')
 
@@ -455,6 +464,10 @@ def build():
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
+ if WAIT_DOWN_PROBE:
+  c.rel32(b'\xe8','wait_down_key'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
+  c.rel32(b'\xe8','resolve_next_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
+  c.rel32(b'\xe8','emit_nav_meta')
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x8b\x32')
  serial('prefix'); c.rel32(b'\xe8','serial_scsu_ascii')
  c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_string')
@@ -468,6 +481,10 @@ def build():
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
+ if WAIT_DOWN_PROBE:
+  c.rel32(b'\xe8','wait_down_key'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
+  c.rel32(b'\xe8','resolve_next_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
+  c.rel32(b'\xe8','emit_nav_meta')
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x8b\x32')
  serial('prefix'); c.rel32(b'\xe8','serial_utf16')
  serial('suffix'); c.rel32(b'\xe9','begin_selected_label')
@@ -773,6 +790,7 @@ def build():
  c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
 
  c.label('fail_selected_string'); serial('selected_string_fail'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_nav'); serial('nav_fail'); c.rel32(b'\xe9','return_fail')
 
  c.label('fail_no_hda'); serial('no_hda'); c.rel32(b'\xe9','return_fail')
  c.label('fail_bad_hda'); serial('bad_hda'); c.rel32(b'\xe9','return_fail')
@@ -1097,6 +1115,7 @@ def build():
  c.lea_rax_data(L['current_raw']); c.emit(b'\x48\x8b\x00\x49\x3b\x41\x06'); c.rel32(b'\x0f\x85','selected_option_advance')
 
  c.label('selected_option_match')
+ c.lea_rdx_data(L['selected_option_ptr']); c.emit(b'\x4c\x89\x0a')
  c.emit(b'\x41\x0f\xb7\x41\x02'); c.lea_rdx_data(L['selected_option_token']); c.emit(b'\x66\x89\x02')
  c.emit(b'\x41\x0f\xb6\x41\x05'); c.lea_rdx_data(L['selected_option_type']); c.emit(b'\x88\x02')
  # Zero-pad the persisted raw option value, then copy exactly its typed width.
@@ -1117,6 +1136,70 @@ def build():
  c.label('selected_option_advance')
  c.emit(b'\x49\x01\xc9\x41\x29\xca'); c.rel32(b'\xe9','selected_option_scan')
  c.label('selected_option_not_found'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
+
+ c.label('wait_down_key')
+ serial('nav_wait')
+ c.label('nav_read_key')
+ c.emit(b'\x48\x89\xe9'); c.lea_rdx_data(L['keybuf'])
+ c.emit(b'\x48\x8b\x45\x08\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','nav_read_key')
+ c.lea_rdx_data(L['keybuf']); c.emit(b'\x0f\xb7\x02\x66\x83\xf8\x02'); c.rel32(b'\x0f\x85','nav_read_key')
+ serial('nav_accept'); c.emit(b'\x31\xc0\xc3')
+
+ c.label('resolve_next_option')
+ # Re-scan only the direct children of the same scoped ONE_OF. The current
+ # option pointer is the boundary: the first later direct numeric option is the
+ # read-only DOWN focus target. No HII write service is called.
+ c.lea_rax_data(L['question_ptr']); c.emit(b'\x48\x8b\x00\x48\x85\xc0'); c.rel32(b'\x0f\x84','nav_option_not_found')
+ c.emit(b'\xf6\x40\x01\x80'); c.rel32(b'\x0f\x84','nav_option_not_found')
+ c.lea_rdx_data(L['ifr_next_ptr']); c.emit(b'\x4c\x8b\x0a')
+ c.lea_rdx_data(L['ifr_next_remaining']); c.emit(b'\x44\x8b\x12')
+ c.emit(b'\x41\xbb\x01\x00\x00\x00\x45\x31\xc0') # depth=1, seen-current=false
+ c.label('nav_option_scan')
+ c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x82','nav_option_not_found')
+ c.emit(b'\x41\x0f\xb6\x01')
+ c.emit(b'\x41\x0f\xb6\x59\x01\x89\xd9\x83\xe1\x7f')
+ c.emit(b'\x83\xf9\x02'); c.rel32(b'\x0f\x82','nav_option_not_found')
+ c.emit(b'\x44\x39\xd1'); c.rel32(b'\x0f\x87','nav_option_not_found')
+ c.emit(b'\x3c\x29'); c.rel32(b'\x0f\x84','nav_option_end')
+ c.emit(b'\x3c\x09'); c.rel32(b'\x0f\x85','nav_option_scope_advance')
+ c.emit(b'\x41\x83\xfb\x01'); c.rel32(b'\x0f\x85','nav_option_scope_advance')
+ c.emit(b'\x45\x85\xc0'); c.rel32(b'\x0f\x85','nav_option_candidate')
+ c.lea_rdx_data(L['selected_option_ptr']); c.emit(b'\x4c\x3b\x0a'); c.rel32(b'\x0f\x85','nav_option_scope_advance')
+ c.emit(b'\x41\xb8\x01\x00\x00\x00'); c.rel32(b'\xe9','nav_option_scope_advance')
+
+ c.label('nav_option_candidate')
+ c.emit(b'\x83\xf9\x07'); c.rel32(b'\x0f\x82','nav_option_advance')
+ c.emit(b'\x41\x89\xc8')
+ c.emit(b'\x41\x0f\xb6\x41\x05\x3c\x03'); c.rel32(b'\x0f\x87','nav_option_advance')
+ c.lea_rdx_data(L['oneof_flags']); c.emit(b'\x0f\xb6\x12\x83\xe2\x03\x39\xd0'); c.rel32(b'\x0f\x85','nav_option_advance')
+ c.emit(b'\x89\xc1\xba\x01\x00\x00\x00\xd3\xe2\x8d\x42\x06\x41\x39\xc0'); c.rel32(b'\x0f\x82','nav_option_restore_advance')
+ c.emit(b'\x44\x89\xc1')
+ c.emit(b'\x41\x0f\xb7\x41\x02'); c.lea_rdx_data(L['nav_option_token']); c.emit(b'\x66\x89\x02')
+ c.emit(b'\x41\x0f\xb6\x41\x05'); c.lea_rdx_data(L['nav_option_type']); c.emit(b'\x88\x02')
+ c.lea_rdx_data(L['nav_option_raw']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00\xc7\x42\x04\x00\x00\x00\x00')
+ c.emit(b'\x41\x0f\xb6\x49\x05\xba\x01\x00\x00\x00\xd3\xe2')
+ c.emit(b'\x49\x8d\x71\x06'); c.lea_rdi_data(L['nav_option_raw']); c.emit(b'\x89\xd1')
+ c.label('nav_option_copy_loop')
+ c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','nav_option_copy_done')
+ c.emit(b'\x8a\x06\x88\x07\x48\xff\xc6\x48\xff\xc7\xff\xc9'); c.rel32(b'\xe9','nav_option_copy_loop')
+ c.label('nav_option_copy_done'); c.emit(b'\x31\xc0\xc3')
+ c.label('nav_option_restore_advance'); c.emit(b'\x44\x89\xc1'); c.rel32(b'\xe9','nav_option_advance')
+ c.label('nav_option_end')
+ c.emit(b'\x41\xff\xcb\x41\x83\xfb\x00'); c.rel32(b'\x0f\x84','nav_option_not_found')
+ c.rel32(b'\xe9','nav_option_advance')
+ c.label('nav_option_scope_advance')
+ c.emit(b'\xf6\xc3\x80'); c.rel32(b'\x0f\x84','nav_option_advance'); c.emit(b'\x41\xff\xc3')
+ c.label('nav_option_advance')
+ c.emit(b'\x49\x01\xc9\x41\x29\xca'); c.rel32(b'\xe9','nav_option_scan')
+ c.label('nav_option_not_found'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
+
+ c.label('emit_nav_meta')
+ serial('nav_token'); c.lea_rsi_data(L['nav_option_token']); c.emit(b'\xb9\x02\x00\x00\x00')
+ c.label('nav_token_hex_loop'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','nav_token_hex_loop')
+ serial('nav_type'); c.lea_rax_data(L['nav_option_type']); c.emit(b'\x8a\x00'); c.rel32(b'\xe8','hex8_emit')
+ serial('nav_raw'); c.lea_rsi_data(L['nav_option_raw']); c.emit(b'\xb9\x08\x00\x00\x00')
+ c.label('nav_raw_hex_loop'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','nav_raw_hex_loop')
+ serial('nav_done'); c.emit(b'\xc3')
 
  c.label('emit_question_meta')
  serial('meta_qid'); c.lea_rsi_data(L['question_id']); c.emit(b'\xb9\x02\x00\x00\x00')
@@ -1300,11 +1383,12 @@ def validate(image,pcm):
   assert token in image,token
 
 def main():
- global WAIT_REPEAT_KEY
- if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat]')
+ global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE
+ if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe]')
  if len(sys.argv)==3:
-  if sys.argv[2] != '--wait-repeat': raise SystemExit('unknown mode: '+sys.argv[2])
-  WAIT_REPEAT_KEY=True
+  if sys.argv[2]=='--wait-repeat': WAIT_REPEAT_KEY=True
+  elif sys.argv[2]=='--wait-down-probe': WAIT_DOWN_PROBE=True
+  else: raise SystemExit('unknown mode: '+sys.argv[2])
  image,pcm=build(); validate(image,pcm)
  p=Path(sys.argv[1]); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(image)
  print('OS_UEFI_HII_CURRENT_OPTION_SPEECH_BUILD=PASS')
@@ -1312,6 +1396,7 @@ def main():
  print('current-option-graphemes=a-z')
  print('current-option-max-spoken-graphemes=8')
  print('accessibility-repeat-key=' + ('enabled' if WAIT_REPEAT_KEY else 'disabled'))
+ print('hii-down-probe=' + ('enabled' if WAIT_DOWN_PROBE else 'disabled'))
  print('pcm-bytes='+str(len(pcm)))
  print('pcm-sha256='+hashlib.sha256(pcm).hexdigest())
  print('sha256='+hashlib.sha256(image).hexdigest())
