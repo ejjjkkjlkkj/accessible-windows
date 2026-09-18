@@ -1,0 +1,23 @@
+LAB14
+role = external-concurrent-transition-witness-record
+system-foundation = false
+purpose = test externally provided atomic transition behavior under real parallel execution on AMD-5800H-REAL
+target-runner = AMD-5800H-REAL
+parallel-worker-policy = one worker per reported logical processor
+increments-per-worker = 100000
+cas-rounds = 512
+atomic-increment-expected = workers multiplied by increments-per-worker
+cas-expected-winners-per-round = exactly one
+external-infrastructure = AMD processor .NET Interlocked thread scheduler Windows PowerShell CSharp GitHub Actions runner
+external-infrastructure-semantics = witness-only
+proof = UNPROVEN
+proof-run = none
+proof-self-hosted = UNPROVEN
+proof-atomic-increment = UNPROVEN
+proof-exclusive-transition = UNPROVEN
+proof-parallel = UNPROVEN
+human-facing = false
+accessibility-behavior = not-applicable
+accessibility-gate = any future human-facing state must be perceivable and operable without requiring vision at the same native layer
+claim = success would prove the tested external atomic increment and exclusive compare-exchange behavior under parallel load on the real AMD carrier
+claim = success would not establish a system-owned scheduler lock mutex process thread memory model instruction set or synchronization semantics

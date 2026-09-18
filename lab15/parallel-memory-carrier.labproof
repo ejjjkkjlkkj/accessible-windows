@@ -1,0 +1,24 @@
+LAB15
+role = external-parallel-memory-carrier-witness-record
+system-foundation = false
+purpose = test deterministic disjoint parallel write and readback behavior on a finite external memory carrier on AMD-5800H-REAL
+target-runner = AMD-5800H-REAL
+parallel-worker-policy = one worker per reported logical processor
+bytes-per-worker = 2097152
+expected-workers = 16
+expected-total-bytes = 33554432
+passes = 4
+expected-final-sha256-for-16-workers = a0e3895d6f3b3a78435e0c002e6e4b2264ccaadc14c4ea22be15fd4f5dc37fae
+external-infrastructure = AMD memory hierarchy .NET managed array runtime scheduler Windows PowerShell CSharp GitHub Actions runner
+external-infrastructure-semantics = witness-only
+proof = UNPROVEN
+proof-run = none
+proof-self-hosted = UNPROVEN
+proof-disjoint-write = UNPROVEN
+proof-readback = UNPROVEN
+proof-final-hash = UNPROVEN
+human-facing = false
+accessibility-behavior = not-applicable
+accessibility-gate = any future human-facing state must be perceivable and operable without requiring vision at the same native layer
+claim = success would prove the tested finite external carrier survives repeated disjoint parallel mutation and readback with the expected deterministic final digest
+claim = success would not establish system-owned memory allocation address virtual memory cache process persistence storage or language semantics
