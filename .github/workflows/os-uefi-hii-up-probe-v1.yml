@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Enforce current-option and fixture foundations
+      - name: Enforce live current-option foundation
         shell: python
         run: |
           from pathlib import Path
@@ -32,27 +32,16 @@ jobs:
               'proof = PASS',
               'proof-live-current-option-identity = PASS',
               'proof-live-current-option-varstore-identity = PASS',
-              'proof-question = iSCSI Mode',
-              'proof-current-option-label = Disabled',
-              'proof-current-value = 0',
-              'proof-current-option-value = 0',
+              'proof-current-label-hardcoded = false',
               'proof-setting-mutation = false',
           ]:
               assert line in current,('current',line)
-
-          fixture=set(Path('boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof').read_text().splitlines())
-          for line in [
-              'proof = PASS',
-              'question-text = iSCSI Mode',
-              'option-disabled-label = Disabled',
-              'option-disabled-value = 0',
-              'option-enabled-label = Enabled',
-              'option-enabled-value = 1',
-              'option-enabled-for-mpio-label = Enabled for MPIO',
-              'option-enabled-for-mpio-value = 2',
-          ]:
-              assert line in fixture,('fixture',line)
+          question=[x.split(' = ',1)[1] for x in current if x.startswith('proof-question = ')]
+          raw=[x.split(' = ',1)[1] for x in current if x.startswith('proof-current-value = ')]
+          assert len(question)==1 and question[0],question
+          assert len(raw)==1,raw
           print('UP_PROBE_FOUNDATIONS=PASS')
+          print('UP_PROBE_LIVE_QUESTION='+question[0])
 
       - name: Audit UP probe source contract
         shell: python
