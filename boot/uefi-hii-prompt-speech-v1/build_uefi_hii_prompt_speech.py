@@ -667,6 +667,7 @@ def build():
  serial('done')
  c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
 
+ c.label('prompt_package_done'); c.rel32(b'\xe9','direct_list_next')
  c.label('fail_hii_protocol'); serial('hii_protocol_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_list_size'); serial('hii_list_size_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_list_fetch'); serial('hii_list_fetch_fail'); c.rel32(b'\xe9','return_fail')
