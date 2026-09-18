@@ -1,0 +1,24 @@
+AW0MAN00
+version = 0
+identity = AW-SOVEREIGN-ORIGIN
+status = ACTIVE
+policy = ZERO-SOFTWARE-ANCESTRY
+language = AWL0
+object-format = AW0OBJ00
+accessibility-proof = A11Y0
+seed = AWSEED0
+foreign-software-base = FORBIDDEN
+third-party-source-in-sovereign-tree = FORBIDDEN
+third-party-compiler-as-final-bootstrap = FORBIDDEN
+accessibility-omission = FORBIDDEN
+evidence-required = A+B
+file-extension-policy = AW0.FORMAT.NO-UNREGISTERED-SOVEREIGN-EXTENSION
+
+canonical = sovereign/formats0/registry.awformats0
+canonical = sovereign/tools0/registry.awtools0
+canonical = sovereign/lang0/language.awspec0
+canonical = sovereign/lang0/foundation.awsource0
+canonical = sovereign/object0/object.awspec0
+canonical = sovereign/seed0/seed.awspec0
+canonical = sovereign/a11y0/format.awspec0
+canonical = sovereign/a11y0/registry.awa11y0

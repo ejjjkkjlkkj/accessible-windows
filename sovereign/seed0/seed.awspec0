@@ -1,0 +1,38 @@
+AW0SPEC0
+kind = seed-specification
+identity = AWSEED0
+generation = 0
+status = UNPROVEN
+
+::origin
+rule = canonical bytes authored from documented machine-boundary specifications
+rule = no third-party compiler or assembler emits canonical Seed-0
+rule = every byte range has project-owned explanation
+rule = no third-party runtime
+::end
+
+::authority
+rule = minimum-next-stage-authority-only
+rule = no-ambient-authority
+::end
+
+::accessibility
+rule = any human interaction requires A11Y0 with no exception
+B = UNPROVEN
+::end
+
+::proof-A
+require = byte-map
+require = instruction-intent
+require = machine-entry-exit-contract
+require = memory-ranges
+require = authority-assumptions
+require = image-invariants
+::end
+
+::proof-B
+require = independent-byte-reconstruction
+require = independent-execution
+require = corrupted-input-negative-tests
+require = exact-byte-hash-witness
+::end

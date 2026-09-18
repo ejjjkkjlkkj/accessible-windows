@@ -9,10 +9,27 @@ on:
 permissions:
   contents: read
 
-# External bootstrap witness only.
-# Hosted shells and operating systems are not part of the sovereign toolchain.
-
 jobs:
+  sovereign-format-policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Reject non-AW0 sovereign extensions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s sovereign/formats0/registry.awformats0
+          bad="$(find sovereign -type f | grep -Ev '\.(awsource0|awobject0|awspec0|awmanifest0|awhash0|awa11y0|awformats0|awtools0|awproof0|awseed0|awimage0|awpackage0)$' || true)"
+          if [ -n "$bad" ]; then
+            echo "Non-AW0 sovereign extension detected:"
+            echo "$bad"
+            exit 1
+          fi
+          grep -q '^AW0FMT00' sovereign/formats0/registry.awformats0
+          grep -q 'extension = .awsource0' sovereign/formats0/registry.awformats0
+          grep -q 'extension = .awobject0' sovereign/formats0/registry.awformats0
+          grep -q 'extension = .awspec0' sovereign/formats0/registry.awformats0
+
   zero-base-policy:
     runs-on: ubuntu-24.04
     steps:
@@ -25,10 +42,10 @@ jobs:
           test ! -e rust-toolchain.toml
           test ! -d crates
           test ! -d boot
-          grep -q '^policy=zero-software-ancestry$' sovereign/ORIGIN.manifest
-          grep -q '^accessibility-omission=forbidden$' sovereign/ORIGIN.manifest
-          if find sovereign -type f \( -name '*.rs' -o -name '*.py' -o -name '*.c' -o -name '*.cc' -o -name '*.cpp' \) | grep -q .; then
-            echo 'Foreign-language implementation file detected in sovereign tree.'
+          grep -q '^policy = ZERO-SOFTWARE-ANCESTRY$' sovereign/origin0/origin.awmanifest0
+          grep -q '^accessibility-omission = FORBIDDEN$' sovereign/origin0/origin.awmanifest0
+          if find sovereign -type f \( -name '*.rs' -o -name '*.py' -o -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.md' -o -name '*.toml' \) | grep -q .; then
+            echo 'Foreign source/document extension detected in sovereign tree.'
             exit 1
           fi
 
@@ -40,13 +57,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          find sovereign -type f ! -path 'sovereign/a11y0/REGISTRY.a11y' | sort > /tmp/active
-          awk -F'|' '!/^#/ && NF==5 {print $1}' sovereign/a11y0/REGISTRY.a11y | sort > /tmp/registered
+          find sovereign -type f | sort > /tmp/active
+          tail -n +3 sovereign/a11y0/registry.awa11y0 | cut -d'|' -f1 | sort > /tmp/registered
           diff -u /tmp/active /tmp/registered
           test "$(sort /tmp/registered | uniq -d | wc -l)" -eq 0
-          grep -q 'proof accessibility' sovereign/awl0/foundation.awl
-          grep -q 'path keyboard | speech | braille' sovereign/awl0/foundation.awl
-          grep -q 'A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS' sovereign/awl0/foundation.awl
+          grep -q '^AW0SRC00' sovereign/lang0/foundation.awsource0
+          grep -q 'proof accessibility' sovereign/lang0/foundation.awsource0
+          grep -q 'path keyboard | speech | braille' sovereign/lang0/foundation.awsource0
+          grep -q 'accessibility = mandatory-A+B' sovereign/tools0/registry.awtools0
 
   accessibility-completeness-B:
     strategy:
@@ -56,20 +74,37 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
-      - name: Independent A11Y0 witness on Unix
+      - name: Independent AW0 witness on Unix
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          awk -F'|' '!/^#/ && NF==5 {print $1 "|" $3 "|" $4}' sovereign/a11y0/REGISTRY.a11y
-          sha256sum sovereign/awl0/foundation.awl sovereign/a11y0/REGISTRY.a11y
-      - name: Independent A11Y0 witness on Windows
+          find sovereign -type f -print0 | sort -z | xargs -0 sha256sum
+          grep -q 'foundation.awsource0|interactive|PASS|UNPROVEN|' sovereign/a11y0/registry.awa11y0
+      - name: Independent AW0 witness on Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Get-Content sovereign/a11y0/REGISTRY.a11y | Where-Object { -not $_.StartsWith('#') }
-          Get-FileHash -Algorithm SHA256 sovereign/awl0/foundation.awl
-          Get-FileHash -Algorithm SHA256 sovereign/a11y0/REGISTRY.a11y
+          Get-ChildItem sovereign -Recurse -File | Sort-Object FullName | ForEach-Object {
+            $h = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower()
+            "$h  $($_.FullName)"
+          }
+          if (-not (Select-String -Quiet -Path sovereign/a11y0/registry.awa11y0 -Pattern 'foundation.awsource0\|interactive\|PASS\|UNPROVEN\|')) {
+            throw 'Missing interactive A+B state'
+          }
+
+  tool-registry-policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Project-owned tool names and accessibility obligations
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tool in awseed0 awencode0 awlink0 awcompile0 awprove0 awa11y0 awbuild0 awtrace0 awfuzz0 awpack0; do
+            grep -q "name = $tool" sovereign/tools0/registry.awtools0
+          done
+          test "$(grep -c 'accessibility = .*A+B' sovereign/tools0/registry.awtools0)" -ge 10
 
   claim-discipline:
     runs-on: ubuntu-24.04
@@ -79,5 +114,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'UNPROVEN' sovereign/seed0/SEED_SPEC.md
-          grep -q 'foundation.awl|interactive|PASS|UNPROVEN|' sovereign/a11y0/REGISTRY.a11y
+          grep -q 'status = UNPROVEN' sovereign/seed0/seed.awspec0
+          grep -q 'foundation.awsource0|interactive|PASS|UNPROVEN|' sovereign/a11y0/registry.awa11y0

@@ -1,0 +1,54 @@
+AW0SPEC0
+kind = language-specification
+identity = AWL0
+generation = 0
+status = COMPILER-UNPROVEN
+
+::cell
+property = stable-semantic-identity
+property = explicit-generation
+property = private-state
+property = explicit-authority
+property = explicit-effects
+property = explicit-regeneration
+property = mandatory-human-contract-if-interactive
+::end
+
+::ambient
+filesystem = none
+network = none
+device-namespace = none
+superuser = none
+::end
+
+::values
+plain = immutable-value
+own = unique-owned-value
+share = immutable-shared-value
+cap = nonduplicable-authority
+keep = validated-regeneration-state
+shed = generation-local-state
+untrusted = cannot-drive-privileged-effect
+trusted = validated-with-provenance
+::end
+
+::authority
+rule = effect requires declaration and matching capability
+rule = authority may narrow-transfer-consume-expire-revoke
+rule = authority never self-widens
+::end
+
+::human
+rule = semantics precede presentation
+rule = keyboard reaches fundamental actions
+rule = native nonvisual path required
+rule = status-error-progress are structured records
+rule = visual is never source-of-truth
+::end
+
+::proof
+A = grammar + ownership + authority + regeneration + human-completeness
+B = positive-execution + negative-rejection + deterministic-output + hostile-input
+without-A+B = UNPROVEN
+accessibility-opt-out = forbidden
+::end

@@ -1,0 +1,94 @@
+AW0FMT00
+version = 0
+identity = AW0.FORMATS.G0
+status = ACTIVE
+
+::format
+extension = .awsource0
+magic = AW0SRC00
+role = AWL0 source
+encoding = utf-8
+::end
+
+::format
+extension = .awobject0
+magic = AW0OBJ00
+role = compiled object container
+encoding = binary
+::end
+
+::format
+extension = .awspec0
+magic = AW0SPEC0
+role = sovereign specification
+encoding = utf-8
+::end
+
+::format
+extension = .awmanifest0
+magic = AW0MAN00
+role = sovereign origin/build manifest
+encoding = utf-8
+::end
+
+::format
+extension = .awhash0
+magic = AW0HSH00
+role = integrity evidence ledger
+encoding = utf-8
+::end
+
+::format
+extension = .awa11y0
+magic = AW0A1100
+role = accessibility A+B registry
+encoding = utf-8
+::end
+
+::format
+extension = .awformats0
+magic = AW0FMT00
+role = file-format registry
+encoding = utf-8
+::end
+
+::format
+extension = .awtools0
+magic = AW0TLS00
+role = project-owned tool registry
+encoding = utf-8
+::end
+
+::format
+extension = .awproof0
+magic = AW0PRF00
+role = proof/evidence bundle
+encoding = binary-or-utf8
+::end
+
+::format
+extension = .awseed0
+magic = AW0SED00
+role = Seed-0 image
+encoding = binary
+::end
+
+::format
+extension = .awimage0
+magic = AW0IMG00
+role = sovereign system image
+encoding = binary
+::end
+
+::format
+extension = .awpackage0
+magic = AW0PKG00
+role = sovereign package/update unit
+encoding = binary
+::end
+
+::invariant
+id = AW0.FORMAT.NO-UNREGISTERED-SOVEREIGN-EXTENSION
+rule = Every file under sovereign/ uses a registered AW0 extension.
+evidence = A+B
+::end

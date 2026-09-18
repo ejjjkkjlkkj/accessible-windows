@@ -1,0 +1,41 @@
+AW0SPEC0
+kind = object-format
+identity = AWOBJ0
+generation = 0
+status = EMITTER-LOADER-UNPROVEN
+
+::header
+magic = AW0OBJ00
+byte-order = little-endian
+version = 0
+field = header-size:u32
+field = target-isa-id:u32
+field = section-count:u32
+field = semantic-manifest-offset:u64
+field = provenance-manifest-offset:u64
+field = flags:u64=0
+::end
+
+::sections
+required = CODE
+required = DATA
+required = CELL
+required = SEMANTIC
+required = PROVENANCE
+required = PROOF
+::end
+
+::authority
+rule = section-existence-grants-no-authority
+rule = authority-evaluated-at-system-admission
+::end
+
+::determinism
+rule = identical-normalized-inputs-produce-identical-bytes
+::end
+
+::proof
+A = structural-invariants
+B = roundtrip + execution + adversarial
+without-A+B = UNPROVEN
+::end
