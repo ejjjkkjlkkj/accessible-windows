@@ -9,6 +9,8 @@ on:
       - 'boot/uefi-hii-prompt-speech-v1/build_uefi_hii_prompt_speech.py'
       - 'boot/uefi-hda-graph-speech-v1/hda_graph_speech_uefi.c'
       - 'boot/uefi-hda-graph-speech-v1/generate_speech_units.py'
+      - 'boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
+      - 'boot/uefi-hii-graph-prompt-speech-v1/generate_units.py'
       - 'boot/uefi-native-speech-v1/build_uefi_native_speech.py'
       - 'boot/uefi-amd5800h-real-final-v1/os-uefi-amd5800h-real-final-v1.labproof'
       - '.github/workflows/os-uefi-amd5800h-real-final-v1.yml'
@@ -40,10 +42,22 @@ jobs:
           lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$root/graph.EFI" "$root/speech.obj" "$root/units.obj"
           test -s "$root/graph.EFI"
           sha256sum "$root/graph.EFI"
+
+          hiiroot=boot/uefi-hii-graph-prompt-speech-v1
+          python "$hiiroot/generate_units.py" "$hiiroot/speech_units.c" "$hiiroot/speech-unit-metadata.txt"
+          hiiflags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+          clang $hiiflags -c "$hiiroot/hii_graph_prompt_speech_uefi.c" -o "$hiiroot/main.obj"
+          clang $hiiflags -c "$hiiroot/speech_units.c" -o "$hiiroot/units.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$hiiroot/hii-graph.EFI" "$hiiroot/main.obj" "$hiiroot/units.obj"
+          test -s "$hiiroot/hii-graph.EFI"
+          sha256sum "$hiiroot/hii-graph.EFI"
+          echo AMD5800H_HII_GRAPH_EFI_BUILD=PASS
       - uses: actions/upload-artifact@v4
         with:
           name: amd5800h-graph-efi
-          path: boot/uefi-hda-graph-speech-v1/graph.EFI
+          path: |
+            boot/uefi-hda-graph-speech-v1/graph.EFI
+            boot/uefi-hii-graph-prompt-speech-v1/hii-graph.EFI
           if-no-files-found: error
 
   amd5800h-final:
@@ -552,7 +566,7 @@ jobs:
             ($raw -split "[\r\n]+" | Where-Object { $_ -match '^HDA_(PIN_NID|DAC_NID|ROUTE_DEPTH|SELECTOR_WRITES_)=' })
           ) | Set-Content (Join-Path $root 'vmware-graph-result.txt') -Encoding ascii
 
-      - name: VMware Workstation independent UEFI HII and multi-hop HDA proof
+      - name: VMware Workstation integrated live HII to multi-hop HDA speech
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -562,21 +576,21 @@ jobs:
             exit 0
           }
           $fatBuilder=Join-Path $root 'make_fat16.py'
-
-          function Invoke-QevarynxUefiVm([string]$Efi,[string]$Tag){
-            $vmRaw=Join-Path $root "$Tag-esp.raw"
-            $vmdk=Join-Path $root "$Tag-esp.vmdk"
-            $serial=Join-Path $root "$Tag.serial"
-            $vmx=Join-Path $root "$Tag.vmx"
-            & $env:PYTHON_EXE $fatBuilder $Efi $vmRaw | Out-File (Join-Path $root "$Tag-fat16-build.txt") -Encoding utf8
-            if($LASTEXITCODE -ne 0){ throw "VMware FAT16 creation failed: $Tag" }
-            & $env:QEMU_IMG_EXE convert -f raw -O vmdk $vmRaw $vmdk
-            if($LASTEXITCODE -ne 0){ throw "qemu-img VMDK conversion failed: $Tag" }
-            @"
+          $efi=Join-Path $root 'hii-graph.EFI'
+          if(-not (Test-Path $efi)){ throw 'integrated hii-graph.EFI artifact missing' }
+          $vmRaw=Join-Path $root 'qevarynx-integrated-esp.raw'
+          $vmdk=Join-Path $root 'qevarynx-integrated-esp.vmdk'
+          $serial=Join-Path $root 'qevarynx-integrated.serial'
+          $vmx=Join-Path $root 'qevarynx-integrated.vmx'
+          & $env:PYTHON_EXE $fatBuilder $efi $vmRaw | Out-File (Join-Path $root 'qevarynx-integrated-fat16-build.txt') -Encoding utf8
+          if($LASTEXITCODE -ne 0){ throw 'VMware integrated FAT16 creation failed' }
+          & $env:QEMU_IMG_EXE convert -f raw -O vmdk $vmRaw $vmdk
+          if($LASTEXITCODE -ne 0){ throw 'VMware integrated VMDK conversion failed' }
+          @"
           .encoding = "UTF-8"
           config.version = "8"
           virtualHW.version = "20"
-          displayName = "Qevarynx UEFI $Tag"
+          displayName = "Qevarynx Integrated UEFI HII Graph Speech"
           guestOS = "other-64"
           firmware = "efi"
           uefi.secureBoot.enabled = "FALSE"
@@ -593,79 +607,53 @@ jobs:
           floppy0.present = "FALSE"
           ethernet0.present = "FALSE"
           "@ | Set-Content $vmx -Encoding ascii
-            Remove-Item $serial -Force -ErrorAction SilentlyContinue
-            & $env:VMRUN_EXE -T ws start $vmx nogui
-            if($LASTEXITCODE -ne 0){ throw "vmrun start failed: $Tag" }
-            try {
-              Start-Sleep -Seconds 20
-            } finally {
-              & $env:VMRUN_EXE -T ws stop $vmx hard 2>$null | Out-Null
-              Start-Sleep -Seconds 1
-            }
-            if(-not (Test-Path $serial)){ throw "VMware serial evidence missing: $Tag" }
-            for($i=0;$i -lt 20;$i++){
-              try { return [IO.File]::ReadAllText($serial) } catch { Start-Sleep -Milliseconds 250 }
-            }
-            throw "VMware serial evidence locked: $Tag"
+          Remove-Item $serial -Force -ErrorAction SilentlyContinue
+          & $env:VMRUN_EXE -T ws start $vmx nogui
+          if($LASTEXITCODE -ne 0){ throw 'vmrun integrated start failed' }
+          try { Start-Sleep -Seconds 25 } finally {
+            & $env:VMRUN_EXE -T ws stop $vmx hard 2>$null | Out-Null
+            Start-Sleep -Seconds 1
           }
-
-          # Phase 1: prove live VMware HII discovery. The prompt reader may stop
-          # at its legacy direct-route HDA policy; that is accepted only after the
-          # live HII prompt source itself has been established.
-          $promptRaw=Invoke-QevarynxUefiVm (Join-Path $root 'prompt.EFI') 'qevarynx-hii-prompt'
-          if(-not ($promptRaw -match 'STATE=START' -and $promptRaw -match 'HII_DATABASE_PROTOCOL=PASS' -and $promptRaw -match 'HII_STRING_PROTOCOL=PASS' -and $promptRaw -match 'HII_PROMPT_SOURCE=PASS' -and $promptRaw -match 'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403')){
-            throw "VMware live HII prompt discovery/controller selection failed: $promptRaw"
+          if(-not (Test-Path $serial)){ throw 'VMware integrated serial evidence missing' }
+          $raw=''
+          for($i=0;$i -lt 20;$i++){
+            try { $raw=[IO.File]::ReadAllText($serial); break } catch { Start-Sleep -Milliseconds 250 }
           }
-          $promptIntegrated=($promptRaw -match 'LPIB_PROGRESS=PASS' -and $promptRaw -match 'HII_PROMPT_SPEECH_HDA=PASS' -and $promptRaw -match 'STATUS=PASS')
-          if(-not $promptIntegrated -and $promptRaw -notmatch 'REASON=AUTO_OUTPUT_ROUTE_DISCOVERY_FAILED'){
-            throw "VMware prompt reader failed outside the known direct-route limitation: $promptRaw"
-          }
-
-          # Phase 2: reuse the immediately preceding VMware multi-hop graph
-          # execution. That step already boots the graph EFI built from this exact
-          # revision and hard-gates route selection, output-path configuration,
-          # DMA progress and STATUS=PASS. Reusing its serial evidence avoids a
-          # second 20-second VMware boot and removes the fixed historical artifact.
-          $graphCaptured=Join-Path $root 'vmware-graph-captured.txt'
-          $graphResult=Join-Path $root 'vmware-graph-result.txt'
-          if(-not (Test-Path $graphCaptured) -or -not (Test-Path $graphResult)){
-            throw 'current-revision VMware graph evidence missing'
-          }
-          $graphRaw=Get-Content $graphCaptured -Raw
-          $graphSummary=Get-Content $graphResult -Raw
-          $graphRequired=@(
+          $raw | Set-Content (Join-Path $root 'vmware-integrated-captured.txt') -Encoding ascii
+          $required=@(
+            'STATE=START',
+            'HII_DATABASE_PROTOCOL=PASS',
+            'HII_STRING_PROTOCOL=PASS',
+            'IFR_PROMPT_STRING_ID=PASS',
+            'HII_PROMPT_TEXT=',
+            'HII_PROMPT_SOURCE=PASS',
+            'HDA_CONTROLLER_CODEC=PASS',
             'HDA_GRAPH_SEARCH_LIVE=PASS',
             'HDA_SELECTOR_APPLY_LIVE=PASS',
             'HDA_OUTPUT_PATH_CONFIGURATION=PASS',
+            'BDL_RUNTIME_TEXT_SCHEDULE=PASS',
+            'HII_GRAPH_SPEECH_DMA=PASS',
+            'HII_PROMPT_SPEECH_HDA=PASS',
             'LPIB_PROGRESS=PASS',
             'STATUS=PASS'
           )
-          foreach($m in $graphRequired){
-            if($graphRaw -notmatch [regex]::Escape($m)){ throw "VMware graph evidence missing $m : $graphRaw" }
+          foreach($m in $required){
+            if($raw -notmatch [regex]::Escape($m)){ throw "VMware integrated HII->HDA evidence missing $m : $raw" }
           }
-          if($graphSummary -notmatch 'VMWARE_GRAPH_ROUTE=PASS' -or $graphSummary -notmatch 'VMWARE_GRAPH_HDA_DMA=PASS'){
-            throw "VMware graph summary incomplete: $graphSummary"
-          }
-
-          $result=@(
+          @(
             'VMWARE_WORKSTATION=PASS'
             'VMWARE_UEFI_LOADER=PASS'
             'VMWARE_HII_DATABASE_PROTOCOL=PASS'
             'VMWARE_HII_STRING_PROTOCOL=PASS'
             'VMWARE_LIVE_HII_PROMPT_SOURCE=PASS'
-            'VMWARE_HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403'
             'VMWARE_HDA_GRAPH_ROUTE=PASS'
             'VMWARE_HDA_DMA_PROGRESS=PASS'
             'VMWARE_GRAPH_HDA_SPEECH=PASS'
+            'VMWARE_FULL_HDA_SPEECH=PASS'
+            'VMWARE_INTEGRATED_HII_HDA_SPEECH=PASS'
             'VMWARE_STATUS=PASS'
-          )
-          if($promptIntegrated){
-            $result += 'VMWARE_INTEGRATED_HII_HDA_SPEECH=PASS'
-          } else {
-            $result += 'VMWARE_INTEGRATED_HII_HDA_SPEECH=NOT_ESTABLISHED'
-            $result += 'VMWARE_PROMPT_DIRECT_ROUTE=UNSUPPORTED_TOPOLOGY'
-          }
-          $result | Set-Content (Join-Path $root 'vmware-result.txt') -Encoding ascii
+            ($raw -split "[\r\n]+" | Where-Object { $_ -match '^(HII_PROMPT_TEXT|HDA_PIN_NID|HDA_DAC_NID|HDA_ROUTE_DEPTH|HDA_SELECTOR_WRITES_)=' })
+          ) | Set-Content (Join-Path $root 'vmware-result.txt') -Encoding ascii
       - name: Final evidence manifest
         shell: pwsh
         run: |
@@ -711,14 +699,20 @@ jobs:
           $proof="$root/os-uefi-amd5800h-real-final-v1.labproof"
           $builder='boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py'
           $promptBuilder='boot/uefi-hii-prompt-speech-v1/build_uefi_hii_prompt_speech.py'
+          $hiiGraphSource='boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
+          $hiiGraphGenerator='boot/uefi-hii-graph-prompt-speech-v1/generate_units.py'
           $workflow='.github/workflows/os-uefi-amd5800h-real-final-v1.yml'
           $testedBuilder=(git rev-parse "$($env:GITHUB_SHA):$builder").Trim()
           $testedPromptBuilder=(git rev-parse "$($env:GITHUB_SHA):$promptBuilder").Trim()
+          $testedHiiGraphSource=(git rev-parse "$($env:GITHUB_SHA):$hiiGraphSource").Trim()
+          $testedHiiGraphGenerator=(git rev-parse "$($env:GITHUB_SHA):$hiiGraphGenerator").Trim()
           $testedWorkflow=(git rev-parse "$($env:GITHUB_SHA):$workflow").Trim()
           git fetch origin os
           git checkout -B os origin/os
           if($testedBuilder -ne (git rev-parse "origin/os:$builder").Trim()){ 'AMD_FINAL_STALE_BUILDER=SKIP'; exit 0 }
           if($testedPromptBuilder -ne (git rev-parse "origin/os:$promptBuilder").Trim()){ 'AMD_FINAL_STALE_PROMPT_BUILDER=SKIP'; exit 0 }
+          if($testedHiiGraphSource -ne (git rev-parse "origin/os:$hiiGraphSource").Trim()){ 'AMD_FINAL_STALE_HII_GRAPH_SOURCE=SKIP'; exit 0 }
+          if($testedHiiGraphGenerator -ne (git rev-parse "origin/os:$hiiGraphGenerator").Trim()){ 'AMD_FINAL_STALE_HII_GRAPH_GENERATOR=SKIP'; exit 0 }
           if($testedWorkflow -ne (git rev-parse "origin/os:$workflow").Trim()){ 'AMD_FINAL_STALE_WORKFLOW=SKIP'; exit 0 }
           $lines=Get-Content $proof | Where-Object { $_ -notmatch '^proof(-| = )' }
           $vm='NOT_FOUND'
@@ -727,7 +721,7 @@ jobs:
           if(Test-Path "$root/evidence/vmware-result.txt"){
             $vr=Get-Content "$root/evidence/vmware-result.txt" -Raw
             if($vr -match 'VMWARE_WORKSTATION=PASS'){ $vm='PASS' }
-            if($vr -match 'VMWARE_GRAPH_HDA_SPEECH=PASS'){ $vmSpeech='PASS' }
+            if($vr -match 'VMWARE_FULL_HDA_SPEECH=PASS'){ $vmSpeech='PASS' }
             if($vr -match 'VMWARE_INTEGRATED_HII_HDA_SPEECH=PASS'){ $vmIntegrated='PASS' }
           }
           $sha=(Get-FileHash "$root/evidence/downspeech.EFI" -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -755,7 +749,7 @@ jobs:
           $lines += "proof-vmware-workstation = $vm"
           $lines += "proof-vmware-hda-graph-speech = $vmSpeech"
           $lines += "proof-vmware-integrated-hii-hda-speech = $vmIntegrated"
-          $lines += 'proof-vmware-hii-source = live-generic-prompt'
+          $lines += 'proof-vmware-hii-source = live-integrated-hii-graph-prompt'
           $lines += 'proof-physical-host-reboot = false'
           $lines += 'proof-physical-host-firmware-mutation = false'
           $lines += 'proof-physical-pre-os-speaker = not-established-by-virtualization-test'
