@@ -95,7 +95,10 @@ jobs:
           Remove-Item $debug -Force -ErrorAction SilentlyContinue
 
           $args=[Collections.Generic.List[string]]::new()
-          $args.Add('-machine'); $args.Add('q35')
+          # Use the classic PC machine for this firmware-load proof so the
+          # firmware sees the ESP through its ubiquitous legacy disk path.
+          # The EFI image itself remains our directly byte-built AMD64 payload.
+          $args.Add('-machine'); $args.Add('pc')
           $args.Add('-m'); $args.Add('256M')
           if ($vars -and (Test-Path $vars)) {
             $varsCopy=Join-Path $PWD 'uefi-runtime/vars.fd'
@@ -105,8 +108,9 @@ jobs:
           } else {
             $args.Add('-bios'); $args.Add($firmware)
           }
-          $args.Add('-drive'); $args.Add("if=none,id=esp,format=raw,file=fat:rw:$esp")
-          $args.Add('-device'); $args.Add('virtio-blk-pci,drive=esp,bootindex=1')
+          # Present the virtual FAT ESP through IDE instead of VirtIO.
+          # This removes dependency on an optional pre-boot VirtIO storage driver.
+          $args.Add('-drive'); $args.Add("if=ide,index=0,media=disk,format=raw,file=fat:rw:$esp")
           $args.Add('-boot'); $args.Add('order=c,strict=off')
           $args.Add('-display'); $args.Add('none')
           $args.Add('-serial'); $args.Add('none')
