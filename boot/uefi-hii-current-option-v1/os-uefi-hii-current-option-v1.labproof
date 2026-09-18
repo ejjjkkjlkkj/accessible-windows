@@ -16,6 +16,7 @@ end-opcode = 0x29 EFI_IFR_END
 storage-opcode = 0x24 EFI_IFR_VARSTORE
 storage-kind = Buffer Storage
 storage-read-service = EFI_HII_CONFIG_ROUTING_PROTOCOL.ExportConfig plus ConfigToBlock
+nested-uefi-call-abi = Microsoft x64 helper reserves 32-byte shadow space plus 8-byte alignment before nested UEFI protocol and Boot Services calls
 question-text-source = live Strings package belonging to the same exported HII package-list as the Forms package
 current-value-source = live read-only HII Config Routing ExportConfig plus ConfigToBlock
 option-selection-source = direct child EFI_IFR_ONE_OF_OPTION whose numeric width and typed value equal the live current ONE_OF value
