@@ -65,6 +65,7 @@ jobs:
               "HII_HANDLE_LIST=PASS",
               "HII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS",
               "CONFIG_ROUTING_EXPORT_CONFIG=PASS",
+              "VARSTORE_NAME_CONFIG_MATCH=PASS",
               "CONFIG_TO_BLOCK=PASS",
               "BUFFER_VARSTORE_MATCH=PASS",
               "CURRENT_VALUE_READ=PASS",
@@ -83,6 +84,7 @@ jobs:
           for line in [
               'storage-opcode = 0x24 EFI_IFR_VARSTORE',
               'storage-read-service = EFI_HII_CONFIG_ROUTING_PROTOCOL.ExportConfig',
+              'config-response-selection = UTF-16 GUID= and NAME= fields matched against the live EFI_IFR_VARSTORE GUID and Name',
               'external-caller-routing = required by UEFI; direct EFI_HII_CONFIG_ACCESS_PROTOCOL invocation is not used',
               'route-config-call = forbidden',
               'runtime-variable-read = forbidden',
@@ -131,6 +133,7 @@ jobs:
               b'HII_HANDLE_LIST=PASS\r\n',
               b'HII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS\r\n',
               b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\r\n',
+              b'VARSTORE_NAME_CONFIG_MATCH=PASS\r\n',
               b'CONFIG_TO_BLOCK=PASS\r\n',
               b'BUFFER_VARSTORE_MATCH=PASS\r\n',
               b'CURRENT_VALUE_READ=PASS\r\n',
@@ -198,6 +201,7 @@ jobs:
               b'HII_HANDLE_LIST=PASS\r\n',
               b'HII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS\r\n',
               b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\r\n',
+              b'VARSTORE_NAME_CONFIG_MATCH=PASS\r\n',
               b'CONFIG_TO_BLOCK=PASS\r\n',
               b'BUFFER_VARSTORE_MATCH=PASS\r\n',
               b'CURRENT_VALUE_READ=PASS\r\n',
@@ -357,6 +361,7 @@ jobs:
               f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
               "proof-buffer-current-value = PASS\n"
               "proof-buffer-current-identity-match = PASS\n"
+              "proof-varstore-name-config-match = PASS\n"
               "proof-read-service = HII Config Routing ExportConfig plus ConfigToBlock\n"
               f"proof-question-text = {vals['question-text']}\n"
               f"proof-question-id = {vals['question-id']}\n"
