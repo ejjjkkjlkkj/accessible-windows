@@ -191,9 +191,8 @@ jobs:
           grep -F 'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$proof"
           echo HII_GRAPH_BOOT_MEDIA_PERSISTENT_PROOF=PASS
 
-      # Interactive repeat runtime is proven independently by
-      # os-uefi-hii-graph-repeat-v1 using QMP send-key. Keep this workflow
-      # focused on the base live-HII -> graph-HDA path and boot-media proof.
+      # Interactive repeat is validated separately by os-uefi-hii-graph-repeat-v1
+      # with QMP keyboard injection. This job proves the base live-HII path.
 
       - name: Validate waveform
         shell: python
