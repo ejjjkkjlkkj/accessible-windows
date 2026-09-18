@@ -40,8 +40,8 @@ MARKS={
 ROOT=Path(__file__).resolve().parents[2]
 SPEECH_BUILDER=ROOT/'boot'/'uefi-native-speech-v1'/'build_uefi_native_speech.py'
 CONOUT_BUILDER=ROOT/'boot'/'uefi-conout-screenreader-v2'/'build_conout_screenreader_v2.py'
-TEST_TEXT='Az\\r\\n'
-TEST_UTF16=TEST_TEXT.encode('utf-16le')+b'\\x00\\x00'
+TEST_TEXT='Az\r\n'
+TEST_UTF16=TEST_TEXT.encode('utf-16le')+b'\x00\x00'
 LETTER_UNITS={
  'a':('a',),
  'b':('b','e'),
