@@ -42,8 +42,8 @@ secure-boot = not-established
 claim = success establishes a first-party synthesized word produced from the native speech allophone source and transported by native pre-OS HDA DMA into a non-silent waveform witness
 claim = success does not establish arbitrary-text TTS dynamic runtime allophone scheduling over HDA or physical ASUS speaker output
 proof = PASS
-proof-run = 35379797212
-proof-head-sha = ecd23015147ec02cfaa6c8e3fea032f4a53ca03c
+proof-run = 35379876620
+proof-head-sha = 6fe034043a7c3277434020b8db3de352792bd96d
 proof-first-party-allophone-source = PASS
 proof-HDA-DMA = PASS
 proof-SDCTL-byte-safe = PASS
@@ -51,7 +51,7 @@ proof-LPIB-progress = PASS
 proof-HDA-speech-waveform = PASS
 proof-native-speech-source-blob = ce737a860fe468c9b9716d37d6c64477c3fd9eda
 proof-HDA-playback-source-blob = 224056f8536c0b7e67cbb8538e0c24e636c2bc72
-proof-wav-metrics = channels=2; sample-width=2; sample-rate=48000; frames=18807; duration=0.3918125; peak=15480; active-samples=32682; wav-sha256=4c4033bd2db6e188b5b43cd088033c190a2151047cc0685c265dd02b351adbeb
+proof-wav-metrics = channels=2; sample-width=2; sample-rate=48000; frames=18772; duration=0.39108333333333334; peak=15480; active-samples=32612; wav-sha256=d3ebcf3eb641469cc34ba32647851f2e3e133a5b94ed23b6713c45acd1104ac2
 proof-efi-sha256 = bf042af71fa2224a8bee636a4d60efb68a5644f1df87bcfc01dfa72c3b7f27b1
-proof-wav-sha256 = 4c4033bd2db6e188b5b43cd088033c190a2151047cc0685c265dd02b351adbeb
+proof-wav-sha256 = d3ebcf3eb641469cc34ba32647851f2e3e133a5b94ed23b6713c45acd1104ac2
 proof-serial-sha256 = 556c50c66f7f896184475950bec603a346608e7ee64505ba7d3b5362b659b099
