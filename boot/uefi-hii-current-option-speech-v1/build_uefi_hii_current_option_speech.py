@@ -109,6 +109,9 @@ MARKS={
  'nav_done': b'\r\nNAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\nEND\r\n',
  'nav_focus_activate': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_FOCUS_OPTION_TOKEN_ACTIVATED=PASS\r\nEND\r\n',
  'nav_speech_hii': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_FOCUS_SOURCE=LIVE_DIRECT_SIBLING_HII_LABEL\r\nNAV_FOCUS_SOURCE=PASS\r\nEND\r\n',
+ 'nav_speech_char': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nEVENT=NAV_FOCUS_GRAPHEME_ACCEPTED\r\nEND\r\n',
+ 'nav_text_ready': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nEVENT=NAV_FOCUS_TEXT_COMMIT\r\nTEXT_BUFFER=PASS\r\nBDL_RUNTIME_TEXT_SCHEDULE=PASS\r\nEND\r\n',
+ 'nav_progress': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nLPIB_PROGRESS=PASS\r\nNAV_FOCUS_SPEECH_HDA=PASS\r\nEND\r\n',
  'nav_spoken_prefix': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_FOCUS_SPOKEN_PREFIX=',
  'nav_spoken_prefix_done': b'\r\nNAV_FOCUS_SPOKEN_PREFIX=PASS\r\nEND\r\n',
  'nav_fail': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=NAV_NEXT_OPTION_NOT_FOUND\r\nEND\r\n',
@@ -525,7 +528,7 @@ def build():
  c.emit(b'\x3c\x61'); c.rel32(b'\x0f\x82','capture_scsu_loop')
  c.emit(b'\x3c\x7a'); c.rel32(b'\x0f\x87','capture_scsu_loop')
  c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','capture_done')
- c.emit(b'\x41\x89\xc3'); serial('speech_char')
+ c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if WAIT_DOWN_SPEAK else 'speech_char')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\x44\x89\x18\xff\xc7')
  c.rel32(b'\xe9','capture_scsu_loop')
 
@@ -542,7 +545,7 @@ def build():
  c.emit(b'\x83\xf8\x61'); c.rel32(b'\x0f\x82','capture_ucs_loop')
  c.emit(b'\x83\xf8\x7a'); c.rel32(b'\x0f\x87','capture_ucs_loop')
  c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','capture_done')
- c.emit(b'\x41\x89\xc3'); serial('speech_char')
+ c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if WAIT_DOWN_SPEAK else 'speech_char')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\x44\x89\x18\xff\xc7')
  c.rel32(b'\xe9','capture_ucs_loop')
 
@@ -759,7 +762,7 @@ def build():
  c.emit(bytes.fromhex('89d8ffc848c1e0044c01e8'))
  c.emit(bytes.fromhex('c7400c01000000'))
  c.emit(bytes.fromhex('4189db41ffcb'))
- serial('text_ready')
+ serial('nav_text_ready' if WAIT_DOWN_SPEAK else 'text_ready')
  c.emit(bytes.fromhex('0f09'))
  serial('dma')
 
@@ -798,7 +801,7 @@ def build():
  # Give HDA backend time to consume DMA, then prove LPIB moved.
  c.emit(b'\xb9\x80\x1a\x06\x00\x49\x8b\x87\xf8\x00\x00\x00\xff\xd0')
  c.emit(b'\x8b\x43\x04\x85\xc0'); c.rel32(b'\x0f\x84','fail_stream')
- serial('progress')
+ serial('nav_progress' if WAIT_DOWN_SPEAK else 'progress')
  # Stop stream.
  c.emit(b'\x8a\x03\x24\xfd\x88\x03')
  serial('done')
