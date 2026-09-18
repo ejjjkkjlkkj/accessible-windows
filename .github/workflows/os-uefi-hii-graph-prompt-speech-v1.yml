@@ -191,118 +191,9 @@ jobs:
           grep -F 'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$proof"
           echo HII_GRAPH_BOOT_MEDIA_PERSISTENT_PROOF=PASS
 
-      - name: Prove interactive repeat key on the same HII graph HDA engine
-        run: |
-          set -euo pipefail
-          source boot/uefi-hii-graph-prompt-speech-v1/ovmf.env
-          root=boot/uefi-hii-graph-prompt-speech-v1
-          cp "$VARS" "$root/repeat-vars.fd"
-          rm -f "$root/repeat-esp.img" "$root/repeat.serial" "$root/repeat.wav" "$root/repeat-qmp.sock"
-          truncate -s 64M "$root/repeat-esp.img"
-          mkfs.vfat -F 16 "$root/repeat-esp.img"
-          mmd -i "$root/repeat-esp.img" ::/EFI
-          mmd -i "$root/repeat-esp.img" ::/EFI/BOOT
-          mcopy -i "$root/repeat-esp.img" "$root/BOOTX64-REPEAT.EFI" ::/EFI/BOOT/BOOTX64.EFI
-
-          qemu-system-x86_64 \
-            -machine q35,accel=tcg -m 192M \
-            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
-            -drive if=pflash,format=raw,file="$root/repeat-vars.fd" \
-            -drive format=raw,file="$root/repeat-esp.img" \
-            -audiodev wav,id=aud,path="$root/repeat.wav",out.frequency=48000,out.channels=2 \
-            -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0 \
-            -device hda-duplex,bus=hda0.0,cad=0,audiodev=aud \
-            -display none -monitor none -qmp unix:"$root/repeat-qmp.sock",server=on,wait=off \
-            -serial file:"$root/repeat.serial" -parallel none -net none -no-reboot -no-shutdown &
-          qpid=$!
-          trap 'kill $qpid 2>/dev/null || true' EXIT
-
-          ROOT="$root" python - <<'PY'
-          from pathlib import Path
-          import json,os,socket,time
-          root=Path(os.environ['ROOT'])
-          serial=root/'repeat.serial'
-          qmp=root/'repeat-qmp.sock'
-          end=time.time()+60
-          while time.time()<end:
-              raw=serial.read_bytes() if serial.exists() else b''
-              if b'STATUS=BLOCKED\r\n' in raw:
-                  raise SystemExit('blocked before repeat key: '+repr(raw[-12000:]))
-              if b'HII_GRAPH_REPEAT_KEY=WAIT_R\r\n' in raw and qmp.exists():
-                  break
-              time.sleep(.05)
-          else:
-              raise SystemExit('repeat wait marker timeout: '+repr((serial.read_bytes() if serial.exists() else b'')[-12000:]))
-
-          with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as s:
-              for _ in range(100):
-                  try:
-                      s.connect(str(qmp))
-                      break
-                  except OSError:
-                      time.sleep(.05)
-              else:
-                  raise SystemExit('QMP connect timeout')
-              f=s.makefile('rwb',buffering=0)
-              greeting=json.loads(f.readline())
-              assert 'QMP' in greeting,greeting
-              f.write((json.dumps({'execute':'qmp_capabilities'})+'\r\n').encode())
-              while True:
-                  m=json.loads(f.readline())
-                  if 'return' in m: break
-                  if 'error' in m: raise SystemExit('QMP capabilities failed: '+repr(m))
-              f.write((json.dumps({'execute':'send-key','arguments':{'keys':[{'type':'qcode','data':'r'}],'hold-time':50}})+'\r\n').encode())
-              while True:
-                  m=json.loads(f.readline())
-                  if 'return' in m: break
-                  if 'error' in m: raise SystemExit('QMP send-key failed: '+repr(m))
-
-          req=[
-              b'HII_GRAPH_REPEAT_KEY=R\r\n',
-              b'HII_GRAPH_REPEAT_KEY=PASS\r\n',
-              b'EVENT=HII_GRAPH_REPEAT_TEXT_COMMIT\r\n',
-              b'HII_GRAPH_REPEAT_SPEECH_DMA=PASS\r\n',
-              b'HII_GRAPH_REPEAT_SPEECH_HDA=PASS\r\n',
-              b'HII_GRAPH_REPEAT_LPIB_PROGRESS=PASS\r\n',
-              b'STATUS=PASS\r\n',
-          ]
-          end=time.time()+60
-          while time.time()<end:
-              raw=serial.read_bytes() if serial.exists() else b''
-              if b'STATUS=BLOCKED\r\n' in raw:
-                  raise SystemExit('repeat blocked: '+repr(raw[-12000:]))
-              if all(x in raw for x in req):
-                  print(raw.decode('ascii','replace'))
-                  print('HII_GRAPH_INTERACTIVE_REPEAT_RUNTIME=PASS')
-                  break
-              time.sleep(.05)
-          else:
-              raise SystemExit('repeat completion timeout: '+repr((serial.read_bytes() if serial.exists() else b'')[-12000:]))
-          PY
-
-          sleep 1
-          kill $qpid 2>/dev/null || true
-          wait $qpid 2>/dev/null || true
-          trap - EXIT
-
-          ROOT="$root" python - <<'PY'
-          from pathlib import Path
-          import os,struct,wave
-          p=Path(os.environ['ROOT'])/'repeat.wav'
-          assert p.exists() and p.stat().st_size>10000,p
-          with wave.open(str(p),'rb') as w:
-              assert w.getnchannels()==2
-              assert w.getframerate()==48000
-              assert w.getsampwidth()==2
-              raw=w.readframes(w.getnframes())
-          vals=struct.unpack('<'+'h'*(len(raw)//2),raw)
-          peak=max(abs(v) for v in vals)
-          active=sum(abs(v)>=500 for v in vals)
-          assert peak>=5000,peak
-          assert active>=2000,active
-          print(f'repeat-peak={peak} repeat-active={active}')
-          print('HII_GRAPH_INTERACTIVE_REPEAT_WAVEFORM=PASS')
-          PY
+      # Interactive repeat runtime is proven independently by
+      # os-uefi-hii-graph-repeat-v1 using QMP send-key. Keep this workflow
+      # focused on the base live-HII -> graph-HDA path and boot-media proof.
 
       - name: Validate waveform
         shell: python
@@ -331,8 +222,6 @@ jobs:
             boot/uefi-hii-graph-prompt-speech-v1/BOOTX64.EFI
             boot/uefi-hii-graph-prompt-speech-v1/BOOTX64-REPEAT.EFI
             boot/uefi-hii-graph-prompt-speech-v1/runtime.serial
-            boot/uefi-hii-graph-prompt-speech-v1/repeat.serial
-            boot/uefi-hii-graph-prompt-speech-v1/repeat.wav
             boot/uefi-hii-graph-prompt-speech-v1/runtime.wav
             boot/uefi-hii-graph-prompt-speech-v1/runtime-boot-media-proof.txt
             boot/uefi-hii-graph-prompt-speech-v1/speech-unit-metadata.txt
