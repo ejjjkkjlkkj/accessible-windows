@@ -11,6 +11,8 @@ MARKS={
  'database': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_DATABASE_PROTOCOL=PASS\r\nEND\r\n',
  'string_protocol': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_STRING_PROTOCOL=PASS\r\nEND\r\n',
  'forms_handle': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_FORMS_HANDLE=PASS\r\nEND\r\n',
+ 'handle_export': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_HANDLE_EXPORT=PASS\r\nEND\r\n',
+ 'forms_package_seen': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_FORMS_PACKAGE_IN_SELECTED_HANDLE=PASS\r\nEND\r\n',
  'ifr': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nIFR_TITLE_STRING_ID=PASS\r\nEND\r\n',
  'language': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_LANGUAGE=PASS\r\nEND\r\n',
  'prefix': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nTITLE_TEXT=',
@@ -158,6 +160,7 @@ def build():
  c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x4c\x8b\x0a')
  c.emit(b'\x41\xff\x54\x24\x20')
  c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','handle_loop')
+ serial('handle_export')
 
  # Verify that this exact HII handle owns a Forms package.
  c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x48\x8b\x32') # rsi=list
@@ -174,6 +177,7 @@ def build():
  c.emit(b'\x48\x01\xd7\x29\xd3'); c.rel32(b'\xe9','pkg_loop')
 
  c.label('forms_pkg')
+ serial('forms_package_seen')
  # r9=first IFR opcode, r10d=bytes available in verified Forms package.
  c.emit(b'\x4c\x8d\x4f\x04\x41\x89\xd2\x41\x83\xea\x04')
  serial('forms_handle')
