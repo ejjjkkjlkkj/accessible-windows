@@ -1,5 +1,0 @@
-* text=auto eol=lf
-
-*.bin -text
-*.efi -text
-*.awobj -text

@@ -1,9 +1,0 @@
-QEVARYNOX_HASH_0
-version = 0
-identity = QEVARYNOX.INTEGRITY.BOOTSTRAP
-status = EXTERNAL-WITNESS
-algorithm = SHA-256
-algorithm-origin = public-standard
-software-ancestry = none
-claim-project-invented-algorithm = false
-coverage = external witness hashes every sovereign artifact
