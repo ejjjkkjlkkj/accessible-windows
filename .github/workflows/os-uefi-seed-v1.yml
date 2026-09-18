@@ -46,9 +46,13 @@ jobs:
           $firmware=$firmwareCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $firmware) { throw 'x86-64 EDK2 firmware not found' }
 
-          $vars=Get-ChildItem (Split-Path $firmware -Parent) -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match '(?i)(vars|variable).*(fd|bin)$' } |
-            Select-Object -ExpandProperty FullName -First 1
+          $share=Split-Path $firmware -Parent
+          $varsCandidates=@(
+            (Join-Path $share 'edk2-i386-vars.fd'),
+            (Join-Path $share 'edk2-x86_64-vars.fd'),
+            (Join-Path $share 'OVMF_VARS.fd')
+          )
+          $vars=$varsCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
           New-Item -ItemType Directory -Force 'uefi-runtime' | Out-Null
           @(
