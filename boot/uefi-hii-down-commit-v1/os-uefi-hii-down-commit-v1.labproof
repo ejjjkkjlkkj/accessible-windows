@@ -27,4 +27,9 @@ physical-host-uefi-variable-write = forbidden
 physical-ASUS-commit = forbidden-in-this-stage
 claim = success establishes an explicit two-step accessible commit in isolated OVMF: DOWN focuses and speaks Enabled, ENTER is required before RouteConfig, the live HII value changes from 0 to 1, an immediate re-read matches Enabled, confirmation speech is emitted, and a reboot using the same isolated VARS still reads Enabled
 claim = success does not authorize or establish mutation of the physical ASUS firmware
-proof = PENDING_CI
+proof = BLOCKED_BY_EDK2_ISCSI_DRIVER_SEMANTICS
+
+superseded-by = OS-UEFI-HII-PLATFORM-COMMIT-V1
+diagnostic = EDK II IScsiFormRouteConfig accepts the static ISCSI_CONFIG_IFR_NVDATA.Enabled ConfigResp but does not persist it as an attempt; this target is not a valid write oracle
+diagnostic-route-config = PASS-without-persistent-state-change
+diagnostic-claim = retained only as a negative backend-semantics test; it is not used as the screen-reader commit proof
