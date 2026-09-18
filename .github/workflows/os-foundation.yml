@@ -424,3 +424,120 @@ jobs:
           [UInt64]$changed = [QevFold0Witness]::Run($code, [byte[]]@(0x52))
           if ($changed -eq [Convert]::ToUInt64('09CB2A482AC8A05C',16)) { throw 'changed-input negative witness failed' }
           'QEVARYNOX_FOLD0_RUNTIME_B_WINDOWS=PASS'
+
+
+  emit0-structural-A:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify exact manually-authored emit0 bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=sovereign/seed0/emit0-x86_64.qevseed0
+          test "$(wc -c < "$f")" -eq 33
+          test "$(sha256sum "$f" | awk '{print $1}')" = "031473f722eced726ee8fe482b9e92a4a0d90f078a0da00ea9520ec7221db1cc"
+          hex="$(od -An -tx1 -v "$f" | tr -d ' \n')"
+          test "$hex" = "4c8bc74c8bcee90b0000004c8bc14c8bcae9000000004d89084c89c04883c008c3"
+          printf '\x4c\x8b\xc7\x4c\x8b\xce\xe9\x0b\x00\x00\x00\x4c\x8b\xc1\x4c\x8b\xca\xe9\x00\x00\x00\x00\x4d\x89\x08\x4c\x89\xc0\x48\x83\xc0\x08\xc3' > /tmp/qev-emit0-reconstructed.bin
+          cmp -s "$f" /tmp/qev-emit0-reconstructed.bin
+          grep -q '^A = PASS$' sovereign/seed0/emit0-x86_64.qevproof0
+          grep -q '^D = PASS$' sovereign/seed0/emit0-byte-origin.qevmanifest0
+          grep -q '^human-path = none$' sovereign/seed0/emit0-x86_64.qevproof0
+
+  emit0-runtime-B-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Execute emit0 with independent Linux witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/qev_emit0_witness.c <<'EOF'
+          #include <stdint.h>
+          #include <stdio.h>
+          #include <string.h>
+          #include <sys/mman.h>
+          typedef unsigned char* (*emit_fn)(unsigned char*, uint64_t);
+          int main(int argc, char **argv) {
+              if (argc != 2) return 10;
+              FILE *fp = fopen(argv[1], "rb");
+              if (!fp) return 11;
+              unsigned char src[33];
+              if (fread(src, 1, sizeof(src), fp) != sizeof(src)) return 12;
+              if (fgetc(fp) != EOF) return 13;
+              fclose(fp);
+              void *mem = mmap(NULL, sizeof(src), PROT_READ|PROT_WRITE|PROT_EXEC,
+                               MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+              if (mem == MAP_FAILED) return 14;
+              memcpy(mem, src, sizeof(src));
+              emit_fn f = (emit_fn)mem;
+              unsigned char out[24];
+              memset(out, 0xA5, sizeof(out));
+              unsigned char *next = f(out + 4, UINT64_C(0x1122334455667788));
+              static const unsigned char expected[8] = {0x88,0x77,0x66,0x55,0x44,0x33,0x22,0x11};
+              if (next != out + 12) return 20;
+              if (memcmp(out + 4, expected, 8) != 0) return 21;
+              for (int i=0;i<4;i++) if (out[i] != 0xA5) return 22;
+              for (int i=12;i<24;i++) if (out[i] != 0xA5) return 23;
+              next = f(next, UINT64_C(0x584E595241564551));
+              static const unsigned char expected2[8] = {0x51,0x45,0x56,0x41,0x52,0x59,0x4e,0x58};
+              if (next != out + 20) return 24;
+              if (memcmp(out + 12, expected2, 8) != 0) return 25;
+              puts("QEVARYNOX_EMIT0_RUNTIME_B_LINUX=PASS");
+              return 0;
+          }
+          EOF
+          cc -O2 -Wall -Wextra -o /tmp/qev_emit0_witness /tmp/qev_emit0_witness.c
+          /tmp/qev_emit0_witness sovereign/seed0/emit0-x86_64.qevseed0
+
+  emit0-runtime-B-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - name: Execute emit0 with independent Windows witness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class QevEmit0Witness {
+              [DllImport("kernel32.dll", SetLastError=true)]
+              static extern IntPtr VirtualAlloc(IntPtr address, UIntPtr size, uint allocationType, uint protect);
+              [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+              public delegate IntPtr Emit(IntPtr dst, ulong value);
+              public static long Run(byte[] code) {
+                  IntPtr p = VirtualAlloc(IntPtr.Zero, (UIntPtr)code.Length, 0x3000, 0x40);
+                  if (p == IntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                  Marshal.Copy(code, 0, p, code.Length);
+                  Emit f = Marshal.GetDelegateForFunctionPointer<Emit>(IntPtr.Add(p, 11));
+                  IntPtr outp = Marshal.AllocHGlobal(24);
+                  try {
+                      for (int i=0;i<24;i++) Marshal.WriteByte(outp,i,0xA5);
+                      IntPtr first = IntPtr.Add(outp,4);
+                      IntPtr next = f(first, 0x1122334455667788UL);
+                      if (next != IntPtr.Add(outp,12)) return 20;
+                      byte[] a = new byte[8];
+                      Marshal.Copy(IntPtr.Add(outp,4),a,0,8);
+                      byte[] e = {0x88,0x77,0x66,0x55,0x44,0x33,0x22,0x11};
+                      for (int i=0;i<8;i++) if (a[i]!=e[i]) return 21;
+                      for (int i=0;i<4;i++) if (Marshal.ReadByte(outp,i)!=0xA5) return 22;
+                      for (int i=12;i<24;i++) if (Marshal.ReadByte(outp,i)!=0xA5) return 23;
+                      IntPtr next2 = f(next, 0x584E595241564551UL);
+                      if (next2 != IntPtr.Add(outp,20)) return 24;
+                      byte[] b = new byte[8];
+                      Marshal.Copy(IntPtr.Add(outp,12),b,0,8);
+                      byte[] e2 = {0x51,0x45,0x56,0x41,0x52,0x59,0x4e,0x58};
+                      for (int i=0;i<8;i++) if (b[i]!=e2[i]) return 25;
+                      return 0;
+                  } finally { Marshal.FreeHGlobal(outp); }
+              }
+          }
+          '@
+          Add-Type -TypeDefinition $src
+          [byte[]]$code = [IO.File]::ReadAllBytes('sovereign/seed0/emit0-x86_64.qevseed0')
+          if ($code.Length -ne 33) { throw "Unexpected emit0 length: $($code.Length)" }
+          $rc=[QevEmit0Witness]::Run($code)
+          if ($rc -ne 0) { throw "emit0 witness failed rc=$rc" }
+          'QEVARYNOX_EMIT0_RUNTIME_B_WINDOWS=PASS'

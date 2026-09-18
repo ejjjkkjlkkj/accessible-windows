@@ -1,0 +1,20 @@
+QEVARYNOX_MANIFEST_0
+version = 0
+identity = QEVARYNOX.SEED0.X86_64.EMIT0.BYTE-ORIGIN
+artifact = sovereign/seed0/emit0-x86_64.qevseed0
+status = ACTIVE
+compiler = none
+assembler = none
+generator = none
+third-party-source = none
+encoding-method = manually-authored-from-public-x86-64-instruction-boundary
+sha256 = 031473f722eced726ee8fe482b9e92a4a0d90f078a0da00ea9520ec7221db1cc
+
+range-0-10 = project-authored external-witness SysV entry adapter
+range-11-21 = project-authored external-witness Win64 entry adapter
+range-22-32 = project-authored Qevarynox emit0 machine core
+
+design-origin = project-defined-bootstrap-emission
+external-algorithm-source = none
+D = PASS
+C = UNPROVEN
