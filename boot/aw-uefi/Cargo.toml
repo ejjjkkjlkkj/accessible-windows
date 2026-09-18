@@ -1,0 +1,18 @@
+[package]
+name = "aw-uefi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aw-abi = { path = "../../crates/aw-abi" }
+aw-accessibility = { path = "../../crates/aw-accessibility" }
+
+[[bin]]
+name = "aw-uefi"
+path = "src/main.rs"
+test = false
+bench = false
+
+[lints]
+workspace = true

@@ -1,0 +1,8 @@
+/target/
+*.log
+*.iso
+*.img
+*.efi
+*.pdb
+.DS_Store
+Thumbs.db

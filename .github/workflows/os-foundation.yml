@@ -1,0 +1,30 @@
+name: OS foundation
+
+on:
+  push:
+    branches: [os]
+  pull_request:
+    branches: [os]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain and targets
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component clippy --component rustfmt
+          rustup target add --toolchain 1.98.1 x86_64-unknown-none x86_64-unknown-uefi
+      - name: Formatting
+        run: cargo +1.98.1 fmt --all -- --check
+      - name: Host tests
+        run: cargo +1.98.1 test --workspace --exclude aw-uefi
+      - name: Clippy
+        run: cargo +1.98.1 clippy --workspace --exclude aw-uefi --all-targets -- -D warnings
+      - name: Bare-metal kernel check
+        run: cargo +1.98.1 check -p aw-kernel --target x86_64-unknown-none
+      - name: UEFI check
+        run: cargo +1.98.1 check -p aw-uefi --target x86_64-unknown-uefi
