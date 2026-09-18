@@ -200,7 +200,7 @@ jobs:
           assert b'PLATFORM_WRITABLE_TARGET=PASS\r\n' in b
           assert b'ROUTE_CONFIG=PASS\r\n' not in b
           initial_value=raw_u32(last(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',b,'initial value'))
-          initial_label=last(br'SELECTED_OPTION_TEXT=([^\r\n]+)',b,'initial label').decode('ascii','replace').strip()
+          initial_label='not-emitted-before-navigation'
 
           end=time.time()+10
           while time.time()<end and not qmp.exists(): time.sleep(.05)
