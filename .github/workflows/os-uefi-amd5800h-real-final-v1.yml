@@ -295,15 +295,40 @@ jobs:
           $script=Join-Path $root 'qemu_test.py'
           @'
           from pathlib import Path
-          import json,re,socket,sys,time,wave,struct
+          import atexit,json,os,re,socket,subprocess,sys,time,wave,struct
           root=Path(sys.argv[1]); serial=root/"qemu.serial"
+          qemu=os.environ["QEMU_EXE"]
+          code=os.environ["OVMF_CODE"]
+          vars_fd=str(root/"vars.fd")
+          esp=str(root/"esp.raw")
+          wav_path=str(root/"qemu.wav")
+          qargs=[
+              qemu,
+              "-machine","q35,accel=tcg","-m","192M",
+              "-drive",f"if=pflash,format=raw,readonly=on,file={code}",
+              "-drive",f"if=pflash,format=raw,file={vars_fd}",
+              "-drive",f"file={esp},format=raw",
+              "-audiodev",f"wav,id=aud,path={wav_path},out.frequency=48000,out.channels=2",
+              "-device","ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0",
+              "-device","hda-micro,bus=hda0.0,cad=0,audiodev=aud,mixer=on",
+              "-display","none","-monitor","none",
+              "-qmp","tcp:127.0.0.1:45555,server=on,wait=off",
+              "-serial",f"file:{serial}",
+              "-parallel","none","-net","none","-no-reboot","-no-shutdown",
+          ]
+          proc=subprocess.Popen(qargs,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+          atexit.register(lambda: proc.poll() is None and proc.kill())
           end=time.time()+45
           while time.time()<end:
               raw=serial.read_bytes() if serial.exists() else b""
               if b"STATUS=BLOCKED\r\n" in raw: raise SystemExit("blocked before DOWN: "+repr(raw[-16000:]))
               if b"HII_NAVIGATION_KEY=WAIT_DOWN\r\n" in raw: break
               time.sleep(.1)
-          else: raise SystemExit("timeout waiting DOWN: "+repr((serial.read_bytes() if serial.exists() else b"")[-16000:]))
+          else:
+              err=""
+              if proc.poll() is not None:
+                  _,err=proc.communicate(timeout=2)
+              raise SystemExit("timeout waiting DOWN; qemu_rc="+repr(proc.poll())+" stderr="+err[-8000:]+" serial="+repr((serial.read_bytes() if serial.exists() else b"")[-16000:]))
           for _ in range(100):
               try:
                   s=socket.create_connection(("127.0.0.1",45555),.5); break
@@ -356,14 +381,12 @@ jobs:
           assert max(abs(v) for v in vals)>=5000
           assert sum(abs(v)>=500 for v in vals)>=3000
           print("QEMU_HDA_WAVEFORM=PASS")
+          proc.terminate()
+          try: proc.wait(timeout=5)
+          except subprocess.TimeoutExpired: proc.kill()
           '@ | Set-Content $script -Encoding utf8
-          $p=Start-Process -FilePath $env:QEMU_EXE -ArgumentList $args -PassThru -WindowStyle Hidden
-          try {
-            & $env:PYTHON_EXE $script $root | Tee-Object (Join-Path $root 'qemu-result.txt')
-            if($LASTEXITCODE -ne 0){ throw 'QEMU UEFI screen reader runtime failed' }
-          } finally {
-            if($p -and -not $p.HasExited){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
-          }
+          & $env:PYTHON_EXE $script $root | Tee-Object (Join-Path $root 'qemu-result.txt')
+          if($LASTEXITCODE -ne 0){ throw 'QEMU UEFI screen reader runtime failed' }
 
       - name: VMware Workstation independent UEFI loader test
         shell: pwsh
