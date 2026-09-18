@@ -1520,7 +1520,7 @@ def main():
  print('current-option-max-spoken-graphemes=8')
  print('accessibility-repeat-key=' + ('enabled' if WAIT_REPEAT_KEY else 'disabled'))
  print('hii-down-probe=' + ('enabled' if WAIT_DOWN_PROBE else 'disabled'))
- print('hii-down-speak=' + ('enabled' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'disabled'))
+ print('hii-down-speak=' + ('enabled' if WAIT_DOWN_SPEAK else 'disabled'))
  print('hii-up-probe=' + ('enabled' if WAIT_UP_PROBE else 'disabled'))
  print('hii-up-speak=' + ('enabled' if WAIT_UP_SPEAK else 'disabled'))
  print('pcm-bytes='+str(len(pcm)))
