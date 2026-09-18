@@ -15,13 +15,43 @@ permissions:
   contents: write
 
 jobs:
+  build-graph-efi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build deterministic multi-hop HDA graph EFI
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld
+          root=boot/uefi-hda-graph-speech-v1
+          python "$root/generate_speech_units.py" "$root/speech_units.c" "$root/speech-unit-metadata.txt"
+          flags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+          clang $flags -c "$root/hda_graph_speech_uefi.c" -o "$root/speech.obj"
+          clang $flags -c "$root/speech_units.c" -o "$root/units.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$root/graph.EFI" "$root/speech.obj" "$root/units.obj"
+          test -s "$root/graph.EFI"
+          sha256sum "$root/graph.EFI"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amd5800h-graph-efi
+          path: boot/uefi-hda-graph-speech-v1/graph.EFI
+          if-no-files-found: error
+
   amd5800h-final:
+    needs: build-graph-efi
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: amd5800h-graph-efi
+          path: boot/uefi-amd5800h-real-final-v1/evidence
 
       - name: Bind exact physical runner and inventory host
         shell: pwsh
@@ -445,6 +475,72 @@ jobs:
           '@ | Set-Content $script -Encoding utf8
           & $env:PYTHON_EXE $script $root | Tee-Object (Join-Path $root 'qemu-result.txt')
           if($LASTEXITCODE -ne 0){ throw 'QEMU UEFI screen reader runtime failed' }
+
+      - name: VMware Workstation multi-hop HDA graph probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path 'boot/uefi-amd5800h-real-final-v1/evidence').Path
+          if(-not $env:VMRUN_EXE -or -not (Test-Path $env:VMRUN_EXE)){
+            'VMWARE_GRAPH=NOT_FOUND' | Set-Content (Join-Path $root 'vmware-graph-result.txt') -Encoding ascii
+            exit 0
+          }
+          $graph=Join-Path $root 'graph.EFI'
+          if(-not (Test-Path $graph)){ throw 'downloaded graph.EFI missing' }
+          $rawDisk=Join-Path $root 'vmware-graph-esp.raw'
+          & $env:PYTHON_EXE (Join-Path $root 'make_fat16.py') $graph $rawDisk | Out-File (Join-Path $root 'vmware-graph-fat16-build.txt') -Encoding utf8
+          if($LASTEXITCODE -ne 0){ throw 'VMware graph FAT16 creation failed' }
+          $vmdk=Join-Path $root 'graph.vmdk'
+          & $env:QEMU_IMG_EXE convert -f raw -O vmdk $rawDisk $vmdk
+          if($LASTEXITCODE -ne 0){ throw 'VMware graph VMDK conversion failed' }
+          $serial=Join-Path $root 'vmware-graph.serial'
+          $vmx=Join-Path $root 'qevarynx-graph.vmx'
+          @"
+          .encoding = "UTF-8"
+          config.version = "8"
+          virtualHW.version = "20"
+          displayName = "Qevarynx UEFI HDA Graph Probe"
+          guestOS = "other-64"
+          firmware = "efi"
+          uefi.secureBoot.enabled = "FALSE"
+          memsize = "256"
+          numvcpus = "1"
+          ide0:0.present = "TRUE"
+          ide0:0.fileName = "$($vmdk.Replace('\','/'))"
+          ide0:0.deviceType = "disk"
+          sound.present = "TRUE"
+          sound.virtualDev = "hdaudio"
+          serial0.present = "TRUE"
+          serial0.fileType = "file"
+          serial0.fileName = "$($serial.Replace('\','/'))"
+          floppy0.present = "FALSE"
+          ethernet0.present = "FALSE"
+          "@ | Set-Content $vmx -Encoding ascii
+          Remove-Item $serial -Force -ErrorAction SilentlyContinue
+          & $env:VMRUN_EXE -T ws start $vmx nogui
+          if($LASTEXITCODE -ne 0){ throw 'vmrun graph start failed' }
+          try { Start-Sleep -Seconds 20 } finally {
+            & $env:VMRUN_EXE -T ws stop $vmx hard 2>$null | Out-Null
+            Start-Sleep -Seconds 1
+          }
+          if(-not (Test-Path $serial)){ throw 'VMware graph serial evidence missing' }
+          $raw=''
+          for($i=0;$i -lt 20;$i++){
+            try { $raw=[IO.File]::ReadAllText($serial); break } catch { Start-Sleep -Milliseconds 250 }
+          }
+          $raw | Set-Content (Join-Path $root 'vmware-graph-captured.txt') -Encoding ascii
+          if(-not ($raw -match 'HDA_GRAPH_SEARCH_LIVE=PASS' -and
+                   $raw -match 'HDA_SELECTOR_APPLY_LIVE=PASS' -and
+                   $raw -match 'HDA_OUTPUT_PATH_CONFIGURATION=PASS' -and
+                   $raw -match 'LPIB_PROGRESS=PASS' -and
+                   $raw -match 'STATUS=PASS')){
+            throw "VMware multi-hop HDA graph probe failed: $raw"
+          }
+          @(
+            'VMWARE_GRAPH_ROUTE=PASS'
+            'VMWARE_GRAPH_HDA_DMA=PASS'
+            ($raw -split "[\r\n]+" | Where-Object { $_ -match '^HDA_(PIN_NID|DAC_NID|ROUTE_DEPTH|SELECTOR_WRITES_)=' })
+          ) | Set-Content (Join-Path $root 'vmware-graph-result.txt') -Encoding ascii
 
       - name: VMware Workstation independent UEFI loader test
         shell: pwsh
