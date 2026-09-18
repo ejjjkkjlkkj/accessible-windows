@@ -7,6 +7,7 @@ on:
       - 'boot/uefi-hii-buffer-current-v1/build_uefi_hii_buffer_current.py'
       - 'boot/uefi-hii-buffer-current-v1/os-uefi-hii-buffer-current-v1.labproof'
       - 'boot/uefi-hii-varstore-def-v1/os-uefi-hii-varstore-def-v1.labproof'
+      - 'boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof'
       - '.github/workflows/os-uefi-hii-buffer-current-v1.yml'
   workflow_dispatch:
 
@@ -44,6 +45,28 @@ jobs:
           ]:
               assert line in have,line
           print('HII_BUFFER_CURRENT_DEPENDENCY=PASS')
+
+      - name: Enforce independent OVMF iSCSI fixture oracle
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof')
+          have=set(p.read_text().splitlines())
+          for line in [
+              'proof = PASS',
+              'question-text = iSCSI Mode',
+              'question-storage-field = ISCSI_CONFIG_IFR_NVDATA.Enabled',
+              'varstore-id = 26214',
+              'varstore-offset = 472',
+              'varstore-opcode-hex = 24',
+              'varstore-size = 17724',
+              'varstore-guid-raw-hex = 16D6474BD6A852459D44CCAD2E0F4CF9',
+              'option-disabled-value = 0',
+              'option-enabled-value = 1',
+              'option-enabled-for-mpio-value = 2',
+          ]:
+              assert line in have,line
+          print('HII_ISCSI_FIXTURE_ORACLE=PASS')
 
       - name: Audit read-only buffer source contract
         shell: python
@@ -269,7 +292,23 @@ jobs:
                   positions=[raw.rfind(marker) for marker in chain]
                   assert all(p >= 0 for p in positions),positions
                   assert positions == sorted(positions),positions
+                  fixture={}
+                  for line in Path('boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof').read_text().splitlines():
+                      if ' = ' in line:
+                          k,v=line.split(' = ',1)
+                          fixture[k]=v
+                  actual_fixture={
+                      'question-text':text,
+                      'varstore-id':str(vsid_v),
+                      'varstore-offset':str(vinfo_v),
+                      'varstore-opcode-hex':op_s,
+                      'varstore-size':str(size_v),
+                      'varstore-guid-raw-hex':guid_s,
+                  }
+                  for k,v in actual_fixture.items():
+                      assert fixture.get(k)==v,(k,v,fixture.get(k))
                   print('HII_BUFFER_CURRENT_IDENTITY_MATCH=PASS')
+                  print('HII_ISCSI_FIXTURE_IDENTITY_MATCH=PASS')
                   root.joinpath('current.txt').write_text(
                       f'question-text = {text}\n'
                       f'question-id = {qid_v}\n'
@@ -374,6 +413,7 @@ jobs:
               f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
               "proof-buffer-current-value = PASS\n"
               "proof-buffer-current-identity-match = PASS\n"
+              "proof-iscsi-fixture-identity-match = PASS\n"
               "proof-varstore-name-config-match = PASS\n"
               "proof-read-service = HII Config Routing ExportConfig plus ConfigToBlock\n"
               f"proof-question-text = {vals['question-text']}\n"
