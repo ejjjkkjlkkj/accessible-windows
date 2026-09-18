@@ -23,4 +23,4 @@ physical-UEFI-speech = not-established
 proof = PENDING
 claim = success identifies the physical controller and codec-facing device identities visible on AMD-5800H-REAL and records sufficient evidence to begin a system-owned pre-OS audio driver
 claim = success does not establish direct MMIO codec command transport DMA stream programming pin routing amplifier control or audible pre-OS speech on the physical laptop
-probe-request = 2026-09-18T20:56+02:00
+probe-request = 2026-09-18T21:39+02:00
