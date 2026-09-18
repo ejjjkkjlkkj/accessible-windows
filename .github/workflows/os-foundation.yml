@@ -54,6 +54,246 @@ jobs:
           grep -q "pub struct CognitiveIntentV1" crates/aw-core/src/lib.rs
           grep -q "NOT IMPLEMENTED" docs/COGNITION.md
 
+  sovereign-origin-policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Evidence A - clean-room sovereign structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s docs/ORIGIN.md
+          test -s sovereign/ORIGIN.manifest
+          test -s sovereign/awl0/SPEC.md
+          test -s sovereign/awl0/foundation.awl
+          test -s sovereign/awobj0/SPEC.md
+          test -s sovereign/seed0/SEED_SPEC.md
+          grep -q '^AW-SOVEREIGN-ORIGIN 1    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - windows-2025
+          - macos-15
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal --component clippy --component rustfmt
+      - name: Formatting
+        run: cargo +1.98.1 fmt --all -- --check
+      - name: Host tests
+        run: cargo +1.98.1 test --workspace --exclude aw-uefi
+      - name: Clippy
+        run: cargo +1.98.1 clippy --workspace --exclude aw-uefi --all-targets -- -D warnings
+
+  storage-recovery-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Publication model
+        run: cargo +1.98.1 test -p aw-storage publication -- --nocapture
+      - name: Recovery model
+        run: cargo +1.98.1 test -p aw-storage recovery -- --nocapture
+      - name: Crash-cut durability model
+        run: cargo +1.98.1 test -p aw-storage crash_cut -- --nocapture
+
+  storage-object-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native object model
+        run: cargo +1.98.1 test -p aw-storage object_descriptor -- --nocapture
+
+  storage-relation-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native relation graph
+        run: cargo +1.98.1 test -p aw-storage relation_record -- --nocapture
+
+  storage-namespace-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native namespace projection
+        run: cargo +1.98.1 test -p aw-storage namespace_binding -- --nocapture
+
+  semantic-core-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native semantic source of truth
+        run: cargo +1.98.1 test -p aw-core semantic_ -- --nocapture
+
+
+  storage-allocation-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native allocation model
+        run: cargo +1.98.1 test -p aw-storage allocation -- --nocapture
+
+  memory-core-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native cognitive memory contract
+        run: cargo +1.98.1 test -p aw-core memory_ -- --nocapture
+
+  capability-core-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native authority and capability contract
+        run: cargo +1.98.1 test -p aw-core capability_ -- --nocapture
+
+  cognitive-intent-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native cognitive intent authorization
+        run: cargo +1.98.1 test -p aw-core cognitive_ -- --nocapture
+
+  bare-metal-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain and targets
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component clippy --component rustfmt
+          rustup target add --toolchain 1.98.1 x86_64-unknown-none x86_64-unknown-uefi
+      - name: Native semantic core bare-metal check
+        run: cargo +1.98.1 check -p aw-core --target x86_64-unknown-none
+      - name: Bare-metal kernel check
+        run: cargo +1.98.1 check -p aw-kernel --target x86_64-unknown-none
+      - name: Native storage bare-metal check
+        run: cargo +1.98.1 check -p aw-storage --target x86_64-unknown-none
+      - name: UEFI check
+        run: cargo +1.98.1 check -p aw-uefi --target x86_64-unknown-uefi
+ sovereign/ORIGIN.manifest
+          grep -q 'evidence-required=A+B' sovereign/ORIGIN.manifest
+          grep -q 'AWL0' sovereign/awl0/SPEC.md
+          grep -q 'AWOBJ000' sovereign/awobj0/SPEC.md
+          grep -q 'Status:.*UNPROVEN\|UNPROVEN' sovereign/seed0/SEED_SPEC.md
+          if grep -R -nEi --include='*.awl' --include='*.awseed' --include='*.awobj'              '(^|[^A-Za-z])(rust|python|cargo|llvm|clang|gcc|msvc|dotnet|node|npm)([^A-Za-z]|$)' sovereign; then
+            echo "Foreign toolchain ancestry marker detected in canonical sovereign source."
+            exit 1
+          fi
+      - name: Evidence A - canonical language specimen
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^cell FoundationProbe {' sovereign/awl0/foundation.awl
+          grep -q 'deny kernel.authority' sovereign/awl0/foundation.awl
+          grep -q 'path keyboard | speech | braille' sovereign/awl0/foundation.awl
+          grep -q 'keep result' sovereign/awl0/foundation.awl
+          grep -q 'shed scratch' sovereign/awl0/foundation.awl
+
+  sovereign-byte-evidence:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - windows-2025
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Evidence B - canonical byte identity (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          sha256sum             docs/ORIGIN.md             sovereign/ORIGIN.manifest             sovereign/awl0/SPEC.md             sovereign/awl0/foundation.awl             sovereign/awobj0/SPEC.md             sovereign/seed0/SEED_SPEC.md
+      - name: Evidence B - canonical byte identity (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          @(
+            'docs/ORIGIN.md',
+            'sovereign/ORIGIN.manifest',
+            'sovereign/awl0/SPEC.md',
+            'sovereign/awl0/foundation.awl',
+            'sovereign/awobj0/SPEC.md',
+            'sovereign/seed0/SEED_SPEC.md'
+          ) | ForEach-Object {
+            $h = Get-FileHash -Algorithm SHA256 $_
+            "$($h.Hash.ToLower())  $($_)"
+          }
+
   host-validation:
     strategy:
       fail-fast: false

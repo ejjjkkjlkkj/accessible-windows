@@ -1,0 +1,25 @@
+cell FoundationProbe {
+    identity semantic.foundation.probe
+    generation system.current
+
+    authority {
+        require semantic.emit
+        deny kernel.authority
+        deny genome.mutate
+    }
+
+    memory {
+        keep result : trusted<semantic.record>
+        shed scratch : own<bytes[4096]>
+    }
+
+    human {
+        semantic tool.foundation.probe
+        path keyboard | speech | braille
+    }
+
+    flow inspect(input : untrusted<bytes>) -> trusted<semantic.record> {
+        effects validate(input) | use(semantic.emit)
+        body validate_then_emit(input)
+    }
+}

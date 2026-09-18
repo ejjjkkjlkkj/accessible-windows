@@ -1,0 +1,13 @@
+AW-SOVEREIGN-ORIGIN 1
+status=active
+policy=clean-room
+language=AWL0
+object-format=AWOBJ0
+seed=Seed-0
+third-party-source-in-sovereign-tree=forbidden
+third-party-compiler-as-final-bootstrap=forbidden
+evidence-required=A+B
+canonical=sovereign/awl0/SPEC.md
+canonical=sovereign/awl0/foundation.awl
+canonical=sovereign/awobj0/SPEC.md
+canonical=sovereign/seed0/SEED_SPEC.md
