@@ -83,7 +83,7 @@ jobs:
               "c.lea_rax_data(L['option_width']); c.emit(b'\\x88\\x10')",
               "c.lea_rax_data(L['option_width']); c.emit(b'\\x0f\\xb6\\x08')",
               "c.lea_rax_data(L['resolve_mode']); c.emit(b'\\xc6\\x00\\x01')",
-              "L['strings_first']",
+              "L['option_strings_ptr']",
               "CURRENT_OPTION_VALUE_MATCH=PASS",
               "CURRENT_OPTION_TEXT=",
               "CURRENT_OPTION_STRING=PASS",
@@ -101,6 +101,7 @@ jobs:
           proof=set((root/'os-uefi-hii-current-option-v1.labproof').read_text().splitlines())
           for line in [
               'scope-policy = scan only the scope opened by the exact live ONE_OF; nested scopes are tracked and excluded from direct-child selection',
+              'option-text-language-binding = exact same EFI_HII_PACKAGE_STRINGS package that successfully resolved QUESTION_TEXT',
               'numeric-option-layout = fixed prefix 6 bytes plus typed Value width 1 2 4 or 8 bytes',
               'numeric-option-lengths = 7 8 10 14 bytes for UINT8 UINT16 UINT32 UINT64',
               'route-config-call = forbidden',
@@ -169,6 +170,7 @@ jobs:
           print('READ_ONLY_CONFIG_ROUTING=BOUND')
           print('DIRECT_CHILD_SCOPE_GATE=BOUND')
           print('SAME_PACKAGE_STRING_NAMESPACE=BOUND')
+          print('SAME_LANGUAGE_STRING_PACKAGE=BOUND')
           print('W_X=BLOCKED')
 
       - name: Resolve OVMF
@@ -320,6 +322,7 @@ jobs:
             echo 'direct-child-scope = PASS'
             echo 'live-current-value-match = PASS'
             echo 'same-package-option-string-resolution = PASS'
+            echo 'same-language-option-string-resolution = PASS'
             echo 'route-config-call = false'
             echo 'runtime-variable-read = false'
             echo 'set-variable-call = false'
@@ -392,6 +395,7 @@ jobs:
               "proof-direct-child-scope = PASS\n"
               "proof-live-current-value-match = PASS\n"
               "proof-same-package-option-string-resolution = PASS\n"
+              "proof-same-language-option-string-resolution = PASS\n"
               f"proof-question-text = {safe_q}\n"
               f"proof-current-width = {vals['current-width']}\n"
               f"proof-current-value-unsigned = {vals['current-value-unsigned']}\n"
