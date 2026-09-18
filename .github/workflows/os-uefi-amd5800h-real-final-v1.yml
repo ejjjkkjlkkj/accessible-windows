@@ -442,8 +442,14 @@ jobs:
             'VMWARE_WORKSTATION=NOT_FOUND' | Tee-Object (Join-Path $root 'vmware-result.txt')
             exit 0
           }
+          # VMware gets the non-interactive current-option variant so full HDA
+          # speech can be proven without synthetic keyboard injection.
+          $fatBuilder=Join-Path $root 'make_fat16.py'
+          $vmRaw=Join-Path $root 'vmware-esp.raw'
+          & $env:PYTHON_EXE $fatBuilder (Join-Path $root 'current.EFI') $vmRaw | Out-File (Join-Path $root 'vmware-fat16-build.txt') -Encoding utf8
+          if($LASTEXITCODE -ne 0){ throw 'VMware FAT16 current-speech disk creation failed' }
           $vmdk=Join-Path $root 'esp.vmdk'
-          & $env:QEMU_IMG_EXE convert -f raw -O vmdk (Join-Path $root 'esp.raw') $vmdk
+          & $env:QEMU_IMG_EXE convert -f raw -O vmdk $vmRaw $vmdk
           if($LASTEXITCODE -ne 0){ throw 'qemu-img VMDK conversion failed' }
           $serial=Join-Path $root 'vmware.serial'
           $vmx=Join-Path $root 'qevarynx-uefi.vmx'
@@ -495,12 +501,17 @@ jobs:
           if(-not ($raw -match 'STATE=START' -and $raw -match 'HII_DATABASE_PROTOCOL=PASS' -and $raw -match 'HII_STRING_PROTOCOL=PASS')){
             throw "VMware UEFI reader did not establish loader+HII protocols: $raw"
           }
+          if(-not ($raw -match 'LPIB_PROGRESS=PASS' -and $raw -match 'CURRENT_OPTION_SPEECH_HDA=PASS' -and $raw -match 'STATUS=PASS')){
+            throw "VMware UEFI HDA speech did not complete: $raw"
+          }
           @(
             'VMWARE_WORKSTATION=PASS'
             'VMWARE_UEFI_LOADER=PASS'
             'VMWARE_HII_DATABASE_PROTOCOL=PASS'
             'VMWARE_HII_STRING_PROTOCOL=PASS'
-            'VMWARE_FULL_HDA_SPEECH=' + $(if($raw -match 'CURRENT_OPTION_SPEECH_HDA=PASS|NAV_FOCUS_SPEECH_HDA=PASS'){'PASS'}else{'NOT_ESTABLISHED'})
+            'VMWARE_HDA_DMA_PROGRESS=PASS'
+            'VMWARE_FULL_HDA_SPEECH=PASS'
+            'VMWARE_STATUS=PASS'
           ) | Set-Content (Join-Path $root 'vmware-result.txt') -Encoding ascii
 
       - name: Final evidence manifest
@@ -553,9 +564,11 @@ jobs:
           if($testedWorkflow -ne (git rev-parse "origin/os:$workflow").Trim()){ 'AMD_FINAL_STALE_WORKFLOW=SKIP'; exit 0 }
           $lines=Get-Content $proof | Where-Object { $_ -notmatch '^proof(-| = )' }
           $vm='NOT_FOUND'
+          $vmSpeech='NOT_ESTABLISHED'
           if(Test-Path "$root/evidence/vmware-result.txt"){
             $vr=Get-Content "$root/evidence/vmware-result.txt" -Raw
             if($vr -match 'VMWARE_WORKSTATION=PASS'){ $vm='PASS' }
+            if($vr -match 'VMWARE_FULL_HDA_SPEECH=PASS'){ $vmSpeech='PASS' }
           }
           $sha=(Get-FileHash "$root/evidence/downspeech.EFI" -Algorithm SHA256).Hash.ToLowerInvariant()
           $manifest=(Get-FileHash "$root/evidence/manifest.sha256" -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -577,6 +590,7 @@ jobs:
           $lines += 'proof-qemu-hda-speech = PASS'
           $lines += "proof-qemu-waveform = $qemuWave"
           $lines += "proof-vmware-workstation = $vm"
+          $lines += "proof-vmware-hda-speech = $vmSpeech"
           $lines += 'proof-physical-host-reboot = false'
           $lines += 'proof-physical-host-firmware-mutation = false'
           $lines += 'proof-physical-pre-os-speaker = not-established-by-virtualization-test'
