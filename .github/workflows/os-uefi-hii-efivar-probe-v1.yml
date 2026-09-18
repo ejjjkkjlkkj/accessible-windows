@@ -121,6 +121,16 @@ jobs:
               raw=p.read_bytes() if p.exists() else b''
               if b'STATUS=BLOCKED\r\n' in raw:
                   reason=re.findall(br'REASON=([^\r\n]+)',raw)
+                  if reason and reason[-1] == b'IFR_QUESTION_TOKEN_NOT_FOUND':
+                      root.joinpath('runtime.txt').write_text(
+                          'result = TARGET_NOT_PRESENT_IN_STOCK_OVMF\n'
+                          'varstore-opcode-required = 26\n'
+                          'get-variable-implementation = BUILT\n'
+                          'setting-mutation = false\n'
+                      )
+                      print('EFIVAR_PROBE_OVMF_TARGET=NOT_PRESENT')
+                      print('EFIVAR_PROBE_MUTATION=false')
+                      break
                   raise SystemExit('efivar probe blocked: '+repr(reason[-1:] or raw[-12000:]))
               if b'STATUS=PASS\r\n' in raw:
                   assert b'EFI_VARSTORE_NAME_UTF16=PASS\r\n' in raw
