@@ -15,6 +15,7 @@ storage-read-service = EFI_HII_CONFIG_ROUTING_PROTOCOL.ExportConfig
 external-caller-routing = required by UEFI; direct EFI_HII_CONFIG_ACCESS_PROTOCOL invocation is not used
 export-scope = entire current HII database
 config-response-selection = UTF-16 GUID= and NAME= fields matched against the live EFI_IFR_VARSTORE GUID and Name
+varstore-name-bounds = EFI_IFR_VARSTORE Name must terminate within the opcode length before ConfigHdr comparison
 config-response-isolation = selected current ConfigResp is temporarily NUL-terminated at the next &GUID= boundary in the allocated ExportConfig copy only
 binary-reconstruction = EFI_HII_CONFIG_ROUTING_PROTOCOL.ConfigToBlock
 question-offset-source = EFI_IFR_QUESTION_HEADER.VarStoreInfo.VarOffset
