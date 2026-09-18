@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   amd5800h-audio-inventory:
@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Verify real AMD runner
         shell: pwsh
@@ -208,3 +210,99 @@ jobs:
           name: os-uefi-physical-audio-probe-amd5800h
           path: boot/uefi-physical-audio-v1/evidence
           if-no-files-found: error
+
+
+      - name: Persist revision-bound physical audio probe proof
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='boot/uefi-physical-audio-v1'
+          $evidence="$root/evidence"
+          $proof="$root/os-uefi-physical-audio-probe-v1.labproof"
+          $workflow='.github/workflows/os-uefi-physical-audio-probe-v1.yml'
+
+          $testedWorkflow=(git rev-parse "$($env:GITHUB_SHA):$workflow").Trim()
+          $testedProof=(git rev-parse "$($env:GITHUB_SHA):$proof").Trim()
+
+          $summary=Get-Content "$evidence/derived-audio-summary.json" -Raw | ConvertFrom-Json
+          $controllers=@($summary.controllers)
+          $codecs=@($summary.codec_facing)
+          if($controllers.Count -lt 1) { throw 'No controller candidate available for proof' }
+          if($codecs.Count -lt 1) { throw 'No codec-facing candidate available for proof' }
+
+          function Join-Property($obj,[string]$name) {
+            $v=$obj.Properties.$name
+            if($null -eq $v) { return 'none' }
+            $items=@($v | ForEach-Object { "$_".Replace([Environment]::NewLine,' ') })
+            if($items.Count -eq 0) { return 'none' }
+            return ($items -join ' | ')
+          }
+          function One-Line([object]$v) {
+            if($null -eq $v) { return 'none' }
+            return ("$v" -replace '[\r\n]+',' ').Trim()
+          }
+          function Sha256([string]$p) {
+            return (Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+
+          $primaryController=$controllers[0]
+          $primaryCodec=$codecs[0]
+          $controllerName=One-Line $primaryController.FriendlyName
+          $controllerId=One-Line $primaryController.InstanceId
+          $controllerHwid=Join-Property $primaryController 'DEVPKEY_Device_HardwareIds'
+          $controllerLocation=Join-Property $primaryController 'DEVPKEY_Device_LocationPaths'
+          $codecName=One-Line $primaryCodec.FriendlyName
+          $codecId=One-Line $primaryCodec.InstanceId
+          $codecHwid=Join-Property $primaryCodec 'DEVPKEY_Device_HardwareIds'
+
+          $summarySha=Sha256 "$evidence/derived-audio-summary.json"
+          $probeSha=Sha256 "$evidence/probe-result.txt"
+          $hashesSha=Sha256 "$evidence/hashes.json"
+
+          git fetch origin os
+          git checkout -B os origin/os
+          if($testedWorkflow -ne (git rev-parse "os:$workflow").Trim()) {
+            'PHYSICAL_AUDIO_STALE_WORKFLOW=SKIP'
+            exit 0
+          }
+          if($testedProof -ne (git rev-parse "os:$proof").Trim()) {
+            'PHYSICAL_AUDIO_STALE_PROOF=SKIP'
+            exit 0
+          }
+
+          $lines=Get-Content $proof
+          $kept=@()
+          foreach($line in $lines) {
+            if($line -match '^proof(-| = )') { continue }
+            if($line -match '^probe-request = ') { continue }
+            $kept += $line
+          }
+          $kept += 'proof = PASS'
+          $kept += "proof-run = $env:GITHUB_RUN_ID"
+          $kept += "proof-head-sha = $env:GITHUB_SHA"
+          $kept += "proof-runner = $env:RUNNER_NAME"
+          $kept += "proof-controller-count = $($controllers.Count)"
+          $kept += "proof-codec-facing-count = $($codecs.Count)"
+          $kept += "proof-primary-controller-name = $controllerName"
+          $kept += "proof-primary-controller-instance-id = $controllerId"
+          $kept += "proof-primary-controller-hardware-id = $controllerHwid"
+          $kept += "proof-primary-controller-location-path = $controllerLocation"
+          $kept += "proof-primary-codec-name = $codecName"
+          $kept += "proof-primary-codec-instance-id = $codecId"
+          $kept += "proof-primary-codec-hardware-id = $codecHwid"
+          $kept += "proof-derived-summary-sha256 = $summarySha"
+          $kept += "proof-probe-result-sha256 = $probeSha"
+          $kept += "proof-hashes-manifest-sha256 = $hashesSha"
+          $kept += 'proof-physical-UEFI-audio-driver = not-established'
+          $kept += 'proof-physical-UEFI-speech = not-established'
+          Set-Content $proof -Value $kept -Encoding utf8
+
+          if(git diff --quiet -- $proof) {
+            'PHYSICAL_AUDIO_PROOF_ALREADY_CURRENT=PASS'
+            exit 0
+          }
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $proof
+          git commit -m "Record physical audio hardware probe proof [skip ci]"
+          git push origin os
