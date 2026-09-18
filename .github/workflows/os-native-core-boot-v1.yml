@@ -247,6 +247,7 @@ jobs:
           $vars=$varsCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $vars) { throw 'UEFI vars firmware missing' }
 
+          Copy-Item $code 'boot/native-core-v1/amd-code.fd' -Force
           Copy-Item $vars 'boot/native-core-v1/amd-vars.fd' -Force
           Remove-Item 'boot/native-core-v1/amd-esp' -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force 'boot/native-core-v1/amd-esp\EFI\BOOT' | Out-Null
@@ -256,7 +257,7 @@ jobs:
           $args=@(
             '-machine','q35,accel=tcg',
             '-m','64M',
-            '-drive',"if=pflash,format=raw,readonly=on,file=$code",
+            '-drive','if=pflash,format=raw,readonly=on,file=boot/native-core-v1/amd-code.fd',
             '-drive','if=pflash,format=raw,file=boot/native-core-v1/amd-vars.fd',
             '-drive','format=raw,file=fat:rw:boot/native-core-v1/amd-esp',
             '-display','none',
