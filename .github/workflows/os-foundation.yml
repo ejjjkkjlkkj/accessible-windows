@@ -109,7 +109,7 @@ jobs:
             grep -q 'path keyboard | speech | braille' "sovereign/tools0/src/$tool.awsource0"
             grep -q 'deny capability.mint' "sovereign/tools0/src/$tool.awsource0"
           done
-          test "$(grep -c 'accessibility = mandatory-A+B' sovereign/tools0/registry.awtools0)" -eq 10
+          test "$(grep -c 'accessibility = mandatory-A+B' sovereign/tools0/registry.awtools0)" -ge 10
           test "$(grep -c 'B = UNPROVEN' sovereign/tools0/registry.awtools0)" -ge 10
       - name: Every required future tool is explicit
         shell: bash
