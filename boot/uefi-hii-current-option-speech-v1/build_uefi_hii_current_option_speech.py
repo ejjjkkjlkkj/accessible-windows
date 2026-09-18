@@ -189,7 +189,7 @@ def build():
   'maxaddr':408,'dac_nid':416,'pin_nid':420,'speech_text_source':424,
   'textbuf':432,'text_count':452,'keybuf':456,
   'selected_option_ptr':464,'nav_option_token':472,'nav_option_type':474,'nav_option_raw':480,
-  'prev_option_ptr':488,'prev_wrap_flag':496,
+  'prev_option_ptr':488,'prev_wrap_flag':496,'conin_ptr':504,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -208,9 +208,12 @@ def build():
 
  c=Code()
  c.emit(b'\x53\x55\x56\x57\x41\x54\x41\x55\x41\x56\x41\x57')
- if WAIT_REPEAT_KEY or WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK or WAIT_UP_PROBE or WAIT_UP_SPEAK:
-  c.emit(b'\x48\x8b\x6a\x30')  # rbp=ConIn for accessibility keyboard commands
  c.emit(b'\x4c\x8b\x7a\x60')  # r15=BootServices
+ if WAIT_REPEAT_KEY or WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK or WAIT_UP_PROBE or WAIT_UP_SPEAK:
+  # Persist ConIn in bridge-owned data. RBP is intentionally used as scratch by
+  # later machine-code paths, so keeping ConIn in RBP can corrupt ReadKeyStroke.
+  c.emit(b'\x48\x8b\x42\x30')
+  c.lea_rdx_data(L['conin_ptr']); c.emit(b'\x48\x89\x02')
  c.emit(b'\x48\x83\xec\x68\xfc')
 
  for p,v in ((0x3f9,0),(0x3fb,0x80),(0x3f8,3),(0x3f9,0),(0x3fb,3),(0x3fa,0xc7),(0x3fc,0x0b)):
@@ -589,9 +592,9 @@ def build():
   # Latin R/r authorizes the already-resolved current label to reach HDA.
   serial('repeat_wait')
   c.label('repeat_read_key')
-  c.emit(b'\x48\x89\xe9')
+  c.lea_rax_data(L['conin_ptr']); c.emit(b'\x48\x8b\x08')
   c.lea_rdx_data(L['keybuf'])
-  c.emit(b'\x48\x8b\x45\x08\xff\xd0\x48\x85\xc0')
+  c.emit(b'\x48\x8b\x41\x08\xff\xd0\x48\x85\xc0')
   c.rel32(b'\x0f\x85','repeat_read_key')
   c.lea_rdx_data(L['keybuf']); c.emit(b'\x0f\xb7\x42\x02\x66\x83\xc8\x20\x66\x3d\x72\x00')
   c.rel32(b'\x0f\x85','repeat_read_key')
@@ -1183,16 +1186,16 @@ def build():
  c.label('wait_down_key')
  serial('nav_wait')
  c.label('nav_read_key')
- c.emit(b'\x48\x89\xe9'); c.lea_rdx_data(L['keybuf'])
- c.emit(b'\x48\x8b\x45\x08\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','nav_read_key')
+ c.lea_rax_data(L['conin_ptr']); c.emit(b'\x48\x8b\x08'); c.lea_rdx_data(L['keybuf'])
+ c.emit(b'\x48\x8b\x41\x08\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','nav_read_key')
  c.lea_rdx_data(L['keybuf']); c.emit(b'\x0f\xb7\x02\x66\x83\xf8\x02'); c.rel32(b'\x0f\x85','nav_read_key')
  serial('nav_accept'); c.emit(b'\x31\xc0\xc3')
 
  c.label('wait_up_key')
  serial('up_wait')
  c.label('up_read_key')
- c.emit(b'\x48\x89\xe9'); c.lea_rdx_data(L['keybuf'])
- c.emit(b'\x48\x8b\x45\x08\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','up_read_key')
+ c.lea_rax_data(L['conin_ptr']); c.emit(b'\x48\x8b\x08'); c.lea_rdx_data(L['keybuf'])
+ c.emit(b'\x48\x8b\x41\x08\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','up_read_key')
  c.lea_rdx_data(L['keybuf']); c.emit(b'\x0f\xb7\x02\x66\x83\xf8\x01'); c.rel32(b'\x0f\x85','up_read_key')
  serial('up_accept'); c.emit(b'\x31\xc0\xc3')
 
