@@ -108,13 +108,13 @@ public sealed class NativeCorrectionReviewForm : Form
             + Environment.NewLine);
     }
 
-    private void Decide(bool approve, string carrier)
+    private void Decide(byte selectedAction, string decisionKind, string carrier)
     {
         if (decided) return;
+        if (selectedAction != plannedAction && selectedAction != identity)
+            throw new Exception("human review selected action outside structural approve/reject choices");
         decided = true;
 
-        byte selectedAction = approve ? plannedAction : identity;
-        string decisionKind = approve ? "approve-proposal" : "reject-proposal";
         string message = "Correction review " + decisionKind
             + ": selected action " + Role(selectedAction)
             + ", execution not performed.";
@@ -157,12 +157,12 @@ public sealed class NativeCorrectionReviewForm : Form
     {
         if (keyData == Keys.A)
         {
-            Decide(true, "keyboard-a");
+            Decide(plannedAction, "approve-proposal", "keyboard-a");
             return true;
         }
         if (keyData == Keys.R)
         {
-            Decide(false, "keyboard-r");
+            Decide(identity, "reject-proposal", "keyboard-r");
             return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
@@ -241,7 +241,7 @@ public sealed class NativeCorrectionReviewForm : Form
         approveButton.Location = new Point(24, 165);
         approveButton.Size = new Size(380, 52);
         approveButton.TabIndex = 0;
-        approveButton.Click += delegate { Decide(true, "assistive-approve"); };
+        approveButton.Click += delegate { Decide(plannedAction, "approve-proposal", "assistive-approve"); };
         Controls.Add(approveButton);
 
         rejectButton = new Button();
@@ -252,7 +252,7 @@ public sealed class NativeCorrectionReviewForm : Form
         rejectButton.Location = new Point(430, 165);
         rejectButton.Size = new Size(380, 52);
         rejectButton.TabIndex = 1;
-        rejectButton.Click += delegate { Decide(false, "assistive-reject"); };
+        rejectButton.Click += delegate { Decide(identity, "reject-proposal", "assistive-reject"); };
         Controls.Add(rejectButton);
 
         File.WriteAllText(tracePath,
