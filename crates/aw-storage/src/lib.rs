@@ -256,18 +256,8 @@ mod tests {
 
     #[test]
     fn falls_back_to_older_anchor_when_newer_is_structurally_corrupt() {
-        let old = SuperblockV1::new(
-            41,
-            BlockAddress::new(100),
-            BlockAddress::new(90),
-            ID_A,
-        );
-        let mut torn = SuperblockV1::new(
-            42,
-            BlockAddress::new(120),
-            BlockAddress::new(100),
-            ID_B,
-        );
+        let old = SuperblockV1::new(41, BlockAddress::new(100), BlockAddress::new(90), ID_A);
+        let mut torn = SuperblockV1::new(42, BlockAddress::new(120), BlockAddress::new(100), ID_B);
         torn.magic = 0;
 
         assert_eq!(newest_structurally_valid(&old, &torn), Some(&old));
@@ -275,18 +265,8 @@ mod tests {
 
     #[test]
     fn selects_newest_valid_generation() {
-        let a = SuperblockV1::new(
-            41,
-            BlockAddress::new(100),
-            BlockAddress::new(90),
-            ID_A,
-        );
-        let b = SuperblockV1::new(
-            42,
-            BlockAddress::new(120),
-            BlockAddress::new(100),
-            ID_B,
-        );
+        let a = SuperblockV1::new(41, BlockAddress::new(100), BlockAddress::new(90), ID_A);
+        let b = SuperblockV1::new(42, BlockAddress::new(120), BlockAddress::new(100), ID_B);
 
         assert_eq!(newest_structurally_valid(&a, &b), Some(&b));
     }
