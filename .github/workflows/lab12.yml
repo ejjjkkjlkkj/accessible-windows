@@ -4,7 +4,7 @@ on:
   push:
     branches: [os]
     paths:
-      - 'lab12/**'
+      - 'lab12/RawExchangeWitness.cs'
       - '.github/workflows/lab12.yml'
   workflow_dispatch:
 
