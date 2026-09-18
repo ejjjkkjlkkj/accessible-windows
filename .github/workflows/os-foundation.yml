@@ -296,3 +296,131 @@ jobs:
           [UInt64]$corrupt = [QevSeedWitness]::Run($bytes)
           if ($corrupt -eq $expected) { throw 'Corruption negative witness failed' }
           'QEVARYNOX_SEED0_RUNTIME_B_WINDOWS=PASS value={0:X16} corrupt={1:X16}' -f $value,$corrupt
+
+
+  fold0-structural-A:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify exact manually-authored fold0 bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=sovereign/seed0/fold0-x86_64.qevseed0
+          test "$(wc -c < "$f")" -eq 61
+          test "$(sha256sum "$f" | awk '{print $1}')" = "b57bcf6e38fa5b7926d7cddb9337166440a8a5996789f9cfe43f8d09e131d1b4"
+          hex="$(od -An -tx1 -v "$f" | tr -d ' \n')"
+          test "$hex" = "4c8bc74c8bcee90b0000004c8bc14c8bcae90000000048b85145564152594e584d85c97417410fb6084831c848c1c0054883c05149ffc049ffc975e9c3"
+          printf '\x4c\x8b\xc7\x4c\x8b\xce\xe9\x0b\x00\x00\x00\x4c\x8b\xc1\x4c\x8b\xca\xe9\x00\x00\x00\x00\x48\xb8\x51\x45\x56\x41\x52\x59\x4e\x58\x4d\x85\xc9\x74\x17\x41\x0f\xb6\x08\x48\x31\xc8\x48\xc1\xc0\x05\x48\x83\xc0\x51\x49\xff\xc0\x49\xff\xc9\x75\xe9\xc3' > /tmp/qev-fold0-reconstructed.bin
+          cmp -s "$f" /tmp/qev-fold0-reconstructed.bin
+          grep -q '^A = PASS$' sovereign/seed0/fold0-x86_64.qevproof0
+          grep -q '^D = PASS$' sovereign/seed0/fold0-byte-origin.qevmanifest0
+          grep -q '^human-path = none$' sovereign/seed0/fold0-x86_64.qevproof0
+
+  fold0-runtime-B-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Execute fold0 with independent Linux witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/qev_fold0_witness.c <<'EOF'
+          #include <stdint.h>
+          #include <stdio.h>
+          #include <string.h>
+          #include <sys/mman.h>
+          typedef uint64_t (*fold_fn)(const unsigned char*, uint64_t);
+          static int one(fold_fn f, const unsigned char *p, uint64_t n, uint64_t expected, int code) {
+              uint64_t got = f(p, n);
+              if (got != expected) {
+                  fprintf(stderr, "vector failed: got=%016llx expected=%016llx\n",
+                          (unsigned long long)got, (unsigned long long)expected);
+                  return code;
+              }
+              return 0;
+          }
+          int main(int argc, char **argv) {
+              if (argc != 2) return 10;
+              FILE *fp = fopen(argv[1], "rb");
+              if (!fp) return 11;
+              unsigned char src[61];
+              if (fread(src, 1, sizeof(src), fp) != sizeof(src)) return 12;
+              if (fgetc(fp) != EOF) return 13;
+              fclose(fp);
+              void *mem = mmap(NULL, sizeof(src), PROT_READ|PROT_WRITE|PROT_EXEC,
+                               MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+              if (mem == MAP_FAILED) return 14;
+              memcpy(mem, src, sizeof(src));
+              fold_fn f = (fold_fn)mem;
+              static const unsigned char dummy[1] = {0};
+              static const unsigned char q[1] = {0x51};
+              static const unsigned char word[9] = {0x51,0x65,0x76,0x61,0x72,0x79,0x6e,0x6f,0x78};
+              static const unsigned char seq[16] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+              static const unsigned char zeros[32] = {0};
+              int r;
+              if ((r=one(f,dummy,0,UINT64_C(0x584E595241564551),20))) return r;
+              if ((r=one(f,q,1,UINT64_C(0x09CB2A482AC8A05C),21))) return r;
+              if ((r=one(f,word,9,UINT64_C(0xC8A0382E09E6B59B),22))) return r;
+              if ((r=one(f,seq,16,UINT64_C(0x5498DCA8B6CC838C),23))) return r;
+              if ((r=one(f,zeros,32,UINT64_C(0xEEC1A02AAAE2FE78),24))) return r;
+              unsigned char changed[1] = {0x52};
+              if (f(changed,1) == UINT64_C(0x09CB2A482AC8A05C)) return 25;
+              puts("QEVARYNOX_FOLD0_RUNTIME_B_LINUX=PASS");
+              return 0;
+          }
+          EOF
+          cc -O2 -Wall -Wextra -o /tmp/qev_fold0_witness /tmp/qev_fold0_witness.c
+          /tmp/qev_fold0_witness sovereign/seed0/fold0-x86_64.qevseed0
+
+  fold0-runtime-B-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - name: Execute fold0 with independent Windows witness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class QevFold0Witness {
+              [DllImport("kernel32.dll", SetLastError=true)]
+              static extern IntPtr VirtualAlloc(IntPtr address, UIntPtr size, uint allocationType, uint protect);
+              [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+              public delegate ulong Fold(IntPtr data, ulong length);
+              static IntPtr Put(byte[] data) {
+                  int n = Math.Max(1, data.Length);
+                  IntPtr p = Marshal.AllocHGlobal(n);
+                  if (data.Length > 0) Marshal.Copy(data, 0, p, data.Length);
+                  else Marshal.WriteByte(p, 0);
+                  return p;
+              }
+              public static ulong Run(byte[] code, byte[] data) {
+                  IntPtr p = VirtualAlloc(IntPtr.Zero, (UIntPtr)code.Length, 0x3000, 0x40);
+                  if (p == IntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                  Marshal.Copy(code, 0, p, code.Length);
+                  Fold f = Marshal.GetDelegateForFunctionPointer<Fold>(IntPtr.Add(p, 11));
+                  IntPtr d = Put(data);
+                  try { return f(d, (ulong)data.Length); }
+                  finally { Marshal.FreeHGlobal(d); }
+              }
+          }
+          '@
+          Add-Type -TypeDefinition $src
+          [byte[]]$code = [IO.File]::ReadAllBytes('sovereign/seed0/fold0-x86_64.qevseed0')
+          if ($code.Length -ne 61) { throw "Unexpected fold0 length: $($code.Length)" }
+          $tests = @(
+            @{d=[byte[]]@(); e=[Convert]::ToUInt64('584E595241564551',16)},
+            @{d=[byte[]]@(0x51); e=[Convert]::ToUInt64('09CB2A482AC8A05C',16)},
+            @{d=[Text.Encoding]::ASCII.GetBytes('Qevarynox'); e=[Convert]::ToUInt64('C8A0382E09E6B59B',16)},
+            @{d=[byte[]](0..15); e=[Convert]::ToUInt64('5498DCA8B6CC838C',16)},
+            @{d=[byte[]](0..31 | ForEach-Object {0}); e=[Convert]::ToUInt64('EEC1A02AAAE2FE78',16)}
+          )
+          foreach ($t in $tests) {
+            [UInt64]$got = [QevFold0Witness]::Run($code, $t.d)
+            if ($got -ne [UInt64]$t.e) { throw ('fold0 mismatch got={0:X16} expected={1:X16}' -f $got,[UInt64]$t.e) }
+          }
+          [UInt64]$changed = [QevFold0Witness]::Run($code, [byte[]]@(0x52))
+          if ($changed -eq [Convert]::ToUInt64('09CB2A482AC8A05C',16)) { throw 'changed-input negative witness failed' }
+          'QEVARYNOX_FOLD0_RUNTIME_B_WINDOWS=PASS'

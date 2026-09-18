@@ -32,3 +32,6 @@ sovereign/tools0/src/qevtrace0.qevsource0|project-specification|external-source=
 sovereign/seed0/byte-origin.qevmanifest0|project-byte-authorship|external-source=none|D=PASS
 sovereign/seed0/pulse-x86_64.qevproof0|project-proof-authorship|external-source=none|D=PASS
 sovereign/seed0/pulse-x86_64.qevseed0|project-manual-machine-bytes|external-source=none|D=PASS
+sovereign/seed0/fold0-byte-origin.qevmanifest0|project-byte-authorship|external-source=none|D=PASS
+sovereign/seed0/fold0-x86_64.qevproof0|project-proof-authorship|external-source=none|D=PASS
+sovereign/seed0/fold0-x86_64.qevseed0|project-manual-machine-bytes|external-source=none|D=PASS

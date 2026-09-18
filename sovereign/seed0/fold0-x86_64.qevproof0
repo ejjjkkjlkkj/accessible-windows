@@ -1,0 +1,79 @@
+QEVARYNOX_PROOF_0
+version = 0
+identity = QEVARYNOX.SEED0.X86_64.FOLD0
+artifact = sovereign/seed0/fold0-x86_64.qevseed0
+target = x86-64
+size = 61
+sha256 = b57bcf6e38fa5b7926d7cddb9337166440a8a5996789f9cfe43f8d09e131d1b4
+purpose = project-defined-deterministic-data-fold-not-cryptography
+
+::boundary
+entry-sysv-offset = 0
+entry-win64-offset = 11
+core-offset = 22
+rule = boundary-adapters-only-copy-arguments-into-Qevarynox-core-registers
+::end
+
+::core
+initial-state = 0x584E595241564551
+step-1 = xor-next-byte
+step-2 = rotate-left-5
+step-3 = add-0x51
+termination = exact-input-length
+::end
+
+::byte-map
+range = 0..10
+meaning = external-witness-SysV-boundary-adapter-to-core
+::end
+::byte-map
+range = 11..21
+meaning = external-witness-Win64-boundary-adapter-to-core
+::end
+::byte-map
+range = 22..31
+meaning = initialize-Qevarynox-fold-state
+::end
+::byte-map
+range = 32..36
+meaning = zero-length-test-and-exit-branch
+::end
+::byte-map
+range = 37..57
+meaning = project-defined-fold-step-and-input-advance
+::end
+::byte-map
+range = 58..60
+meaning = loop-or-return
+::end
+
+::test-vectors
+empty = 0x584E595241564551
+51 = 0x09CB2A482AC8A05C
+5165766172796E6F78 = 0xC8A0382E09E6B59B
+000102030405060708090A0B0C0D0E0F = 0x5498DCA8B6CC838C
+32x00 = 0xEEC1A02AAAE2FE78
+::end
+
+::accessibility
+class = noninteractive
+human-path = none
+visual-output = none
+semantic-human-output = none
+rule = no-human-facing-state-is-created-by-this-machine-primitive
+::end
+
+::proof-state
+A = PASS
+B = UNPROVEN
+C = UNPROVEN
+D = PASS
+accessibility-A = PASS
+accessibility-B = UNPROVEN
+::end
+
+::claim
+rule = this-is-not-a-hash-security-or-cryptographic-primitive
+rule = this-is-not-a-kernel-bootloader-filesystem-process-or-application-model
+rule = runtime-B-stays-UNPROVEN-until-independent-Linux-and-Windows-witnesses-pass
+::end
