@@ -8,6 +8,8 @@ DATA_RVA=0x8000
 WAIT_REPEAT_KEY=False
 WAIT_DOWN_PROBE=False
 WAIT_DOWN_SPEAK=False
+WAIT_UP_PROBE=False
+WAIT_UP_SPEAK=False
 
 ROOT=Path(__file__).resolve().parents[2]
 SPEECH_BUILDER=ROOT/'boot'/'uefi-hii-option-speech-v1'/'build_uefi_hii_option_speech.py'
@@ -117,6 +119,12 @@ MARKS={
  'nav_spoken_prefix': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_FOCUS_SPOKEN_PREFIX=',
  'nav_spoken_prefix_done': b'\r\nNAV_FOCUS_SPOKEN_PREFIX=PASS\r\nEND\r\n',
  'nav_fail': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=NAV_NEXT_OPTION_NOT_FOUND\r\nEND\r\n',
+ 'up_wait': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_NAVIGATION_KEY=WAIT_UP\r\nEND\r\n',
+ 'up_accept': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_NAVIGATION_KEY=UP\r\nHII_NAVIGATION_KEY=PASS\r\nEND\r\n',
+ 'up_token': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_PREV_OPTION_STRING_ID_LE_HEX=',
+ 'up_type': b'\r\nNAV_PREV_OPTION_TYPE_HEX=',
+ 'up_raw': b'\r\nNAV_PREV_OPTION_VALUE_RAW8_HEX=',
+ 'up_done': b'\r\nNAV_PREV_OPTION_DIRECT_CHILD=PASS\r\nNAV_PREV_OPTION_WRAP_POLICY=PASS\r\nEND\r\n',
  'done': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=PASS\r\nEND\r\n',
  'no_hda': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_PCI_NOT_FOUND\r\nEND\r\n',
  'bad_hda': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_CONTROLLER_OR_CODEC_FAILED\r\nEND\r\n',
@@ -181,6 +189,7 @@ def build():
   'maxaddr':408,'dac_nid':416,'pin_nid':420,'speech_text_source':424,
   'textbuf':432,'text_count':452,'keybuf':456,
   'selected_option_ptr':464,'nav_option_token':472,'nav_option_type':474,'nav_option_raw':480,
+  'prev_option_ptr':488,'prev_wrap_flag':496,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -199,7 +208,7 @@ def build():
 
  c=Code()
  c.emit(b'\x53\x55\x56\x57\x41\x54\x41\x55\x41\x56\x41\x57')
- if WAIT_REPEAT_KEY or WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK:
+ if WAIT_REPEAT_KEY or WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK or WAIT_UP_PROBE or WAIT_UP_SPEAK:
   c.emit(b'\x48\x8b\x6a\x30')  # rbp=ConIn for accessibility keyboard commands
  c.emit(b'\x4c\x8b\x7a\x60')  # r15=BootServices
  c.emit(b'\x48\x83\xec\x68\xfc')
@@ -478,7 +487,14 @@ def build():
   c.rel32(b'\xe8','wait_down_key'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','resolve_next_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','emit_nav_meta')
-  if WAIT_DOWN_SPEAK:
+  if WAIT_DOWN_SPEAK or WAIT_UP_SPEAK:
+   c.lea_rax_data(L['nav_option_token']); c.emit(b'\x0f\xb7\x00'); c.lea_rdx_data(L['selected_option_token']); c.emit(b'\x66\x89\x02')
+   serial('nav_focus_activate')
+ elif WAIT_UP_PROBE or WAIT_UP_SPEAK:
+  c.rel32(b'\xe8','wait_up_key'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
+  c.rel32(b'\xe8','resolve_prev_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
+  c.rel32(b'\xe8','emit_up_meta')
+  if WAIT_UP_SPEAK:
    c.lea_rax_data(L['nav_option_token']); c.emit(b'\x0f\xb7\x00'); c.lea_rdx_data(L['selected_option_token']); c.emit(b'\x66\x89\x02')
    serial('nav_focus_activate')
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x8b\x32')
@@ -498,7 +514,14 @@ def build():
   c.rel32(b'\xe8','wait_down_key'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','resolve_next_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','emit_nav_meta')
-  if WAIT_DOWN_SPEAK:
+  if WAIT_DOWN_SPEAK or WAIT_UP_SPEAK:
+   c.lea_rax_data(L['nav_option_token']); c.emit(b'\x0f\xb7\x00'); c.lea_rdx_data(L['selected_option_token']); c.emit(b'\x66\x89\x02')
+   serial('nav_focus_activate')
+ elif WAIT_UP_PROBE or WAIT_UP_SPEAK:
+  c.rel32(b'\xe8','wait_up_key'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
+  c.rel32(b'\xe8','resolve_prev_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
+  c.rel32(b'\xe8','emit_up_meta')
+  if WAIT_UP_SPEAK:
    c.lea_rax_data(L['nav_option_token']); c.emit(b'\x0f\xb7\x00'); c.lea_rdx_data(L['selected_option_token']); c.emit(b'\x66\x89\x02')
    serial('nav_focus_activate')
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x8b\x32')
@@ -519,9 +542,9 @@ def build():
  c.label('selected_scsu_found')
  c.emit(b'\x80\x3e\x00'); c.rel32(b'\x0f\x84','fail_selected_string')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x89\x32')
- serial('nav_focus_text_prefix' if WAIT_DOWN_SPEAK else 'selected_text_prefix'); c.rel32(b'\xe8','serial_scsu_ascii')
+ serial('nav_focus_text_prefix' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'selected_text_prefix'); c.rel32(b'\xe8','serial_scsu_ascii')
  c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_selected_string')
- serial('nav_focus_text_done' if WAIT_DOWN_SPEAK else 'selected_text_done')
+ serial('nav_focus_text_done' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'selected_text_done')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x8b\x32')
  c.emit(b'\x31\xff')
  c.label('capture_scsu_loop')
@@ -530,15 +553,15 @@ def build():
  c.emit(b'\x3c\x61'); c.rel32(b'\x0f\x82','capture_scsu_loop')
  c.emit(b'\x3c\x7a'); c.rel32(b'\x0f\x87','capture_scsu_loop')
  c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','capture_done')
- c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if WAIT_DOWN_SPEAK else 'speech_char')
+ c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'speech_char')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\x44\x89\x18\xff\xc7')
  c.rel32(b'\xe9','capture_scsu_loop')
 
  c.label('selected_ucs_found')
  c.emit(b'\x66\x83\x3e\x00'); c.rel32(b'\x0f\x84','fail_selected_string')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x89\x32')
- serial('nav_focus_text_prefix' if WAIT_DOWN_SPEAK else 'selected_text_prefix'); c.rel32(b'\xe8','serial_utf16')
- serial('nav_focus_text_done' if WAIT_DOWN_SPEAK else 'selected_text_done')
+ serial('nav_focus_text_prefix' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'selected_text_prefix'); c.rel32(b'\xe8','serial_utf16')
+ serial('nav_focus_text_done' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'selected_text_done')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x8b\x32')
  c.emit(b'\x31\xff')
  c.label('capture_ucs_loop')
@@ -547,7 +570,7 @@ def build():
  c.emit(b'\x83\xf8\x61'); c.rel32(b'\x0f\x82','capture_ucs_loop')
  c.emit(b'\x83\xf8\x7a'); c.rel32(b'\x0f\x87','capture_ucs_loop')
  c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','capture_done')
- c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if WAIT_DOWN_SPEAK else 'speech_char')
+ c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'speech_char')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\x44\x89\x18\xff\xc7')
  c.rel32(b'\xe9','capture_ucs_loop')
 
@@ -555,7 +578,7 @@ def build():
  c.emit(b'\x85\xff'); c.rel32(b'\x0f\x84','fail_speech_text')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\xc7\x00\x00\x00')
  c.lea_rdx_data(L['text_count']); c.emit(b'\x89\x3a')
- if WAIT_DOWN_SPEAK:
+ if WAIT_DOWN_SPEAK or WAIT_UP_SPEAK:
   serial('nav_speech_hii')
   serial('nav_spoken_prefix'); c.rel32(b'\xe8','serial_textbuf'); serial('nav_spoken_prefix_done')
  else:
@@ -764,7 +787,7 @@ def build():
  c.emit(bytes.fromhex('89d8ffc848c1e0044c01e8'))
  c.emit(bytes.fromhex('c7400c01000000'))
  c.emit(bytes.fromhex('4189db41ffcb'))
- serial('nav_text_ready' if WAIT_DOWN_SPEAK else 'text_ready')
+ serial('nav_text_ready' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'text_ready')
  c.emit(bytes.fromhex('0f09'))
  serial('dma')
 
@@ -803,7 +826,7 @@ def build():
  # Give HDA backend time to consume DMA, then prove LPIB moved.
  c.emit(b'\xb9\x80\x1a\x06\x00\x49\x8b\x87\xf8\x00\x00\x00\xff\xd0')
  c.emit(b'\x8b\x43\x04\x85\xc0'); c.rel32(b'\x0f\x84','fail_stream')
- serial('nav_progress' if WAIT_DOWN_SPEAK else 'progress')
+ serial('nav_progress' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'progress')
  # Stop stream.
  c.emit(b'\x8a\x03\x24\xfd\x88\x03')
  serial('done')
@@ -1165,6 +1188,14 @@ def build():
  c.lea_rdx_data(L['keybuf']); c.emit(b'\x0f\xb7\x02\x66\x83\xf8\x02'); c.rel32(b'\x0f\x85','nav_read_key')
  serial('nav_accept'); c.emit(b'\x31\xc0\xc3')
 
+ c.label('wait_up_key')
+ serial('up_wait')
+ c.label('up_read_key')
+ c.emit(b'\x48\x89\xe9'); c.lea_rdx_data(L['keybuf'])
+ c.emit(b'\x48\x8b\x45\x08\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','up_read_key')
+ c.lea_rdx_data(L['keybuf']); c.emit(b'\x0f\xb7\x02\x66\x83\xf8\x01'); c.rel32(b'\x0f\x85','up_read_key')
+ serial('up_accept'); c.emit(b'\x31\xc0\xc3')
+
  c.label('resolve_next_option')
  # Re-scan only the direct children of the same scoped ONE_OF. The current
  # option pointer is the boundary: the first later direct numeric option is the
@@ -1220,6 +1251,69 @@ def build():
  serial('nav_raw'); c.lea_rsi_data(L['nav_option_raw']); c.emit(b'\xb9\x08\x00\x00\x00')
  c.label('nav_raw_hex_loop'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','nav_raw_hex_loop')
  serial('nav_done'); c.emit(b'\xc3')
+
+ c.label('resolve_prev_option')
+ # Read-only UP focus. Track the preceding direct numeric ONE_OF_OPTION; if
+ # current is first, continue to the scope end and wrap to the last sibling.
+ c.lea_rax_data(L['question_ptr']); c.emit(b'\x48\x8b\x00\x48\x85\xc0'); c.rel32(b'\x0f\x84','prev_option_not_found')
+ c.emit(b'\xf6\x40\x01\x80'); c.rel32(b'\x0f\x84','prev_option_not_found')
+ c.lea_rdx_data(L['ifr_next_ptr']); c.emit(b'\x4c\x8b\x0a')
+ c.lea_rdx_data(L['ifr_next_remaining']); c.emit(b'\x44\x8b\x12')
+ c.emit(b'\x41\xbb\x01\x00\x00\x00')
+ c.lea_rdx_data(L['prev_option_ptr']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00')
+ c.lea_rdx_data(L['prev_wrap_flag']); c.emit(b'\xc6\x02\x00')
+ c.label('prev_option_scan')
+ c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x82','prev_option_not_found')
+ c.emit(b'\x41\x0f\xb6\x01')
+ c.emit(b'\x41\x0f\xb6\x59\x01\x89\xd9\x83\xe1\x7f')
+ c.emit(b'\x83\xf9\x02'); c.rel32(b'\x0f\x82','prev_option_not_found')
+ c.emit(b'\x44\x39\xd1'); c.rel32(b'\x0f\x87','prev_option_not_found')
+ c.emit(b'\x3c\x29'); c.rel32(b'\x0f\x84','prev_option_end')
+ c.emit(b'\x3c\x09'); c.rel32(b'\x0f\x85','prev_option_scope_advance')
+ c.emit(b'\x41\x83\xfb\x01'); c.rel32(b'\x0f\x85','prev_option_scope_advance')
+ c.lea_rdx_data(L['selected_option_ptr']); c.emit(b'\x4c\x3b\x0a'); c.rel32(b'\x0f\x85','prev_option_candidate')
+ c.lea_rax_data(L['prev_option_ptr']); c.emit(b'\x4c\x8b\x08\x4d\x85\xc9'); c.rel32(b'\x0f\x85','prev_option_capture')
+ c.lea_rdx_data(L['prev_wrap_flag']); c.emit(b'\xc6\x02\x01'); c.rel32(b'\xe9','prev_option_advance')
+
+ c.label('prev_option_candidate')
+ c.emit(b'\x83\xf9\x07'); c.rel32(b'\x0f\x82','prev_option_advance')
+ c.emit(b'\x41\x89\xc8')
+ c.emit(b'\x41\x0f\xb6\x41\x05\x3c\x03'); c.rel32(b'\x0f\x87','prev_option_advance')
+ c.lea_rdx_data(L['oneof_flags']); c.emit(b'\x0f\xb6\x12\x83\xe2\x03\x39\xd0'); c.rel32(b'\x0f\x85','prev_option_restore_advance')
+ c.emit(b'\x89\xc1\xba\x01\x00\x00\x00\xd3\xe2\x8d\x42\x06\x41\x39\xc0'); c.rel32(b'\x0f\x82','prev_option_restore_advance')
+ c.lea_rdx_data(L['prev_option_ptr']); c.emit(b'\x4c\x89\x0a')
+ c.emit(b'\x44\x89\xc1'); c.rel32(b'\xe9','prev_option_advance')
+ c.label('prev_option_restore_advance'); c.emit(b'\x44\x89\xc1'); c.rel32(b'\xe9','prev_option_advance')
+
+ c.label('prev_option_end')
+ c.emit(b'\x41\xff\xcb\x41\x83\xfb\x00'); c.rel32(b'\x0f\x85','prev_option_advance')
+ c.lea_rax_data(L['prev_wrap_flag']); c.emit(b'\x80\x38\x01'); c.rel32(b'\x0f\x85','prev_option_not_found')
+ c.lea_rax_data(L['prev_option_ptr']); c.emit(b'\x4c\x8b\x08\x4d\x85\xc9'); c.rel32(b'\x0f\x84','prev_option_not_found')
+ c.rel32(b'\xe9','prev_option_capture')
+ c.label('prev_option_scope_advance')
+ c.emit(b'\xf6\xc3\x80'); c.rel32(b'\x0f\x84','prev_option_advance'); c.emit(b'\x41\xff\xc3')
+ c.label('prev_option_advance')
+ c.emit(b'\x49\x01\xc9\x41\x29\xca'); c.rel32(b'\xe9','prev_option_scan')
+
+ c.label('prev_option_capture')
+ c.emit(b'\x41\x0f\xb7\x41\x02'); c.lea_rdx_data(L['nav_option_token']); c.emit(b'\x66\x89\x02')
+ c.emit(b'\x41\x0f\xb6\x41\x05'); c.lea_rdx_data(L['nav_option_type']); c.emit(b'\x88\x02')
+ c.lea_rdx_data(L['nav_option_raw']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00\xc7\x42\x04\x00\x00\x00\x00')
+ c.emit(b'\x41\x0f\xb6\x49\x05\xba\x01\x00\x00\x00\xd3\xe2')
+ c.emit(b'\x49\x8d\x71\x06'); c.lea_rdi_data(L['nav_option_raw']); c.emit(b'\x89\xd1')
+ c.label('prev_option_copy_loop')
+ c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','prev_option_copy_done')
+ c.emit(b'\x8a\x06\x88\x07\x48\xff\xc6\x48\xff\xc7\xff\xc9'); c.rel32(b'\xe9','prev_option_copy_loop')
+ c.label('prev_option_copy_done'); c.emit(b'\x31\xc0\xc3')
+ c.label('prev_option_not_found'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
+
+ c.label('emit_up_meta')
+ serial('up_token'); c.lea_rsi_data(L['nav_option_token']); c.emit(b'\xb9\x02\x00\x00\x00')
+ c.label('up_token_hex_loop'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','up_token_hex_loop')
+ serial('up_type'); c.lea_rax_data(L['nav_option_type']); c.emit(b'\x8a\x00'); c.rel32(b'\xe8','hex8_emit')
+ serial('up_raw'); c.lea_rsi_data(L['nav_option_raw']); c.emit(b'\xb9\x08\x00\x00\x00')
+ c.label('up_raw_hex_loop'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','up_raw_hex_loop')
+ serial('up_done'); c.emit(b'\xc3')
 
  c.label('emit_question_meta')
  serial('meta_qid'); c.lea_rsi_data(L['question_id']); c.emit(b'\xb9\x02\x00\x00\x00')
@@ -1409,12 +1503,14 @@ def validate(image,pcm):
   assert token in image,token
 
 def main():
- global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE, WAIT_DOWN_SPEAK
- if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak]')
+ global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE, WAIT_DOWN_SPEAK, WAIT_UP_PROBE, WAIT_UP_SPEAK
+ if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak|--wait-up-probe|--wait-up-speak]')
  if len(sys.argv)==3:
   if sys.argv[2]=='--wait-repeat': WAIT_REPEAT_KEY=True
   elif sys.argv[2]=='--wait-down-probe': WAIT_DOWN_PROBE=True
   elif sys.argv[2]=='--wait-down-speak': WAIT_DOWN_SPEAK=True
+  elif sys.argv[2]=='--wait-up-probe': WAIT_UP_PROBE=True
+  elif sys.argv[2]=='--wait-up-speak': WAIT_UP_SPEAK=True
   else: raise SystemExit('unknown mode: '+sys.argv[2])
  image,pcm=build(); validate(image,pcm)
  p=Path(sys.argv[1]); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(image)
@@ -1424,7 +1520,9 @@ def main():
  print('current-option-max-spoken-graphemes=8')
  print('accessibility-repeat-key=' + ('enabled' if WAIT_REPEAT_KEY else 'disabled'))
  print('hii-down-probe=' + ('enabled' if WAIT_DOWN_PROBE else 'disabled'))
- print('hii-down-speak=' + ('enabled' if WAIT_DOWN_SPEAK else 'disabled'))
+ print('hii-down-speak=' + ('enabled' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'disabled'))
+ print('hii-up-probe=' + ('enabled' if WAIT_UP_PROBE else 'disabled'))
+ print('hii-up-speak=' + ('enabled' if WAIT_UP_SPEAK else 'disabled'))
  print('pcm-bytes='+str(len(pcm)))
  print('pcm-sha256='+hashlib.sha256(pcm).hexdigest())
  print('sha256='+hashlib.sha256(image).hexdigest())
