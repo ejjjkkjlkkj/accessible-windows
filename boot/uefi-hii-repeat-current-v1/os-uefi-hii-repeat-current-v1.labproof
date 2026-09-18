@@ -28,19 +28,19 @@ physical-ASUS-repeat-command = not-established
 claim = success establishes that native pre-OS current-option speech remains blocked until a real EFI keyboard event carrying R/r is consumed by ReadKeyStroke and that the same execution then produces native HDA speech
 claim = success does not establish Up/Down focus traversal or physical ASUS keyboard/audio behavior
 proof = PASS
-proof-run = 35399054764
-proof-head-sha = 11454ccf0a889fb74e7185d6a60ba23f0c53d1d8
+proof-run = 35400278269
+proof-head-sha = 039c7cf70cef54691fbd5ff8488cb7b8e8bad1cc
 proof-prekey-HDA-blocked = PASS
 proof-repeat-key-event = PASS
 proof-repeat-key = R
-proof-current-option-label = Disabled
-proof-spoken-prefix = disabled
+proof-current-option-label = 1280x800
+proof-spoken-prefix = 1280x800
 proof-postkey-native-HDA-speech = PASS
 proof-HDA-waveform = PASS
 proof-setting-mutation = false
 proof-arrow-navigation = false
 proof-physical-ASUS-repeat-command = false
-proof-wave-metrics = frames=18786; peak=13821; active=32688; wav-sha256=a08467bbf331d814ce77c8dbee5e59dc667d3735c23177598021a99ba3ce79c6
-proof-efi-sha256 = 37256d4d7427c0aa238ef5ee1366605aa5ed9f65d235582fdb93b32b1d2c078c
-proof-serial-sha256 = 106a64d9dfb0161364bcaae308018637a88f89084b9e8f2d86e5bf615c99bef8
-proof-wav-sha256 = a08467bbf331d814ce77c8dbee5e59dc667d3735c23177598021a99ba3ce79c6
+proof-wave-metrics = frames=18765; peak=13355; active=32172; wav-sha256=39821036745a37998e0d72ad57aa51d441ed936e926fea3990f43462e2a3e144
+proof-efi-sha256 = 7645acd67a2a568189d27adfcaf2fd52e4d11a1aeee29546d691171af8e4c0f2
+proof-serial-sha256 = 885d69cd31c9b51bde7b748c5a28479ae574dec7048630a42d29246296c20290
+proof-wav-sha256 = 39821036745a37998e0d72ad57aa51d441ed936e926fea3990f43462e2a3e144
