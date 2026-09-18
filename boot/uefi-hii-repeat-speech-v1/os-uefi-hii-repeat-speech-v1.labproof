@@ -2,7 +2,6 @@ OS-UEFI-HII-REPEAT-SPEECH-V1
 role = native pre-OS repeat-current-option speech command gated by an explicit keyboard R key
 system-foundation = true
 depends-on = OS-UEFI-HII-CURRENT-OPTION-SPEECH-V1
-depends-on = OS-UEFI-HII-ISCSI-FIXTURE-V1
 execution-domain = pre-OS UEFI
 artifact-format = PE32+ EFI application
 architecture = x86-64
