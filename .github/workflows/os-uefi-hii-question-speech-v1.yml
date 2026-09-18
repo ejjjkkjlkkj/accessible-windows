@@ -72,6 +72,13 @@ jobs:
               "HII_FORMS_PACKAGE=PASS",
               "HII_STRINGS_PACKAGE=PASS",
               "IFR_ONE_OF_PROMPT_STRING_ID=PASS",
+              "QUESTION_ID_LE_HEX=",
+              "VARSTORE_ID_LE_HEX=",
+              "VARSTORE_INFO_LE_HEX=",
+              "QUESTION_FLAGS_HEX=",
+              "ONEOF_FLAGS_HEX=",
+              "QUESTION_METADATA=PASS",
+              "emit_question_meta",
               "string_block_loop",
               "capture_scsu_loop",
               "capture_ucs_loop",
@@ -93,6 +100,7 @@ jobs:
           for line in [
               'question-source-hardcoded = false',
               'question-selection-policy = first resolvable EFI_IFR_ONE_OF with nonzero VarStoreId',
+              'question-identity-binding = runtime QuestionId plus VarStoreId plus VarStoreInfo plus QuestionFlags plus OneOfFlags must match OS-UEFI-HII-STORED-QUESTION-V1 proof',
               'keyboard-input-required = false',
               'widget-nids-hardcoded = false',
               'firmware-setting-mutation = forbidden',
@@ -141,6 +149,12 @@ jobs:
               b'HII_FORMS_PACKAGE=PASS\r\n',
               b'HII_STRINGS_PACKAGE=PASS\r\n',
               b'IFR_ONE_OF_PROMPT_STRING_ID=PASS\r\n',
+              b'QUESTION_ID_LE_HEX=',
+              b'VARSTORE_ID_LE_HEX=',
+              b'VARSTORE_INFO_LE_HEX=',
+              b'QUESTION_FLAGS_HEX=',
+              b'ONEOF_FLAGS_HEX=',
+              b'QUESTION_METADATA=PASS\r\n',
               b'HII_QUESTION_SOURCE=PASS\r\n',
               b'NONZERO_VARSTORE_ID=PASS\r\n',
               b'AFG_RUNTIME_DISCOVERY=PASS\r\n',
@@ -196,6 +210,7 @@ jobs:
               b'HII_FORMS_PACKAGE=PASS\r\n',
               b'HII_STRINGS_PACKAGE=PASS\r\n',
               b'IFR_ONE_OF_PROMPT_STRING_ID=PASS\r\n',
+              b'QUESTION_METADATA=PASS\r\n',
               b'HII_LANGUAGE=PASS\r\n',
               b'HII_QUESTION_SOURCE=PASS\r\n',
               b'AFG_RUNTIME_DISCOVERY=PASS\r\n',
@@ -214,8 +229,32 @@ jobs:
               if b'STATUS=BLOCKED\r\n' in raw:
                   raise SystemExit('HII speech blocked: '+repr(raw[-8192:]))
               if all(x in raw for x in required):
+                  import re
+                  def le16(name):
+                      m=re.search(name+br'=([0-9A-F]{4})',raw)
+                      assert m,name
+                      return int.from_bytes(bytes.fromhex(m.group(1).decode()),'little')
+                  def hex8(name):
+                      m=re.search(name+br'=([0-9A-F]{2})',raw)
+                      assert m,name
+                      return m.group(1).decode()
+                  actual={
+                      'question-id':str(le16(b'QUESTION_ID_LE_HEX')),
+                      'varstore-id':str(le16(b'VARSTORE_ID_LE_HEX')),
+                      'varstore-info':str(le16(b'VARSTORE_INFO_LE_HEX')),
+                      'question-flags-hex':hex8(b'QUESTION_FLAGS_HEX'),
+                      'oneof-flags-hex':hex8(b'ONEOF_FLAGS_HEX'),
+                  }
+                  expected={}
+                  for line in Path('boot/uefi-hii-stored-question-v1/os-uefi-hii-stored-question-v1.labproof').read_text().splitlines():
+                      if line.startswith('proof-') and ' = ' in line:
+                          k,v=line[len('proof-'):].split(' = ',1)
+                          expected[k]=v
+                  for k,v in actual.items():
+                      assert expected.get(k)==v,(k,v,expected.get(k))
                   count=raw.count(b'EVENT=HII_GRAPHEME_ACCEPTED\r\n')
                   assert 1 <= count <= 8,count
+                  print('HII_STORED_QUESTION_IDENTITY_MATCH=PASS')
                   print('HII_ACCEPTED_GRAPHEMES='+str(count))
                   print('UEFI_HII_QUESTION_SPEECH_RUNTIME=PASS')
                   break
@@ -318,7 +357,7 @@ jobs:
 
           python - <<'PY'
           from pathlib import Path
-          import hashlib,os
+          import hashlib,os,re
           root=Path('boot/uefi-hii-question-speech-v1')
           p=root/'os-uefi-hii-question-speech-v1.labproof'
           text=p.read_text()
@@ -335,6 +374,19 @@ jobs:
           wav=Path('/tmp/hii-question-speech.wav').read_bytes()
           metrics=Path('/tmp/hii-question-speech-metrics.txt').read_text().strip().replace('\n','; ')
           accepted=serial.count(b'EVENT=HII_GRAPHEME_ACCEPTED\r\n')
+          def le16(name):
+              m=re.search(name.encode()+br'=([0-9A-F]{4})',serial)
+              if not m: raise SystemExit('missing '+name)
+              return int.from_bytes(bytes.fromhex(m.group(1).decode()),'little')
+          def hex8(name):
+              m=re.search(name.encode()+br'=([0-9A-F]{2})',serial)
+              if not m: raise SystemExit('missing '+name)
+              return m.group(1).decode()
+          qid=le16('QUESTION_ID_LE_HEX')
+          vsid=le16('VARSTORE_ID_LE_HEX')
+          vinfo=le16('VARSTORE_INFO_LE_HEX')
+          qflags=hex8('QUESTION_FLAGS_HEX')
+          oflags=hex8('ONEOF_FLAGS_HEX')
           text='\n'.join(kept).rstrip()+'\n'
           text += (
               f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
@@ -343,6 +395,12 @@ jobs:
               "proof-HII-export-all-package-lists = PASS\n"
               "proof-HII-direct-string-decoder = PASS\n"
               "proof-question-source-hardcoded = false\n"
+              "proof-stored-question-identity-match = PASS\n"
+              f"proof-question-id = {qid}\n"
+              f"proof-varstore-id = {vsid}\n"
+              f"proof-varstore-info = {vinfo}\n"
+              f"proof-question-flags-hex = {qflags}\n"
+              f"proof-oneof-flags-hex = {oflags}\n"
               f"proof-spoken-graphemes = {accepted}\n"
               "proof-first-party-allophones = PASS\n"
               "proof-runtime-HDA-route = PASS\n"
