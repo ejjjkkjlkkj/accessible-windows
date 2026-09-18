@@ -539,7 +539,6 @@ static int run_speech_dma(const char *text, u32 text_count) {
         fence();
     }
 
-    volatile u8 *pcm = (volatile u8 *)(usize)(base + pcm_off);
 
     volatile u8 *bdl = (volatile u8 *)(usize)base;
     u32 entries = 0;
