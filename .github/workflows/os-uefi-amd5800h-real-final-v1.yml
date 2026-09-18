@@ -17,6 +17,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: os-uefi-amd5800h-real-final-v1-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-graph-efi:
     runs-on: ubuntu-latest
