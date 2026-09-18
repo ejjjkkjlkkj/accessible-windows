@@ -45,7 +45,7 @@ jobs:
               'def make_unit(',
               'def make_units(',
               'SYNTH=ALLOPHONE_CONCATENATIVE_V1',
-              'for unit in PHRASES[name]:',
+              'for unit_name in PHRASES[name]:',
           ):
               assert token in src, token
           proof=(root/'os-uefi-native-speech-v1.labproof').read_text()
