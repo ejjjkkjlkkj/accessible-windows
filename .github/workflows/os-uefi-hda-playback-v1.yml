@@ -60,6 +60,7 @@ jobs:
           assert not (tc & 0x80000000)
           assert dc & 0x80000000 and not (dc & 0x20000000)
           required=[
+              bytes.fromhex('4181fc00000100'),
               bytes.fromhex('498b4728ffd0'),
               bytes.fromhex('41c7450c01000000'),
               bytes.fromhex('66c743121100'),
@@ -89,6 +90,9 @@ jobs:
           from pathlib import Path
           lines=set(Path('boot/uefi-hda-playback-v1/os-uefi-hda-playback-v1.labproof').read_text().splitlines())
           required={
+              'depends-on = OS-UEFI-HDA-WIDGET-V1',
+              'depends-on = OS-UEFI-HDA-PCM-V1',
+              'pci-scan-scope = segment 0 all 65536 bus-device-function tuples',
               'external-audio-driver-required = false',
               'AudioDxe-required = false',
               'dma-allocation = UEFI AllocatePages below 4GiB',
