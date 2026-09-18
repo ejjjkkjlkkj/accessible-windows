@@ -1,0 +1,26 @@
+OS-UEFI-HII-DOWN-REPEAT-SPEECH-V1
+role = native pre-OS two-key accessibility sequence: DOWN moves read-only focus, then R repeats the newly focused HII option through native HDA speech
+system-foundation = true
+depends-on = OS-UEFI-HII-DOWN-SPEECH-V1
+depends-on = OS-UEFI-HII-REPEAT-SPEECH-V1
+execution-domain = pre-OS UEFI
+artifact-format = PE32+ EFI application
+architecture = x86-64
+keyboard-protocol = EFI_SIMPLE_TEXT_INPUT_PROTOCOL.ReadKeyStroke
+first-key = SCAN_DOWN 0x0002
+first-key-effect = move accessibility focus to next direct ONE_OF_OPTION sibling
+second-key = Unicode R or r
+second-key-effect = authorize speech of the already focused option
+focus-operation = read-only
+focused-label-source = live sibling HII Strings package and language namespace
+speech-synthesizer = first-party deterministic allophones
+audio-transport = native Intel HDA immediate verbs plus runtime BDL DMA
+route-config-call = forbidden
+runtime-variable-read = forbidden
+set-variable-call = forbidden
+varstore-write = forbidden
+firmware-setting-mutation = forbidden
+physical-ASUS-two-key-focus-repeat = not-established
+claim = success establishes that DOWN first moves accessibility focus from Disabled to Enabled without speaking through HDA, then R is consumed as a second real EFI keyboard event and only then speaks the focused Enabled label through native HDA while the firmware current value remains unchanged
+claim = success does not establish physical ASUS keyboard/audio behavior
+proof = PENDING_CI
