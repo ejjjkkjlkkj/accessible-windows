@@ -32,7 +32,7 @@ rule = no-human-facing-state-is-created-by-this-generation-step
 
 ::proof-state
 A = PASS
-B = UNPROVEN
+B = PASS
 C = UNPROVEN
 D = PASS
 accessibility-A = PASS
@@ -42,5 +42,7 @@ accessibility-B = UNPROVEN
 ::claim
 rule = this-is-not-yet-self-hosting
 rule = this-is-a-first-native-code-generation-chain
-rule = B-stays-UNPROVEN-until-independent-Linux-and-Windows-generation-witnesses-pass
+rule = B-passed-on-independent-Linux-and-Windows-generation-witnesses
 ::end
+witness-run = 35341295674
+witness-commit = 6922e36af270feefd266bc3fd34bbfd635c665e8
