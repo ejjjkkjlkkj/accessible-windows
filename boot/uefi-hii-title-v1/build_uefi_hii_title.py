@@ -58,7 +58,7 @@ def build():
   'db_guid':0,'str_guid':16,'dbptr':32,'strptr':40,
   'handles_size':48,'handles_ptr':56,'pkg_size':64,'pkg_ptr':72,
   'langs_size':80,'langs_ptr':88,'string_size':96,'string_ptr':104,
-  'token':112,'temp_handle':120,
+  'token':112,'temp_handle':120,'handle_cursor':128,'handles_remaining':136,
  }
  struct.pack_into('<IHH8B',data,L['db_guid'],
   0xef9fc172,0xa1b2,0x4693,0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42)
@@ -105,48 +105,59 @@ def build():
  c.emit(b'\x4d\x85\xed'); c.rel32(b'\x0f\x84','fail_protocol')
  serial('string_protocol')
 
- # ListPackageLists(FORMS=0x02), first size query.
+ # List every active HII package-list handle.  Some firmware exposes Forms
+ # through ExportPackageLists while a type-filtered ListPackageLists(FORMS)
+ # sizing query is not usable here, so selection is verified by inspecting
+ # each exported package list for an actual EFI_HII_PACKAGE_FORMS package.
  zero_qword(L['handles_size'])
  zero_qword(L['temp_handle'])
- c.emit(b'\x4c\x89\xe1\xba\x02\x00\x00\x00\x45\x31\xc0')
+ c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')  # PackageType=ALL, Guid=NULL
  c.lea_r9_data(L['handles_size'])
- # EDK2's own HiiGetHiiHandles helper supplies a valid temporary Handle
- # pointer even for the zero-length sizing query. Do the same for maximum
- # firmware compatibility instead of passing NULL as the fifth argument.
  c.lea_rax_data(L['temp_handle']); c.emit(b'\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
  c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x1a')
  c.emit(b'\x48\x83\xfb\x08'); c.rel32(b'\x0f\x82','fail_no_handle')
 
- # Allocate handle array and list again.
+ # Allocate handle array and list all active HII handles.
  alloc(True,L['handles_ptr'])
- c.emit(b'\x4c\x89\xe1\xba\x02\x00\x00\x00\x45\x31\xc0')
+ c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')
  c.lea_r9_data(L['handles_size'])
  c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
  c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_no_handle')
- # First active Forms package handle -> r14.
- c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x12\x4c\x8b\x32')
- c.emit(b'\x4d\x85\xf6'); c.rel32(b'\x0f\x84','fail_no_handle')
- serial('forms_handle')
 
- # Export selected package list, size query.
+ # Persist cursor and byte count because protocol calls may clobber volatile regs.
+ c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02')
+ c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x89\x02')
+ c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x02')
+ c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x89\x02')
+
+ c.label('handle_loop')
+ c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x8b\x2a')
+ c.emit(b'\x48\x83\xfd\x08'); c.rel32(b'\x0f\x82','fail_no_handle')
+ c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x8b\x32')
+ c.emit(b'\x4c\x8b\x36')                    # r14 = current HII handle
+ c.emit(b'\x48\x83\xc6\x08\x48\x83\xed\x08')
+ c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x89\x32')
+ c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x89\x2a')
+ c.emit(b'\x4d\x85\xf6'); c.rel32(b'\x0f\x84','handle_loop')
+
+ # Export this handle's package list, first obtaining the required byte count.
  zero_qword(L['pkg_size'])
  c.emit(b'\x4c\x89\xe1\x4c\x89\xf2')
  c.lea_r8_data(L['pkg_size']); c.emit(b'\x45\x31\xc9')
  c.emit(b'\x41\xff\x54\x24\x20')
  c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x18'); c.rel32(b'\x0f\x82','fail_export')
+ c.emit(b'\x48\x83\xfb\x18'); c.rel32(b'\x0f\x82','handle_loop')
  alloc(True,L['pkg_ptr'])
 
- # Export selected package list.
  c.emit(b'\x4c\x89\xe1\x4c\x89\xf2')
  c.lea_r8_data(L['pkg_size'])
  c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x4c\x8b\x0a')
  c.emit(b'\x41\xff\x54\x24\x20')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_export')
+ c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','handle_loop')
 
- # Locate Forms package in exported list.
+ # Verify that this exact HII handle owns a Forms package.
  c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x48\x8b\x32') # rsi=list
  c.emit(b'\x8b\x5e\x10\x83\xfb\x18'); c.rel32(b'\x0f\x82','fail_ifr')
  c.emit(b'\x48\x8d\x7e\x14\x83\xeb\x14') # rdi=package, ebx=remaining
@@ -157,12 +168,13 @@ def build():
  c.emit(b'\x83\xfa\x04'); c.rel32(b'\x0f\x82','fail_ifr')
  c.emit(b'\x39\xda'); c.rel32(b'\x0f\x87','fail_ifr')
  c.emit(b'\x83\xfd\x02'); c.rel32(b'\x0f\x84','forms_pkg')
- c.emit(b'\x81\xfd\xdf\x00\x00\x00'); c.rel32(b'\x0f\x84','fail_ifr')
+ c.emit(b'\x81\xfd\xdf\x00\x00\x00'); c.rel32(b'\x0f\x84','handle_loop')
  c.emit(b'\x48\x01\xd7\x29\xd3'); c.rel32(b'\xe9','pkg_loop')
 
  c.label('forms_pkg')
- # r9=first IFR opcode, r10d=bytes available in Forms package.
+ # r9=first IFR opcode, r10d=bytes available in verified Forms package.
  c.emit(b'\x4c\x8d\x4f\x04\x41\x89\xd2\x41\x83\xea\x04')
+ serial('forms_handle')
  c.label('ifr_loop')
  c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x82','fail_ifr')
  c.emit(b'\x41\x0f\xb6\x01')       # eax=OpCode
