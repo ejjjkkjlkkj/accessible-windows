@@ -72,15 +72,15 @@ PHRASES = {
 }
 
 MARKERS = {
-    "boot": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\\r\\nEVENT=BOOT\\r\\nSYNTH=ALLOPHONE_CONCATENATIVE_V1\\r\\nFOCUS=CONTINUE\\r\\nSPEECH=DONE\\r\\nEND\\r\\n",
-    "focus_accessibility": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\\r\\nEVENT=FOCUS\\r\\nFOCUS=ACCESSIBILITY\\r\\nSPEECH=DONE\\r\\nEND\\r\\n",
-    "focus_recovery": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\\r\\nEVENT=FOCUS\\r\\nFOCUS=RECOVERY\\r\\nSPEECH=DONE\\r\\nEND\\r\\n",
-    "focus_continue": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\\r\\nEVENT=FOCUS\\r\\nFOCUS=CONTINUE\\r\\nSPEECH=DONE\\r\\nEND\\r\\n",
-    "help": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\\r\\nEVENT=ACTIVATE\\r\\nID=ACCESSIBILITY\\r\\nSTATUS=READY\\r\\nSPEECH=DONE\\r\\nEND\\r\\n",
-    "recovery": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\\r\\nEVENT=ACTIVATE\\r\\nID=RECOVERY\\r\\nSTATUS=BLOCKED\\r\\nSPEECH=DONE\\r\\nEND\\r\\n",
-    "invalid": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\\r\\nEVENT=INVALID_KEY\\r\\nSTATUS=BLOCKED\\r\\nSPEECH=DONE\\r\\nEND\\r\\n",
-    "continue": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\\r\\nEVENT=ACTIVATE\\r\\nID=CONTINUE\\r\\nSTATUS=CONFIRMED\\r\\nSPEECH=DONE\\r\\nEND\\r\\n",
-    "fail": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\\r\\nSTATUS=BLOCKED\\r\\nREASON=AUDIO_PATH_FAILED\\r\\nEND\\r\\n",
+    "boot": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=BOOT\r\nSYNTH=ALLOPHONE_CONCATENATIVE_V1\r\nFOCUS=CONTINUE\r\nSPEECH=DONE\r\nEND\r\n",
+    "focus_accessibility": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=FOCUS\r\nFOCUS=ACCESSIBILITY\r\nSPEECH=DONE\r\nEND\r\n",
+    "focus_recovery": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=FOCUS\r\nFOCUS=RECOVERY\r\nSPEECH=DONE\r\nEND\r\n",
+    "focus_continue": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=FOCUS\r\nFOCUS=CONTINUE\r\nSPEECH=DONE\r\nEND\r\n",
+    "help": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=ACTIVATE\r\nID=ACCESSIBILITY\r\nSTATUS=READY\r\nSPEECH=DONE\r\nEND\r\n",
+    "recovery": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=ACTIVATE\r\nID=RECOVERY\r\nSTATUS=BLOCKED\r\nSPEECH=DONE\r\nEND\r\n",
+    "invalid": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=INVALID_KEY\r\nSTATUS=BLOCKED\r\nSPEECH=DONE\r\nEND\r\n",
+    "continue": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=ACTIVATE\r\nID=CONTINUE\r\nSTATUS=CONFIRMED\r\nSPEECH=DONE\r\nEND\r\n",
+    "fail": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=AUDIO_PATH_FAILED\r\nEND\r\n",
 }
 
 def _noise(seed: int) -> float:
@@ -278,9 +278,12 @@ def build_code(units: dict[str, bytes], off: dict[str, int]) -> bytes:
         c.rel32(b"\xe8", "serial_emit")
 
     def speak(name: str) -> None:
-        c.lea_rsi_data(off["clip_" + name])
-        c.emit(b"\xb9" + struct.pack("<I", len(clips[name])))
-        c.rel32(b"\xe8", "play_pcm")
+        # Runtime concatenation: the EFI executes one playback operation per
+        # first-party allophone unit. No full-utterance PCM is materialized.
+        for unit_name in PHRASES[name]:
+            c.lea_rsi_data(off["unit_" + unit_name])
+            c.emit(b"\xb9" + struct.pack("<I", len(units[unit_name])))
+            c.rel32(b"\xe8", "play_pcm")
 
     speak("startup")
     serial("boot")
