@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+# Cargo intentionally uses runner-sized automatic parallelism.
+# No fixed -j cap is set: every runner uses all logical CPUs it exposes.
+
 jobs:
   architecture-policy:
     runs-on: ubuntu-24.04
@@ -138,6 +141,22 @@ jobs:
         run: rustup toolchain install 1.98.1 --profile minimal
       - name: Native semantic source of truth
         run: cargo +1.98.1 test -p aw-core semantic_ -- --nocapture
+
+
+  storage-allocation-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native allocation model
+        run: cargo +1.98.1 test -p aw-storage allocation -- --nocapture
 
   bare-metal-contracts:
     runs-on: ubuntu-24.04

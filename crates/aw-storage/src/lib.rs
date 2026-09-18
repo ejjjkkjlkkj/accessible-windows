@@ -5,6 +5,9 @@
 //! that the final filesystem, authenticated storage, encryption or physical
 //! crash durability are complete.
 
+/// Native block-allocation structural contracts.
+pub mod allocation;
+
 /// On-disk magic for the native storage format.
 pub const STORAGE_MAGIC: u64 = 0x4157_5354_4F52_4531;
 /// First native storage-format version.

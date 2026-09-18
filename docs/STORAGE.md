@@ -13,7 +13,11 @@ The initial durable model uses:
 - redundant durable anchors;
 - explicit previous-known-good roots;
 - transaction descriptors;
-- a future authenticated integrity graph;\n- immutable object-version descriptors with native semantic identity and relation roots;\n- immutable typed relation records with explicit endpoints, semantic identity and version lineage;\n- namespace bindings projected from `Names` relations and native name objects, without making path strings fundamental.
+- a future authenticated integrity graph;
+- immutable object-version descriptors with native semantic identity and relation roots;
+- immutable typed relation records with explicit endpoints, semantic identity and version lineage;
+- namespace bindings projected from `Names` relations and native name objects, without making path strings fundamental.
+- native allocation extents and immutable allocation records with overlap/overflow rejection.
 
 ## Version-1 publication model
 
@@ -55,6 +59,11 @@ The Rust model now tests the state-transition rules above and includes an abstra
 - derivation of a next-generation anchor from a prepared transaction;
 - preservation of the previous known-good root;
 - rejection of stale and non-prepared transactions;
-- recovery staying on the old generation until a valid new anchor exists;\n- deterministic crash-cut simulation across candidate, transaction and anchor durability barriers;\n- versioned native object descriptors that require semantic identity and preserve explicit previous-version links;\n- typed native relation records that form the object graph and carry semantic identity directly;\n- namespace projection bindings where namespace, target and name remain native versionable objects.
+- recovery staying on the old generation until a valid new anchor exists;
+- deterministic crash-cut simulation across candidate, transaction and anchor durability barriers;
+- versioned native object descriptors that require semantic identity and preserve explicit previous-version links;
+- typed native relation records that form the object graph and carry semantic identity directly;
+- namespace projection bindings where namespace, target and name remain native versionable objects.
+- structural native allocation records with nonzero ownership, generation checks, block-zero rejection, overflow rejection and overlap detection.
 
-Cryptographic integrity verification, physical block I/O, real hardware durability barriers, allocator, object graph, device-level crash-fault injection, encryption, repair, snapshots and filesystem projections are **NOT IMPLEMENTED** and must not be reported as PASS.
+Cryptographic integrity verification, physical block I/O, real hardware durability barriers, a persistent free-space allocator, full object-graph persistence, device-level crash-fault injection, encryption, repair, snapshots and filesystem projections are **NOT IMPLEMENTED** and must not be reported as PASS.
