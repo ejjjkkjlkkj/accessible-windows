@@ -79,7 +79,7 @@ def build():
   'langs_size':80,'langs_ptr':88,'string_size':96,'string_ptr':104,
   'token':112,'temp_handle':120,'handle_cursor':128,'handles_remaining':136,
   'forms_ptr':144,'strings_ptr':152,'list_len':160,'ifr_next_ptr':168,'ifr_next_remaining':176,
-  'strings_first':184,'list_start':192,
+  'strings_first':184,'list_start':192,'global_remaining':200,
   'handles_static':0x100,'pkg_static':0x1100,
  }
  struct.pack_into('<IHH8B',data,L['db_guid'],
@@ -149,6 +149,8 @@ def build():
  c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x8b\x1a')
  c.label('direct_list_loop')
  c.emit(b'\x48\x83\xfb\x14'); c.rel32(b'\x0f\x82','fail_no_handle')
+ c.lea_rdx_data(L['global_remaining']); c.emit(b'\x48\x89\x1a')
+ c.lea_rdx_data(L['list_start']); c.emit(b'\x48\x89\x32')
  c.emit(b'\x8b\x46\x10\x83\xf8\x18'); c.rel32(b'\x0f\x82','fail_ifr')
  c.emit(b'\x48\x39\xd8'); c.rel32(b'\x0f\x87','fail_ifr')
  c.lea_rdx_data(L['list_len']); c.emit(b'\x89\x02')
@@ -183,6 +185,8 @@ def build():
  c.rel32(b'\xe9','forms_pkg')
 
  c.label('direct_list_next')
+ c.lea_rdx_data(L['list_start']); c.emit(b'\x48\x8b\x32')
+ c.lea_rdx_data(L['global_remaining']); c.emit(b'\x48\x8b\x1a')
  c.lea_rdx_data(L['list_len']); c.emit(b'\x8b\x02')
  c.emit(b'\x48\x01\xc6\x48\x29\xc3')
  c.emit(b'\x48\x85\xdb'); c.rel32(b'\x0f\x85','direct_list_loop')
@@ -192,7 +196,7 @@ def build():
  # r9=first IFR opcode, r10d=bytes available in verified Forms package.
  c.emit(b'\x4c\x8d\x4f\x04\x41\x89\xd2\x41\x83\xea\x04')
  c.label('ifr_loop')
- c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x82','fail_ifr')
+ c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x82','prompt_package_done')
  c.emit(b'\x41\x0f\xb6\x01')       # eax=OpCode
  c.emit(b'\x41\x0f\xb6\x49\x01\x83\xe1\x7f') # ecx=Length
  c.emit(b'\x83\xf9\x02'); c.rel32(b'\x0f\x82','fail_ifr')
@@ -367,7 +371,12 @@ def build():
  c.lea_rdx_data(L['ifr_next_ptr']); c.emit(b'\x4c\x8b\x0a')
  c.lea_rdx_data(L['ifr_next_remaining']); c.emit(b'\x44\x8b\x12')
  c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x83','ifr_loop')
- serial('string_fail')
+
+ c.label('prompt_package_done')
+ # This Forms package-list did not yield a resolvable prompt. Continue through
+ # the remaining exported HII package-lists rather than producing a false FAIL.
+ c.rel32(b'\xe9','direct_list_next')
+
  c.label('return_fail'); c.emit(b'\xb8\x01\x00\x00\x00')
  c.label('return')
  c.emit(b'\x48\x83\xc4\x68\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5f\x5e\x5d\x5b\xc3')
