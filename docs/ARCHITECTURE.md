@@ -22,7 +22,8 @@ The system carries verified human-interaction state through every privileged tra
 10. Native semantic object/graph representation shared by all modalities. **FOUNDATION IMPLEMENTED; renderers not implemented.**
 11. From-zero VFS and persistent storage foundation.
 12. Process model, native shell and recovery environment.
-13. Native cognitive-memory primitives with explicit class, version, provenance, retention and confidence. **MEMORY CONTRACT FOUNDATION IMPLEMENTED; cognition/learning not implemented.**
+13. Native cognitive-memory primitives with explicit class, version, provenance, retention and confidence. **MEMORY CONTRACT FOUNDATION IMPLEMENTED.**
+14. Native cognition intent pipeline: plan -> explicit capability authorization -> executor permit. **STRUCTURAL FOUNDATION IMPLEMENTED; reasoning/learning/action engines not implemented.**
 
 ## Authority invariant
 
@@ -45,4 +46,4 @@ Serial output is an engineering diagnostic path and does not satisfy the non-vis
 
 ## Current milestone
 
-This milestone defines contracts and compile-time structure. The native semantic object/edge invariants and the structural cognitive-memory record contract are implemented and unit-tested. Learning, retrieval, cognition/planning, persistent-memory storage integration, speech, braille rendering, visual projection, haptics, agent projection, memory management, scheduling, drivers and the complete native filesystem are not implemented.
+This milestone defines contracts and compile-time structure. The native semantic object/edge invariants and the structural cognitive-memory record contract are implemented and unit-tested. Learning, retrieval, reasoning engines, real action execution, persistent-memory storage integration, speech, braille rendering, visual projection, haptics, memory management, scheduling, drivers and the complete native filesystem are not implemented.

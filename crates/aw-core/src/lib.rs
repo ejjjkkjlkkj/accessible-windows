@@ -686,6 +686,188 @@ impl CapabilityGrantV1 {
     }
 }
 
+
+/// Native identity for a cognitive intent.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub struct CognitiveIntentId(u64);
+
+impl CognitiveIntentId {
+    /// Reserved invalid identity.
+    pub const ZERO: Self = Self(0);
+
+    /// Creates an intent identity.
+    #[must_use]
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// Returns true for the reserved invalid identity.
+    #[must_use]
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// Validation errors for a native cognitive intent.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CognitiveIntentError {
+    /// Every intent requires an identity.
+    MissingId,
+    /// Goal semantics are mandatory.
+    MissingGoal,
+    /// A concrete semantic target is mandatory.
+    MissingTarget,
+    /// Planning requires explicit memory/evidence provenance.
+    MissingEvidence,
+    /// An intent must request at least one explicit right.
+    MissingRequestedRights,
+    /// Generation zero is reserved.
+    InvalidGeneration,
+    /// Only the planner domain creates cognitive intents.
+    PlannerDomainRequired,
+}
+
+/// Native cognitive intent.
+///
+/// An intent is a proposal, never an authority token. It may request a
+/// privileged action, but it cannot execute that action by itself.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CognitiveIntentV1 {
+    /// Stable intent identity.
+    pub id: CognitiveIntentId,
+    /// Semantic description of the intended goal.
+    pub goal: SemanticObjectId,
+    /// Concrete semantic target of the proposed action.
+    pub target: SemanticObjectId,
+    /// Memory/evidence supporting the proposal.
+    pub evidence: MemoryRecordId,
+    /// Rights the proposal would require if authorized.
+    pub requested_rights: u64,
+    /// System generation in which the intent was produced.
+    pub generation: u64,
+    /// Domain that produced the plan.
+    pub planner: AuthorityDomain,
+}
+
+impl CognitiveIntentV1 {
+    /// Creates a native cognitive intent.
+    #[must_use]
+    pub const fn new(
+        id: CognitiveIntentId,
+        goal: SemanticObjectId,
+        target: SemanticObjectId,
+        evidence: MemoryRecordId,
+        requested_rights: u64,
+        generation: u64,
+        planner: AuthorityDomain,
+    ) -> Self {
+        Self {
+            id,
+            goal,
+            target,
+            evidence,
+            requested_rights,
+            generation,
+            planner,
+        }
+    }
+
+    /// Validates cognitive-intent invariants.
+    pub const fn validate(&self) -> Result<(), CognitiveIntentError> {
+        if self.id.is_zero() {
+            return Err(CognitiveIntentError::MissingId);
+        }
+        if self.goal.is_zero() {
+            return Err(CognitiveIntentError::MissingGoal);
+        }
+        if self.target.is_zero() {
+            return Err(CognitiveIntentError::MissingTarget);
+        }
+        if self.evidence.is_zero() {
+            return Err(CognitiveIntentError::MissingEvidence);
+        }
+        if self.requested_rights == 0 {
+            return Err(CognitiveIntentError::MissingRequestedRights);
+        }
+        if self.generation == 0 {
+            return Err(CognitiveIntentError::InvalidGeneration);
+        }
+        if !matches!(self.planner, AuthorityDomain::AgentPlanner) {
+            return Err(CognitiveIntentError::PlannerDomainRequired);
+        }
+        Ok(())
+    }
+}
+
+/// Errors while converting a plan into an executor permit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExecutionAuthorizationError {
+    /// Intent structure is invalid.
+    InvalidIntent(CognitiveIntentError),
+    /// Capability grant structure is invalid.
+    InvalidGrant(CapabilityGrantError),
+    /// The capability is not assigned to the isolated agent executor.
+    GrantNotForAgentExecutor,
+    /// Grant target, rights or lifetime does not authorize the intent.
+    GrantDoesNotAuthorizeIntent,
+}
+
+/// Capability-checked permit consumed by a future executor.
+///
+/// The permit contains no ambient authority and cannot exist unless
+/// `authorize_intent` succeeds.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExecutionPermitV1 {
+    /// Authorized intent.
+    pub intent_id: CognitiveIntentId,
+    /// Capability that authorized this permit.
+    pub capability_id: CapabilityId,
+    /// Execution domain.
+    pub executor: AuthorityDomain,
+    /// Exact semantic target.
+    pub target: SemanticObjectId,
+    /// Exact rights authorized.
+    pub rights: u64,
+    /// Generation for which authorization was evaluated.
+    pub generation: u64,
+}
+
+/// Converts a cognitive proposal into an executor permit only when explicit
+/// capability authority covers the exact target, rights and generation.
+pub const fn authorize_intent(
+    intent: &CognitiveIntentV1,
+    grant: &CapabilityGrantV1,
+) -> Result<ExecutionPermitV1, ExecutionAuthorizationError> {
+    if let Err(error) = intent.validate() {
+        return Err(ExecutionAuthorizationError::InvalidIntent(error));
+    }
+    if let Err(error) = grant.validate() {
+        return Err(ExecutionAuthorizationError::InvalidGrant(error));
+    }
+    if !matches!(grant.subject, AuthorityDomain::AgentExecutor) {
+        return Err(ExecutionAuthorizationError::GrantNotForAgentExecutor);
+    }
+    if !grant.authorizes(
+        intent.target,
+        intent.requested_rights,
+        intent.generation,
+    ) {
+        return Err(ExecutionAuthorizationError::GrantDoesNotAuthorizeIntent);
+    }
+
+    Ok(ExecutionPermitV1 {
+        intent_id: intent.id,
+        capability_id: grant.id,
+        executor: AuthorityDomain::AgentExecutor,
+        target: intent.target,
+        rights: intent.requested_rights,
+        generation: intent.generation,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -739,6 +921,71 @@ mod tests {
         assert_ne!(
             AuthorityDomain::SystemSovereign,
             AuthorityDomain::KernelAuthority
+        );
+    }
+
+    fn cognitive_intent(requested_rights: u64) -> CognitiveIntentV1 {
+        CognitiveIntentV1::new(
+            CognitiveIntentId::new(1),
+            SemanticObjectId::new(600),
+            SemanticObjectId::new(500),
+            MemoryRecordId::new(1),
+            requested_rights,
+            15,
+            AuthorityDomain::AgentPlanner,
+        )
+    }
+
+    #[test]
+    fn cognitive_intent_requires_memory_evidence() {
+        let intent = CognitiveIntentV1::new(
+            CognitiveIntentId::new(1),
+            SemanticObjectId::new(600),
+            SemanticObjectId::new(500),
+            MemoryRecordId::ZERO,
+            capability_right::READ,
+            15,
+            AuthorityDomain::AgentPlanner,
+        );
+        assert_eq!(intent.validate(), Err(CognitiveIntentError::MissingEvidence));
+    }
+
+    #[test]
+    fn cognitive_intent_may_request_mutation_without_owning_authority() {
+        let intent = cognitive_intent(capability_right::WRITE);
+        assert_eq!(intent.validate(), Ok(()));
+
+        let read_only_grant =
+            scoped_capability(AuthorityDomain::AgentExecutor, capability_right::READ);
+        assert_eq!(
+            authorize_intent(&intent, &read_only_grant),
+            Err(ExecutionAuthorizationError::GrantDoesNotAuthorizeIntent)
+        );
+    }
+
+    #[test]
+    fn cognitive_execution_requires_exact_executor_capability() {
+        let intent = cognitive_intent(capability_right::INVOKE);
+        let executor_grant =
+            scoped_capability(AuthorityDomain::AgentExecutor, capability_right::INVOKE);
+
+        let permit = authorize_intent(&intent, &executor_grant).expect("authorized intent");
+        assert_eq!(permit.intent_id, intent.id);
+        assert_eq!(permit.capability_id, executor_grant.id);
+        assert_eq!(permit.executor, AuthorityDomain::AgentExecutor);
+        assert_eq!(permit.target, intent.target);
+        assert_eq!(permit.rights, capability_right::INVOKE);
+        assert_eq!(permit.generation, intent.generation);
+    }
+
+    #[test]
+    fn cognitive_execution_rejects_non_executor_grant() {
+        let intent = cognitive_intent(capability_right::READ);
+        let human_grant =
+            scoped_capability(AuthorityDomain::SystemSovereign, capability_right::READ);
+        assert_eq!(
+            authorize_intent(&intent, &human_grant),
+            Err(ExecutionAuthorizationError::GrantNotForAgentExecutor)
         );
     }
 
