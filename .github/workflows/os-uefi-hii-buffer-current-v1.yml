@@ -59,6 +59,8 @@ jobs:
               "c.emit(b'\\xff\\x51\\x20\\x49\\x89\\xc2')",
               "hex_utf16_nibble",
               "config_boundary_scan",
+              "nested UEFI protocol calls retain Microsoft x64 / UEFI 16-byte stack alignment",
+              "L['string_ptr']",
               "HII_CONFIG_ROUTING_PROTOCOL=PASS",
               "HII_HANDLE_LIST=PASS",
               "HII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS",
@@ -75,6 +77,8 @@ jobs:
           assert "c.emit(b'\\xff\\x51\\x10')" not in src
           # Direct ConfigAccess ExtractConfig (call [rcx]) must remain absent.
           assert "c.emit(b'\\xff\\x11')" not in src
+          # Never wrap read_buffer_current in PUSH/POP: it performs UEFI calls.
+          assert "c.emit(b'\\x56'); c.rel32(b'\\xe8','read_buffer_current')" not in src
           proof=set((root/'os-uefi-hii-buffer-current-v1.labproof').read_text().splitlines())
           for line in [
               'storage-opcode = 0x24 EFI_IFR_VARSTORE',
@@ -232,6 +236,23 @@ jobs:
                   assert w in {1,2,4,8},w
                   assert vinfo_v+w <= size_v,(vinfo_v,w,size_v)
                   current=int.from_bytes(bytes.fromhex(raw8)[:w],'little')
+                  expected={}
+                  for line in Path('boot/uefi-hii-varstore-def-v1/os-uefi-hii-varstore-def-v1.labproof').read_text().splitlines():
+                      if line.startswith('proof-') and ' = ' in line:
+                          k,v=line[len('proof-'):].split(' = ',1)
+                          expected[k]=v
+                  actual={
+                      'question-text':text,
+                      'question-id':str(qid_v),
+                      'varstore-id':str(vsid_v),
+                      'varstore-info':str(vinfo_v),
+                      'varstore-opcode-hex':op_s,
+                      'varstore-size':str(size_v),
+                      'varstore-guid-raw-hex':guid_s,
+                  }
+                  for k,v in actual.items():
+                      assert expected.get(k)==v,(k,v,expected.get(k))
+                  print('HII_BUFFER_CURRENT_IDENTITY_MATCH=PASS')
                   root.joinpath('current.txt').write_text(
                       f'question-text = {text}\n'
                       f'question-id = {qid_v}\n'
@@ -335,6 +356,7 @@ jobs:
               f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
               f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
               "proof-buffer-current-value = PASS\n"
+              "proof-buffer-current-identity-match = PASS\n"
               "proof-read-service = HII Config Routing ExportConfig plus ConfigToBlock\n"
               f"proof-question-text = {vals['question-text']}\n"
               f"proof-question-id = {vals['question-id']}\n"
