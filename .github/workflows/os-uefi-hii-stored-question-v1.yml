@@ -37,9 +37,9 @@ jobs:
           for line in [
               'proof = PASS',
               'proof-question-metadata = PASS',
-              'proof-current-value-read = false
-            echo 'nonzero-varstore-id = PASS'',
+              'proof-current-value-read = false',
               'proof-varstore-write = false',
+              'proof-setting-mutation = false',
           ]:
               assert line in have,line
           print('HII_STORED_QUESTION_DEPENDENCY=PASS')
