@@ -57,8 +57,9 @@ jobs:
               'ACCESSIBILITY_REPEAT_KEY=WAIT_R',
               'ACCESSIBILITY_REPEAT_KEY=PASS',
               "c.label('repeat_read_key')",
-              "c.emit(b'\\x48\\x8b\\x6a\\x30')",
-              "c.emit(b'\\x48\\x8b\\x45\\x08\\xff\\xd0\\x48\\x85\\xc0')",
+              "'conin_ptr':504",
+              "c.lea_rax_data(L['conin_ptr']); c.emit(b'\\x48\\x8b\\x08')",
+              "c.emit(b'\\x48\\x8b\\x41\\x08\\xff\\xd0\\x48\\x85\\xc0')",
               "'--wait-repeat'",
               "CURRENT_OPTION_SPEECH_HDA=PASS",
           ]:
