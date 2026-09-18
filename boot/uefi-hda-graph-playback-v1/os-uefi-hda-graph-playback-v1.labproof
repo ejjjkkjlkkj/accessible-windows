@@ -1,0 +1,18 @@
+OS-UEFI-HDA-GRAPH-PLAYBACK-V1
+proof = PENDING_CI
+branch = os
+scope = graph-routed freestanding UEFI HDA DMA playback
+language = C
+uefi-framework = none
+edk2 = none
+compiler-role = translation-only
+graph-source = live runtime HDA topology
+selector-apply-readback = required
+output-path-configuration = required
+dma-allocation = UEFI AllocatePages below 4GiB
+stream-format = 48kHz s16 stereo
+pcm-source = runtime first-party generated square-wave witness
+LPIB-progress = required
+captured-waveform = required
+physical-ASUS-M1603QA-topology = not-established
+physical-ASUS-M1603QA-speech = not-established
