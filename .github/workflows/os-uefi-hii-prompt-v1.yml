@@ -37,7 +37,7 @@ jobs:
           for line in [
               'proof = PASS',
               'proof-HII-string-protocol = PASS',
-              'proof-IFR-prompt-token = PASS',
+              'proof-IFR-title-token = PASS',
               'proof-title-resolution = PASS',
           ]:
               assert line in lines,line
@@ -176,7 +176,7 @@ jobs:
                   prompt=m.group(1).decode('ascii','replace').strip()
                   if not prompt:
                       raise SystemExit('resolved prompt is empty')
-                  Path('boot/uefi-hii-prompt-v1/prompt.txt').write_text(title+'\n')
+                  Path('boot/uefi-hii-prompt-v1/prompt.txt').write_text(prompt+'\n')
                   print('HII_RESOLVED_PROMPT='+prompt)
                   print('UEFI_HII_PROMPT_RUNTIME=PASS')
                   break
@@ -197,7 +197,7 @@ jobs:
           root=boot/uefi-hii-prompt-v1
           sha256sum "$root/BOOTX64.EFI" "$root/prompt.serial" "$root/prompt.txt" > "$root/evidence.sha256"
           {
-            echo 'OS-UEFI-HII-TITLE-V1'
+            echo 'OS-UEFI-HII-PROMPT-V1'
             echo 'firmware = OVMF'
             echo 'machine = q35'
             echo 'HII-Database = PASS'
