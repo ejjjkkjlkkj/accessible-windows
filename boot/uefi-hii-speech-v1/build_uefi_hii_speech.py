@@ -207,7 +207,7 @@ def build():
  # storage. Avoid the observed sizing/fetch race before native HDA work.
  c.lea_rdx_data(L['handles_size'])
  c.emit(b'\x48\xc7\x02'+struct.pack('<I',0x1000))
- c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')
+ c.emit(b'\x4c\x89\xe1\xba\x02\x00\x00\x00\x45\x31\xc0')
  c.lea_r9_data(L['handles_size'])
  c.lea_rax_data(L['handles_static']); c.emit(b'\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
