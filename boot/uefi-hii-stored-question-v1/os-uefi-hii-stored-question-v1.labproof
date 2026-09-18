@@ -23,4 +23,4 @@ firmware-setting-mutation = forbidden
 claim = success establishes a real resolvable ONE_OF question whose IFR Question Header names a nonzero VarStoreId
 claim = success does not establish VarStore definition current value or any configuration mutation
 proof = PENDING_CI
-revalidation-request = 2026-09-18T22:20+02:00
+revalidation-request = 2026-09-18T22:23+02:00
