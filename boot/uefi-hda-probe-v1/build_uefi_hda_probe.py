@@ -106,7 +106,7 @@ def build():
 
     c.label("scan_next")
     c.emit(b"\x41\xff\xc4")
-    c.emit(b"\x41\x81\xfc\x00\x01\x00\x00")
+    c.emit(b"\x41\x81\xfc\x00\x00\x01\x00")  # 65536 bus/device/function tuples in segment 0
     c.rel32(b"\x0f\x82","scan")
     c.rel32(b"\xe9","fail_no_hda")
 
@@ -131,17 +131,22 @@ def build():
     c.emit(b"\x89\xc1")
     c.emit(b"\x83\xe1\x06")
     c.emit(b"\x83\xf9\x04")
-    c.rel32(b"\x0f\x85","bar_low")
+    c.rel32(b"\x0f\x84","bar_64")
+    c.emit(b"\x85\xc9")
+    c.rel32(b"\x0f\x85","fail_bad_bar")
+    c.rel32(b"\xe9","bar_low")
+
+    c.label("bar_64")
     c.emit(b"\x44\x89\xe8")
     c.emit(b"\x83\xc8\x14")
     c.rel32(b"\xe8","pci_read32")
-    c.emit(b"\x85\xc0")
-    c.rel32(b"\x0f\x85","fail_bad_bar")
+    c.emit(b"\x48\xc1\xe0\x20")
+    c.emit(b"\x49\x09\xc6")
 
     c.label("bar_low")
-    c.emit(b"\x44\x89\xf0")
-    c.emit(b"\x25\xf0\xff\xff\xff")
-    c.emit(b"\x85\xc0")
+    c.emit(b"\x4c\x89\xf0")
+    c.emit(b"\x48\x83\xe0\xf0")
+    c.emit(b"\x48\x85\xc0")
     c.rel32(b"\x0f\x84","fail_bad_bar")
     c.emit(b"\x48\x89\xc3")
 
