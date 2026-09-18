@@ -40,4 +40,5 @@ firmware-setting-mutation = forbidden
 selected-option-speech = not-established-in-this-stage
 claim = success establishes that one native pre-OS UEFI execution reads a live Buffer-Storage ONE_OF current value, binds it to the direct matching ONE_OF_OPTION, resolves that exact option StringId in the exact Strings package/language that resolved the question, and emits the currently selected option text
 claim = success does not establish audible speech of that current option; native speech remains a separate gate
+revalidation-request = abi-v2-dependencies-restored
 proof = PENDING_CI
