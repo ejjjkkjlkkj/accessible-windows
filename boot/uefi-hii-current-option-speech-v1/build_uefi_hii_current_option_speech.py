@@ -330,11 +330,15 @@ def build():
  zero_qword(L['forms_ptr']); zero_qword(L['strings_ptr'])
  c.emit(b'\x48\x8d\x7e\x14\x89\xc1\x83\xe9\x14')
  c.label('direct_pkg_loop')
- c.emit(b'\x83\xf9\x04'); c.rel32(b'\x0f\x82','fail_ifr')
+ # The enclosing package-list length is already validated against the exported
+ # database. If one child package has a truncated/invalid header, abandon only
+ # this package list and continue global HII discovery instead of converting
+ # unrelated later firmware package lists into a global IFR failure.
+ c.emit(b'\x83\xf9\x04'); c.rel32(b'\x0f\x82','direct_list_next')
  c.emit(b'\x8b\x07\x89\xc2\x81\xe2\xff\xff\xff\x00')
  c.emit(b'\x89\xc5\xc1\xed\x18')
- c.emit(b'\x83\xfa\x04'); c.rel32(b'\x0f\x82','fail_ifr')
- c.emit(b'\x39\xca'); c.rel32(b'\x0f\x87','fail_ifr')
+ c.emit(b'\x83\xfa\x04'); c.rel32(b'\x0f\x82','direct_list_next')
+ c.emit(b'\x39\xca'); c.rel32(b'\x0f\x87','direct_list_next')
  c.emit(b'\x81\xfd\xdf\x00\x00\x00'); c.rel32(b'\x0f\x84','direct_list_done')
  c.emit(b'\x83\xfd\x02'); c.rel32(b'\x0f\x85','direct_not_forms')
  c.lea_rax_data(L['forms_ptr']); c.emit(b'\x48\x83\x38\x00'); c.rel32(b'\x0f\x85','direct_not_forms')
