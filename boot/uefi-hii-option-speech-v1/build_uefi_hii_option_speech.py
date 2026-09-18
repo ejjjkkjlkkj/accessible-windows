@@ -90,6 +90,16 @@ LETTER_UNITS={
  'x':('i','k','s'),
  'y':('i','g','r','e','k'),
  'z':('z','e','d'),
+ '0':('z','e','r','o'),
+ '1':('u','n'),
+ '2':('d','eu'),
+ '3':('t','r','w','a'),
+ '4':('k','a','t','r'),
+ '5':('s','i','n','k'),
+ '6':('s','i','s'),
+ '7':('s','e','t'),
+ '8':('u','i','t'),
+ '9':('n','eu','f'),
 }
 TEXT_UNITS=tuple(sorted({name for sequence in LETTER_UNITS.values() for name in sequence}))
 UNIT_LAYOUT: dict[str, tuple[int,int]] = {}
