@@ -16,6 +16,8 @@ MARKS={
  'prefix': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nPROMPT_TEXT=',
  'suffix': b'\r\nHII_PROMPT_STRING=PASS\r\nSTATUS=PASS\r\nEND\r\n',
  'no_protocol': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_PROTOCOL_NOT_FOUND\r\nEND\r\n',
+ 'list_size_fail': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_SIZE_QUERY_FAILED\r\nEND\r\n',
+ 'list_fetch_fail': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_FAILED\r\nEND\r\n',
  'no_handle': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_FORMS_HANDLE_NOT_FOUND\r\nEND\r\n',
  'alloc': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=POOL_ALLOC_FAILED\r\nEND\r\n',
  'export': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_HANDLE_EXPORT_FAILED\r\nEND\r\n',
@@ -113,14 +115,14 @@ def build():
  c.lea_rax_data(L['temp_handle']); c.emit(b'\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
  c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x08'); c.rel32(b'\x0f\x82','fail_no_handle')
+ c.emit(b'\x48\x83\xfb\x08'); c.rel32(b'\x0f\x82','fail_list_size')
 
  alloc(True,L['handles_ptr'])
  c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')
  c.lea_r9_data(L['handles_size'])
  c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_no_handle')
+ c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_list_fetch')
 
  c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02')
  c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x89\x02')
@@ -252,6 +254,8 @@ def build():
  c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
 
  c.label('fail_protocol'); serial('no_protocol'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_list_size'); serial('list_size_fail'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_list_fetch'); serial('list_fetch_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_no_handle'); serial('no_handle'); c.rel32(b'\xe9','return_fail')
  c.label('fail_alloc'); serial('alloc'); c.rel32(b'\xe9','return_fail')
  c.label('fail_export'); serial('export'); c.rel32(b'\xe9','return_fail')
