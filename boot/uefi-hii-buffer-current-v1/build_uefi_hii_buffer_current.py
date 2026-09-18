@@ -40,8 +40,8 @@ MARKS={
  'vs_match': b'\r\nVARSTORE_DEFINITION_MATCH=PASS\r\nEND\r\n',
  'routing': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nHII_CONFIG_ROUTING_PROTOCOL=PASS\r\nEND\r\n',
  'handle_list': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nHII_HANDLE_LIST=PASS\r\nEND\r\n',
- 'cfg_access': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nHII_CONFIG_ACCESS_PROTOCOL=PASS\r\nEND\r\n',
- 'extract': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nCONFIG_ACCESS_EXTRACT=PASS\r\nEND\r\n',
+ 'cfg_access': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nHII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS\r\nEND\r\n',
+ 'extract': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nCONFIG_ROUTING_EXPORT_CONFIG=PASS\r\nEND\r\n',
  'to_block': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nCONFIG_TO_BLOCK=PASS\r\nEND\r\n',
  'cur_width': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nCURRENT_VALUE_BYTES_HEX=',
  'cur_raw': b'\r\nCURRENT_VALUE_RAW8_HEX=',
@@ -104,7 +104,7 @@ def build():
   'varstore_opcode':216,'varstore_size':218,'varstore_attrs':220,'varstore_guid':224,
   'cfgacc_guid':240,'routing_guid':256,'routing_ptr':272,'config_ptr':280,
   'driver_handle':288,'progress':296,'results':304,'match_pkg_size':312,
-  'matched_hii_handle':320,'block_size':328,'current_width':336,'current_raw':344,
+  'matched_hii_handle':320,'block_size':328,'current_width':336,'current_raw':344,'config_boundary':352,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -524,7 +524,9 @@ def build():
  c.label('varstore_not_found'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
 
  c.label('read_buffer_current')
- # Buffer Storage (0x24) must be read through HII Config Access, never GetVariable.
+ # Buffer Storage (0x24) is read through EFI_HII_CONFIG_ROUTING_PROTOCOL.
+ # UEFI requires external applications to use Config Routing rather than
+ # invoking a driver's ConfigAccess interface directly.
  c.lea_rax_data(L['varstore_opcode']); c.emit(b'\x80\x38\x24'); c.rel32(b'\x0f\x85','buffer_current_not_found')
  # ONE_OF numeric width: Flags&3 => 1/2/4/8.
  c.lea_rax_data(L['oneof_flags']); c.emit(b'\x0f\xb6\x00\x83\xe0\x03\x89\xc1')
@@ -534,68 +536,77 @@ def build():
  c.lea_rdx_data(L['varstore_info']); c.emit(b'\x0f\xb7\x12\x01\xc2')
  c.lea_rax_data(L['varstore_size']); c.emit(b'\x0f\xb7\x00\x39\xc2'); c.rel32(b'\x0f\x87','buffer_current_not_found')
 
- # Match the current exported PackageListGuid+PackageLength back to an HII handle.
- c.lea_rax_data(L['handles_static']); c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x89\x02')
- c.lea_rax_data(L['handles_size']); c.emit(b'\x48\x8b\x00'); c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x89\x02')
- c.label('buffer_handle_loop')
- c.lea_rax_data(L['handles_remaining']); c.emit(b'\x48\x8b\x00\x48\x83\xf8\x08'); c.rel32(b'\x0f\x82','buffer_current_not_found')
- c.lea_rax_data(L['handle_cursor']); c.emit(b'\x48\x8b\x00\x48\x8b\x10')
- c.lea_rdx_data(L['matched_hii_handle']); c.emit(b'\x48\x89\x02')
- c.lea_rdx_data(L['match_pkg_size']); c.emit(b'\x48\xc7\x02\x00\x00\x10\x00')
- c.emit(b'\x4c\x89\xe1')
- c.lea_rdx_data(L['matched_hii_handle']); c.emit(b'\x48\x8b\x12')
- c.lea_r8_data(L['match_pkg_size']); c.lea_r9_data(L['match_pkg_static'])
- c.emit(b'\x41\xff\x54\x24\x20')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','buffer_handle_next')
- c.lea_rax_data(L['match_pkg_size']); c.emit(b'\x48\x83\x38\x14'); c.rel32(b'\x0f\x82','buffer_handle_next')
- c.lea_rdx_data(L['list_start']); c.emit(b'\x48\x8b\x32'); c.lea_rdi_data(L['match_pkg_static'])
- c.emit(b'\x48\x8b\x06\x48\x3b\x07'); c.rel32(b'\x0f\x85','buffer_handle_next')
- c.emit(b'\x48\x8b\x46\x08\x48\x3b\x47\x08'); c.rel32(b'\x0f\x85','buffer_handle_next')
- c.emit(b'\x8b\x46\x10\x3b\x47\x10'); c.rel32(b'\x0f\x84','buffer_handle_match')
- c.label('buffer_handle_next')
- c.lea_rax_data(L['handle_cursor']); c.emit(b'\x48\x83\x00\x08')
- c.lea_rax_data(L['handles_remaining']); c.emit(b'\x48\x83\x28\x08')
- c.rel32(b'\xe9','buffer_handle_loop')
-
- c.label('buffer_handle_match')
- # HII Database.GetPackageListHandle(HiiHandle,&DriverHandle), table offset 0x50.
- c.emit(b'\x4c\x89\xe1'); c.lea_rdx_data(L['matched_hii_handle']); c.emit(b'\x48\x8b\x12'); c.lea_r8_data(L['driver_handle'])
- c.emit(b'\x41\xff\x54\x24\x50')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','buffer_handle_next')
- # BootServices.HandleProtocol(DriverHandle,ConfigAccessGuid,&Interface), offset 0x98.
- c.lea_rax_data(L['driver_handle']); c.emit(b'\x48\x8b\x08')
- c.lea_rdx_data(L['cfgacc_guid']); c.lea_r8_data(L['config_ptr'])
- c.emit(b'\x41\xff\x97\x98\x00\x00\x00')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','buffer_handle_next')
- c.lea_rax_data(L['config_ptr']); c.emit(b'\x48\x83\x38\x00'); c.rel32(b'\x0f\x84','buffer_handle_next')
- serial('cfg_access')
-
- # ExtractConfig(NULL) is defined to return all settings abstracted by this driver.
- c.lea_rdx_data(L['progress']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00')
+ # ExportConfig(This,&Results), routing method +0x08, returns the current
+ # configuration for the entirety of the HII database.
  c.lea_rdx_data(L['results']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00')
- c.lea_rax_data(L['config_ptr']); c.emit(b'\x48\x8b\x08')
- c.emit(b'\x31\xd2'); c.lea_r8_data(L['progress']); c.lea_r9_data(L['results'])
- c.emit(b'\xff\x11')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','buffer_handle_next')
- c.lea_rax_data(L['results']); c.emit(b'\x48\x83\x38\x00'); c.rel32(b'\x0f\x84','buffer_handle_next')
- serial('extract')
-
- # ConfigToBlock(Results,current_data,&BlockSize,&Progress) maps OFFSET/WIDTH/VALUE
- # pairs into bytes without modifying firmware. Protocol method offset 0x20.
- c.lea_rax_data(L['varstore_size']); c.emit(b'\x0f\xb7\x00'); c.lea_rdx_data(L['block_size']); c.emit(b'\x48\x89\x02')
  c.lea_rax_data(L['routing_ptr']); c.emit(b'\x48\x8b\x08')
- c.lea_rdx_data(L['results']); c.emit(b'\x48\x8b\x12')
+ c.lea_rdx_data(L['results']); c.emit(b'\xff\x51\x08')
+ c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','buffer_current_not_found')
+ c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x30\x48\x85\xf6'); c.rel32(b'\x0f\x84','buffer_current_not_found')
+ serial('cfg_access'); serial('extract')
+
+ # Find a UTF-16 ConfigHdr whose GUID= field exactly matches the raw 16-byte
+ # EFI_IFR_VARSTORE GUID. Hex comparison is case-insensitive.
+ c.label('config_search')
+ c.emit(b'\x66\x83\x3e\x00'); c.rel32(b'\x0f\x84','buffer_export_exhausted')
+ c.emit(b'\x66\x81\x3e\x47\x00'); c.rel32(b'\x0f\x85','config_search_next')
+ c.emit(b'\x66\x81\x7e\x02\x55\x00'); c.rel32(b'\x0f\x85','config_search_next')
+ c.emit(b'\x66\x81\x7e\x04\x49\x00'); c.rel32(b'\x0f\x85','config_search_next')
+ c.emit(b'\x66\x81\x7e\x06\x44\x00'); c.rel32(b'\x0f\x85','config_search_next')
+ c.emit(b'\x66\x81\x7e\x08\x3d\x00'); c.rel32(b'\x0f\x85','config_search_next')
+ c.emit(b'\x48\x8d\x7e\x0a')
+ c.lea_rax_data(L['varstore_guid']); c.emit(b'\x48\x89\xc3')
+ c.emit(b'\xb9\x10\x00\x00\x00')
+ c.label('config_guid_loop')
+ c.emit(b'\x44\x8a\x13')
+ c.emit(b'\x0f\xb7\x07'); c.rel32(b'\xe8','hex_utf16_nibble')
+ c.emit(b'\x3c\xff'); c.rel32(b'\x0f\x84','config_guid_mismatch')
+ c.emit(b'\xc0\xe0\x04\x41\x88\xc1')
+ c.emit(b'\x0f\xb7\x47\x02'); c.rel32(b'\xe8','hex_utf16_nibble')
+ c.emit(b'\x3c\xff'); c.rel32(b'\x0f\x84','config_guid_mismatch')
+ c.emit(b'\x44\x08\xc8\x44\x38\xd0'); c.rel32(b'\x0f\x85','config_guid_mismatch')
+ c.emit(b'\x48\xff\xc3\x48\x83\xc7\x04\xff\xc9'); c.rel32(b'\x0f\x85','config_guid_loop')
+
+ # Save the selected current ConfigResp start and temporarily terminate it at
+ # the next &GUID= boundary so ConfigToBlock sees exactly one ConfigResp.
+ c.lea_rdx_data(L['config_ptr']); c.emit(b'\x48\x89\x32')
+ c.emit(b'\x48\x8d\x7e\x02')
+ c.label('config_boundary_scan')
+ c.emit(b'\x66\x8b\x07\x66\x85\xc0'); c.rel32(b'\x0f\x84','config_boundary_end')
+ c.emit(b'\x66\x83\xf8\x26'); c.rel32(b'\x0f\x85','config_boundary_next')
+ c.emit(b'\x66\x81\x7f\x02\x47\x00'); c.rel32(b'\x0f\x85','config_boundary_next')
+ c.emit(b'\x66\x81\x7f\x04\x55\x00'); c.rel32(b'\x0f\x85','config_boundary_next')
+ c.emit(b'\x66\x81\x7f\x06\x49\x00'); c.rel32(b'\x0f\x85','config_boundary_next')
+ c.emit(b'\x66\x81\x7f\x08\x44\x00'); c.rel32(b'\x0f\x85','config_boundary_next')
+ c.emit(b'\x66\x81\x7f\x0a\x3d\x00'); c.rel32(b'\x0f\x85','config_boundary_next')
+ c.lea_rdx_data(L['config_boundary']); c.emit(b'\x48\x89\x3a')
+ c.emit(b'\x66\xc7\x07\x00\x00'); c.rel32(b'\xe9','config_to_block_call')
+ c.label('config_boundary_next'); c.emit(b'\x48\x83\xc7\x02'); c.rel32(b'\xe9','config_boundary_scan')
+ c.label('config_boundary_end'); c.lea_rdx_data(L['config_boundary']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00')
+
+ c.label('config_to_block_call')
+ c.lea_rax_data(L['varstore_size']); c.emit(b'\x0f\xb7\x00'); c.lea_rdx_data(L['block_size']); c.emit(b'\x48\x89\x02')
+ c.lea_rdx_data(L['progress']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00')
+ c.lea_rax_data(L['routing_ptr']); c.emit(b'\x48\x8b\x08')
+ c.lea_rdx_data(L['config_ptr']); c.emit(b'\x48\x8b\x12')
  c.lea_r8_data(L['current_data']); c.lea_r9_data(L['block_size'])
  c.lea_rax_data(L['progress']); c.emit(b'\x48\x89\x44\x24\x20')
- c.emit(b'\xff\x51\x20')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','buffer_results_fail')
- serial('to_block')
+ c.emit(b'\xff\x51\x20\x49\x89\xc2')
+ # Restore the allocated ExportConfig string before any next candidate/free.
+ c.lea_rax_data(L['config_boundary']); c.emit(b'\x48\x8b\x10\x48\x85\xd2'); c.rel32(b'\x0f\x84','config_restore_done')
+ c.emit(b'\x66\xc7\x02\x26\x00')
+ c.label('config_restore_done')
+ c.emit(b'\x4d\x85\xd2'); c.rel32(b'\x0f\x84','config_to_block_ok')
+ # A same-GUID ConfigResp can belong to another storage name. Continue safely.
+ c.lea_rax_data(L['config_boundary']); c.emit(b'\x48\x8b\x30\x48\x85\xf6'); c.rel32(b'\x0f\x84','buffer_export_exhausted')
+ c.emit(b'\x48\x83\xc6\x02'); c.rel32(b'\xe9','config_search')
 
+ c.label('config_to_block_ok'); serial('to_block')
  # Require the mapped block to cover the selected question field.
  c.lea_rax_data(L['block_size']); c.emit(b'\x48\x8b\x00')
  c.lea_rdx_data(L['varstore_info']); c.emit(b'\x0f\xb7\x12')
  c.lea_rcx_data(L['current_width']); c.emit(b'\x0f\xb6\x09\x48\x01\xca')
- c.emit(b'\x48\x39\xd0'); c.rel32(b'\x0f\x82','buffer_results_fail')
+ c.emit(b'\x48\x39\xd0'); c.rel32(b'\x0f\x82','buffer_export_exhausted')
  c.lea_rsi_data(L['current_data']); c.lea_rax_data(L['varstore_info']); c.emit(b'\x0f\xb7\x00\x48\x01\xc6')
  c.lea_rdx_data(L['current_raw']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00\xc7\x42\x04\x00\x00\x00\x00')
  c.lea_rax_data(L['current_width']); c.emit(b'\x0f\xb6\x08')
@@ -603,10 +614,12 @@ def build():
  c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','buffer_copy_done')
  c.emit(b'\x8a\x06\x88\x02\x48\xff\xc6\x48\xff\xc2\xff\xc9'); c.rel32(b'\xe9','buffer_copy_loop')
  c.label('buffer_copy_done')
- # Free the ExtractConfig-owned Results pool after copying.
  c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x41\xff\x57\x48')
  c.emit(b'\x31\xc0\xc3')
- c.label('buffer_results_fail')
+
+ c.label('config_guid_mismatch')
+ c.label('config_search_next'); c.emit(b'\x48\x83\xc6\x02'); c.rel32(b'\xe9','config_search')
+ c.label('buffer_export_exhausted')
  c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','buffer_current_not_found')
  c.emit(b'\x41\xff\x57\x48')
  c.label('buffer_current_not_found'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
@@ -648,6 +661,18 @@ def build():
  c.label('hex_char_ready'); c.emit(b'\x88\xc3\x66\xba\xfd\x03')
  c.label('hex_wait'); c.emit(b'\xec\xa8\x20'); c.rel8(0x74,'hex_wait')
  c.emit(b'\x66\xba\xf8\x03\x88\xd8\xee\xc3')
+
+ c.label('hex_utf16_nibble')
+ # EAX contains one UTF-16 code unit. Return AL=0..15 or 0xff when it is not
+ # an ASCII hexadecimal digit. Accept both upper and lower case.
+ c.emit(b'\x84\xe4'); c.rel32(b'\x0f\x85','hex_utf16_invalid')
+ c.emit(b'\x3c\x30'); c.rel32(b'\x0f\x82','hex_utf16_invalid')
+ c.emit(b'\x3c\x39'); c.rel32(b'\x0f\x86','hex_utf16_digit')
+ c.emit(b'\x0c\x20\x3c\x61'); c.rel32(b'\x0f\x82','hex_utf16_invalid')
+ c.emit(b'\x3c\x66'); c.rel32(b'\x0f\x87','hex_utf16_invalid')
+ c.emit(b'\x2c\x57\xc3')
+ c.label('hex_utf16_digit'); c.emit(b'\x2c\x30\xc3')
+ c.label('hex_utf16_invalid'); c.emit(b'\xb0\xff\xc3')
 
  c.label('serial_emit')
  c.emit(b'\x49\x89\xd0\x66\xba\xfd\x03')
@@ -704,8 +729,8 @@ def validate(image):
   b'VARSTORE_DEFINITION_MATCH=PASS',
   b'HII_CONFIG_ROUTING_PROTOCOL=PASS',
   b'HII_HANDLE_LIST=PASS',
-  b'HII_CONFIG_ACCESS_PROTOCOL=PASS',
-  b'CONFIG_ACCESS_EXTRACT=PASS',
+  b'HII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS',
+  b'CONFIG_ROUTING_EXPORT_CONFIG=PASS',
   b'CONFIG_TO_BLOCK=PASS',
   b'BUFFER_VARSTORE_MATCH=PASS',
   b'CURRENT_VALUE_READ=PASS',
