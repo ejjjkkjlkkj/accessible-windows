@@ -156,13 +156,17 @@ def build():
  # Derive first output stream descriptor from GCAP.ISS.
  c.emit(b'\x41\x0f\xb7\x06\xc1\xe8\x08\x83\xe0\x0f\xc1\xe0\x05\x05\x80\x00\x00\x00')
  c.emit(b'\x49\x8d\x1c\x06')
- # Reset stream descriptor.
- c.emit(b'\xc7\x03\x01\x00\x00\x00\xb9\xa0\x86\x01\x00')
- c.label('sd_reset_set'); c.emit(b'\x8b\x03\xa8\x01'); c.rel32(b'\x0f\x85','sd_reset_set_ok')
+ # Reset SDCTL with byte accesses so SDSTS at +3 is never overwritten.
+ c.emit(b'\x8a\x03\x24\xfd\x88\x03\xb9\xa0\x86\x01\x00')
+ c.label('sd_run_clear'); c.emit(b'\xf6\x03\x02'); c.rel32(b'\x0f\x84','sd_run_clear_ok')
+ c.emit(b'\xff\xc9'); c.rel32(b'\x0f\x85','sd_run_clear'); c.rel32(b'\xe9','fail_stream')
+ c.label('sd_run_clear_ok')
+ c.emit(b'\x8a\x03\x0c\x01\x88\x03\xb9\xa0\x86\x01\x00')
+ c.label('sd_reset_set'); c.emit(b'\xf6\x03\x01'); c.rel32(b'\x0f\x85','sd_reset_set_ok')
  c.emit(b'\xff\xc9'); c.rel32(b'\x0f\x85','sd_reset_set'); c.rel32(b'\xe9','fail_stream')
  c.label('sd_reset_set_ok')
- c.emit(b'\xc7\x03\x00\x00\x00\x00\xb9\xa0\x86\x01\x00')
- c.label('sd_reset_clear'); c.emit(b'\x8b\x03\xa8\x01'); c.rel32(b'\x0f\x84','sd_reset_clear_ok')
+ c.emit(b'\x8a\x03\x24\xfe\x88\x03\xb9\xa0\x86\x01\x00')
+ c.label('sd_reset_clear'); c.emit(b'\xf6\x03\x01'); c.rel32(b'\x0f\x84','sd_reset_clear_ok')
  c.emit(b'\xff\xc9'); c.rel32(b'\x0f\x85','sd_reset_clear'); c.rel32(b'\xe9','fail_stream')
  c.label('sd_reset_clear_ok')
  # CBL, LVI, format, BDL address.
@@ -179,15 +183,14 @@ def build():
  verb_const(0x00370740)
  serial('codec')
 
- # Program stream number 1 and RUN.
- c.emit(b'\xc7\x03\x00\x00\x10\x00')
- c.emit(b'\xc7\x03\x02\x00\x10\x00')
+ # Program stream number 1 in SDCTL byte 2, then RUN in SDCTL byte 0.
+ c.emit(b'\xc6\x43\x02\x10\xc6\x03\x02')
  # Give HDA backend time to consume DMA, then prove LPIB moved.
  c.emit(b'\xb9\x80\x1a\x06\x00\x49\x8b\x87\xf8\x00\x00\x00\xff\xd0')
  c.emit(b'\x8b\x43\x04\x85\xc0'); c.rel32(b'\x0f\x84','fail_stream')
  serial('progress')
  # Stop stream.
- c.emit(b'\x8b\x03\x83\xe0\xfd\x89\x03')
+ c.emit(b'\x8a\x03\x24\xfd\x88\x03')
  serial('done')
  c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
 
