@@ -25,8 +25,8 @@ physical-ASUS-down-focus-speech = not-established
 claim = success establishes that DOWN moves accessibility focus to the next direct ONE_OF_OPTION sibling, resolves that sibling live HII label, and speaks that focused label over native HDA while leaving the firmware current value unchanged
 claim = success does not establish physical ASUS keyboard/audio behavior or reverse navigation
 proof = PASS
-proof-run = 35399302079
-proof-head-sha = 025337db3a3050db9ab6d201973e89b8804d783f
+proof-run = 35399426027
+proof-head-sha = a48dbaa5b6da4d1ffc5159eb1bdbfaee738336f6
 proof-down-key-event = PASS
 proof-next-direct-sibling = PASS
 proof-current-value = 0
@@ -41,8 +41,8 @@ proof-post-state-current-value = 0
 proof-post-state-current-label = Disabled
 proof-setting-mutation = false
 proof-physical-ASUS-down-focus-speech = false
-proof-wave-metrics = frames=18788; peak=13355; active=33904; wav-sha256=83183c84f04006090f844b3feea6ce4c047d37bee66e77e3d98cf68ca1c495fc
+proof-wave-metrics = frames=18789; peak=13355; active=33906; wav-sha256=79879d492410f97b5dbff6f9416968d373056ade8572174e3418bcd5e0fbae91
 proof-efi-sha256 = 3f92a31d9198d891b1f4b5842649f272df8225709b1252c904cdc21e512b3660
 proof-serial-sha256 = db9960494b2196144232e4ec7507a2921287a4862557ede964fbdc3af15b18cf
-proof-wav-sha256 = 83183c84f04006090f844b3feea6ce4c047d37bee66e77e3d98cf68ca1c495fc
+proof-wav-sha256 = 79879d492410f97b5dbff6f9416968d373056ade8572174e3418bcd5e0fbae91
 proof-post-serial-sha256 = 5032a2b8bda5d36e00618d8521ba3a6204ec1d212f5a134f9728d2518d62af86
