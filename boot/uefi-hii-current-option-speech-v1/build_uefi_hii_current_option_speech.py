@@ -518,6 +518,9 @@ def build():
   c.lea_rax_data(L['varstore_size']); c.emit(b'\x66\x83\x38\x24'); c.rel32(b'\x0f\x85','prompt_next')
   serial('platform_target')
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
+ if PLATFORM_TARGET_ONLY:
+  # Platform target diagnostics expose the live 32-bit current value before option binding.
+  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
  if WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK or WAIT_DOWN_COMMIT or WAIT_DOWN_CANCEL:
@@ -548,6 +551,9 @@ def build():
   c.lea_rax_data(L['varstore_size']); c.emit(b'\x66\x83\x38\x24'); c.rel32(b'\x0f\x85','prompt_next')
   serial('platform_target')
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
+ if PLATFORM_TARGET_ONLY:
+  # Platform target diagnostics expose the live 32-bit current value before option binding.
+  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
  if WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK or WAIT_DOWN_COMMIT or WAIT_DOWN_CANCEL:
@@ -1179,6 +1185,8 @@ def build():
  c.label('buffer_export_exhausted')
  c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','buffer_current_not_found')
  c.emit(b'\x41\xff\x57\x48')
+ # Buffer Storage exhaustion must never fall through into EFI VarStore handling.
+ c.rel32(b'\xe9','buffer_current_not_found')
  c.label('efi_var_current')
  # ONE_OF numeric width: Flags&3 => 1/2/4/8 and declared VarStore bounds.
  c.lea_rax_data(L['oneof_flags']); c.emit(b'\x0f\xb6\x00\x83\xe0\x03\x89\xc1')
