@@ -344,13 +344,13 @@ def build():
 
  c.label('direct_scsu_found')
  c.emit(b'\x80\x3e\x00'); c.rel32(b'\x0f\x84','fail_string')
- c.rel32(b'\xe8','emit_option_meta')
+ c.emit(b'\x56'); c.rel32(b'\xe8','emit_option_meta'); c.emit(b'\x5e')
  serial('prefix'); c.rel32(b'\xe8','serial_scsu_ascii')
  c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_string')
  serial('suffix'); c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
  c.label('direct_ucs_found')
  c.emit(b'\x66\x83\x3e\x00'); c.rel32(b'\x0f\x84','fail_string')
- c.rel32(b'\xe8','emit_option_meta')
+ c.emit(b'\x56'); c.rel32(b'\xe8','emit_option_meta'); c.emit(b'\x5e')
  serial('prefix'); c.rel32(b'\xe8','serial_utf16')
  serial('suffix'); c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
 
