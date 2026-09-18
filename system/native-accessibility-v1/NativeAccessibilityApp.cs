@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
-using System.Linq;
 using System.Windows.Forms;
 
 public sealed class NativeAccessibilityForm : Form
@@ -98,7 +97,10 @@ public sealed class NativeAccessibilityForm : Form
         this.tracePath = tracePath;
         table = File.ReadAllBytes(tablePath);
         if (table.Length != 4) throw new Exception("native relation table length mismatch");
-        states = table.Distinct().ToArray();
+        var unique = new List<byte>();
+        for (int i = 0; i < table.Length; i++)
+            if (!unique.Contains(table[i])) unique.Add(table[i]);
+        states = unique.ToArray();
         if (states.Length != 2) throw new Exception("expected exactly two native relation carriers");
 
         identity = FindIdentity();
