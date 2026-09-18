@@ -7,6 +7,19 @@ typedef unsigned long long usize;
 typedef u64 (*stall_fn)(usize microseconds);
 typedef u64 (*allocate_pages_fn)(u32 type, u32 memory_type, usize pages, u64 *memory);
 
+#ifdef QEV_INTERACTIVE_REPEAT
+typedef struct {
+    u16 scan_code;
+    u16 unicode_char;
+} efi_input_key;
+typedef u64 (*read_key_fn)(void *self, efi_input_key *key);
+typedef struct {
+    void *reset;
+    read_key_fn read_key;
+    void *wait_for_key;
+} simple_text_input_protocol;
+#endif
+
 extern const u8 qev_unit_bank[];
 extern const u32 qev_unit_bank_len;
 extern const u32 qev_unit_off[];
@@ -810,6 +823,31 @@ static int discover_live_graph(u8 *pin_out, u8 *dac_out, u8 *selectors_out) {
     return 0;
 }
 
+#ifdef QEV_INTERACTIVE_REPEAT
+static int wait_repeat_key(void *system_table) {
+    if (!system_table) return 0;
+    simple_text_input_protocol *conin =
+        *(simple_text_input_protocol **)((u8 *)system_table + 0x30);
+    if (!conin || !conin->read_key) return 0;
+    marker("HII_GRAPH_REPEAT_KEY=WAIT_R");
+    for (;;) {
+        efi_input_key key;
+        key.scan_code = 0;
+        key.unicode_char = 0;
+        u64 st = conin->read_key(conin, &key);
+        if (st == 0) {
+            if (key.unicode_char == (u16)'r' || key.unicode_char == (u16)'R') {
+                marker("HII_GRAPH_REPEAT_KEY=R");
+                marker("HII_GRAPH_REPEAT_KEY=PASS");
+                return 1;
+            }
+            if (key.unicode_char == 0x001bu) return 0;
+        }
+        if (g_stall) g_stall(1000);
+    }
+}
+#endif
+
 __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     serial_init();
     marker("QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V1");
@@ -883,6 +921,22 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("HII_GRAPH_SPEECH_DMA=PASS");
     marker("HII_PROMPT_SPEECH_HDA=PASS");
     marker("LPIB_PROGRESS=PASS");
+#ifdef QEV_INTERACTIVE_REPEAT
+    if (!wait_repeat_key(system_table)) {
+        marker("STATUS=BLOCKED");
+        marker("REASON=HII_GRAPH_REPEAT_KEY_CANCELLED");
+        return 1;
+    }
+    marker("EVENT=HII_GRAPH_REPEAT_TEXT_COMMIT");
+    if (!run_speech_dma(g_prompt_text, g_prompt_count)) {
+        marker("STATUS=BLOCKED");
+        marker("REASON=HII_GRAPH_REPEAT_SPEECH_DMA_FAILED");
+        return 1;
+    }
+    marker("HII_GRAPH_REPEAT_SPEECH_DMA=PASS");
+    marker("HII_GRAPH_REPEAT_SPEECH_HDA=PASS");
+    marker("HII_GRAPH_REPEAT_LPIB_PROGRESS=PASS");
+#endif
     if (persist_boot_proof(image_handle, boot_services, pin, dac, selectors, applied)) {
         marker("BOOT_MEDIA_PERSISTENT_PROOF=PASS");
     } else {
