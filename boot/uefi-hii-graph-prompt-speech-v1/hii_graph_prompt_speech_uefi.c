@@ -860,8 +860,12 @@ static int discover_controller(void) {
     }
     if (!found) return 0;
 
-    u32 command = pci_read32(cfg | 0x04);
-    pci_write32(cfg | 0x04, command | 0x00000006u);
+    u32 command_status = pci_read32(cfg | 0x04);
+    u32 command = (command_status & 0x0000ffffu) | 0x00000006u;
+    /* PCI Status is W1C in the upper 16 bits: write zeros there. */
+    pci_write32(cfg | 0x04, command);
+    if ((pci_read32(cfg | 0x04) & 0x00000006u) != 0x00000006u) return 0;
+    marker("PCI_COMMAND_MEMORY_BUSMASTER=PASS");
 
     u32 bar0 = pci_read32(cfg | 0x10);
     if (bar0 & 1) return 0;
