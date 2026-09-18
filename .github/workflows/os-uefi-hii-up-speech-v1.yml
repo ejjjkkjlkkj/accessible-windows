@@ -243,10 +243,10 @@ jobs:
                   cur_raw=cur.group(1).decode()
                   sel_raw=sel.group(1).decode()
                   prev_raw=navraw.group(1).decode()
-                  current_label_m=re.search(br'SELECTED_OPTION_TEXT=([^\r\n]+)',raw)
-                  assert current_label_m,current_label_m
+                  question_m=re.search(br'QUESTION_TEXT=([^\r\n]+)',raw)
+                  assert question_m,question_m
                   token=int.from_bytes(bytes.fromhex(navtok.group(1).decode()),'little')
-                  current_label=current_label_m.group(1).decode('ascii','replace').strip()
+                  question=question_m.group(1).decode('ascii','replace').strip()
                   focus_label=label.group(1).decode('ascii','replace').strip()
                   prefix=spoken.group(1).decode()
                   expected_prefix=''.join(
@@ -256,13 +256,13 @@ jobs:
                   assert cur_raw==sel_raw,(cur_raw,sel_raw)
                   assert prev_raw!=cur_raw,(cur_raw,prev_raw)
                   assert token!=0,token
-                  assert current_label,current_label
+                  assert question,question
                   assert focus_label,focus_label
                   assert expected_prefix,(focus_label,expected_prefix)
                   assert prefix==expected_prefix,(prefix,expected_prefix,focus_label)
                   root.joinpath('runtime.txt').write_text(
                       f'current-raw8 = {cur_raw}\n'
-                      f'current-option-label = {current_label}\n'
+                      f'question-text = {question}\n'
                       f'focus-raw8 = {prev_raw}\n'
                       f'focus-option-string-id = {token}\n'
                       f'focus-option-label = {focus_label}\n'
@@ -338,7 +338,7 @@ jobs:
               if ' = ' in line:
                   k,v=line.split(' = ',1); vals[k]=v
           expected_raw=vals['current-raw8']
-          expected_label=vals['current-option-label']
+          expected_question=vals['question-text']
           p=root/'post.serial'
           end=time.time()+35
           while time.time()<end:
@@ -347,15 +347,15 @@ jobs:
                   raise SystemExit('post-state blocked: '+repr(raw[-20000:]))
               if b'STATUS=PASS\r\n' in raw:
                   cur=re.search(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
-                  label=re.search(br'SELECTED_OPTION_TEXT=([^\r\n]+)',raw)
-                  assert cur and label
+                  question=re.search(br'QUESTION_TEXT=([^\r\n]+)',raw)
+                  assert cur and question
                   got_raw=cur.group(1).decode()
-                  got_label=label.group(1).decode('ascii','replace').strip()
+                  got_question=question.group(1).decode('ascii','replace').strip()
                   assert got_raw==expected_raw,(got_raw,expected_raw)
-                  assert got_label==expected_label,(got_label,expected_label)
+                  assert got_question==expected_question,(got_question,expected_question)
                   (root/'post-state.txt').write_text(
                       f'current-raw8 = {got_raw}\n'
-                      f'current-option-label = {got_label}\n'
+                      f'question-text = {got_question}\n'
                       'unchanged = PASS\n'
                   )
                   print('UP_FOCUS_POST_STATE_UNCHANGED=PASS')
@@ -456,7 +456,7 @@ jobs:
               "proof-prev-direct-sibling = PASS\n"
               "proof-wrap-policy = PASS\n"
               f"proof-current-raw8 = {vals['current-raw8']}\n"
-              f"proof-current-option-label = {vals['current-option-label']}\n"
+              f"proof-question-text = {vals['question-text']}\n"
               f"proof-focus-raw8 = {vals['focus-raw8']}\n"
               f"proof-focus-option-string-id = {vals['focus-option-string-id']}\n"
               f"proof-focus-option-label = {vals['focus-option-label']}\n"
