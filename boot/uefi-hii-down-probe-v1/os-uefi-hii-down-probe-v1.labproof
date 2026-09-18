@@ -2,7 +2,6 @@ OS-UEFI-HII-DOWN-PROBE-V1
 role = native pre-OS read-only DOWN-arrow focus probe over direct EFI_IFR_ONE_OF_OPTION siblings
 system-foundation = true
 depends-on = OS-UEFI-HII-CURRENT-OPTION-SPEECH-V1
-depends-on = OS-UEFI-HII-ISCSI-FIXTURE-V1
 execution-domain = pre-OS UEFI
 artifact-format = PE32+ EFI application
 architecture = x86-64
