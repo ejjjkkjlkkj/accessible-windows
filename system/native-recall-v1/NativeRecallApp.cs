@@ -178,6 +178,16 @@ public sealed class NativeRecallForm : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
+        if (keyData == Keys.Enter && nextButton != null && nextButton.Focused && nextButton.Enabled)
+        {
+            Next("keyboard-next");
+            return true;
+        }
+        if (keyData == Keys.Enter && previousButton != null && previousButton.Focused && previousButton.Enabled)
+        {
+            Previous("keyboard-previous");
+            return true;
+        }
         if (keyData == Keys.Left)
         {
             Previous("keyboard-left");
