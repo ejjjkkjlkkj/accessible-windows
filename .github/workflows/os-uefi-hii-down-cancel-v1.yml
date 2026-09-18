@@ -334,6 +334,7 @@ jobs:
           cp "$root/cancel.serial" /tmp/down-cancel.serial
           cp "$root/cancel.wav" /tmp/down-cancel.wav
           cp "$root/post.serial" /tmp/down-cancel-post.serial
+          cp "$root/runtime.txt" /tmp/down-cancel-runtime.txt
           cp "$root/metrics.txt" /tmp/down-cancel-metrics.txt
 
           git fetch origin os
