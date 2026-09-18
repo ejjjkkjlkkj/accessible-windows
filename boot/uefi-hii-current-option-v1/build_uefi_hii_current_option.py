@@ -585,6 +585,10 @@ def build():
  c.label('varstore_not_found'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
 
  c.label('read_buffer_current')
+ # Internal CALL enters with RSP misaligned by the return address. Reserve the
+ # Microsoft x64 32-byte shadow space plus 8 bytes so nested UEFI calls execute
+ # with RSP 16-byte aligned and cannot overwrite this helper's return address.
+ c.emit(b'\x48\x83\xec\x28')
  # Buffer Storage (0x24) is read through EFI_HII_CONFIG_ROUTING_PROTOCOL.
  # UEFI requires external applications to use Config Routing rather than
  # invoking a driver's ConfigAccess interface directly.
@@ -705,14 +709,14 @@ def build():
  c.emit(b'\x8a\x06\x88\x02\x48\xff\xc6\x48\xff\xc2\xff\xc9'); c.rel32(b'\xe9','buffer_copy_loop')
  c.label('buffer_copy_done')
  c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x41\xff\x57\x48')
- c.emit(b'\x31\xc0\xc3')
+ c.emit(b'\x31\xc0\x48\x83\xc4\x28\xc3')
 
  c.label('config_guid_mismatch')
  c.label('config_search_next'); c.emit(b'\x48\x83\xc6\x02'); c.rel32(b'\xe9','config_search')
  c.label('buffer_export_exhausted')
  c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','buffer_current_not_found')
  c.emit(b'\x41\xff\x57\x48')
- c.label('buffer_current_not_found'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
+ c.label('buffer_current_not_found'); c.emit(b'\xb8\x01\x00\x00\x00\x48\x83\xc4\x28\xc3')
 
  c.label('resolve_current_option')
  # Scan only the IFR scope opened by this exact ONE_OF.  Nested scoped
