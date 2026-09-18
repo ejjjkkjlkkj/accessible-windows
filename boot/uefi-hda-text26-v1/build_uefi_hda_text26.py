@@ -4,7 +4,7 @@ import hashlib, importlib.util, math, struct, sys
 from pathlib import Path
 
 TEXT_RVA=0x1000
-DATA_RVA=0x4000
+DATA_RVA=0x8000
 RATE=48000
 CHANNELS=2
 BITS=16
@@ -458,7 +458,7 @@ def build():
  c.label('serial_wait'); c.emit(b'\xec\xa8\x20'); c.rel8(0x74,'serial_wait')
  c.emit(b'\x66\xba\xf8\x03\x41\x8a\x00\xee\x49\xff\xc0\x66\xba\xfd\x03\xff\xc9'); c.rel8(0x75,'serial_wait'); c.emit(b'\xc3')
  c.patch(); code=bytes(c.data)
- if len(code)>0x5000: raise SystemExit('text26 too large')
+ if len(code)>0x7000: raise SystemExit('text26 too large')
 
  text_raw=0x200; text_raw_size=(len(code)+0x1ff)&~0x1ff
  data_raw=text_raw+text_raw_size; data_raw_size=(len(data)+0x1ff)&~0x1ff
