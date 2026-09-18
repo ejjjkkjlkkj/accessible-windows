@@ -142,6 +142,11 @@ static char g_nav_prompts[MAX_HII_NAV_PROMPTS][9];
 static u8 g_nav_prompt_lengths[MAX_HII_NAV_PROMPTS];
 static u8 g_nav_prompt_total;
 static u8 g_nav_prompt_index;
+static u8 g_nav_event_mask;
+static u8 g_nav_speech_events;
+#define NAV_SEEN_UP   0x01u
+#define NAV_SEEN_DOWN 0x02u
+#define NAV_SEEN_R    0x04u
 #endif
 
 static inline void outb(u16 port, u8 value) {
@@ -271,6 +276,23 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_SPEECH_DMA_REUSE=PASS\r\n");
 #else
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_REPEAT_KEY=NOT_ENABLED\r\n");
+#endif
+#ifdef QEV_INTERACTIVE_NAV
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_UP=");
+    proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_UP) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_DOWN=");
+    proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_DOWN) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_REPEAT=");
+    proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_R) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_EXIT=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SPEECH_EVENTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_speech_events);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_SPEECH_DMA_REUSE=");
+    proof_puts(proof,sizeof(proof),&n,
+        (g_nav_speech_events && g_speech_dma_allocations == 1u) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+#else
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAVIGATION=NOT_ENABLED\r\n");
 #endif
     proof_puts(proof,sizeof(proof),&n,"AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION\r\n");
 
@@ -713,6 +735,8 @@ static int resolve_hii_prompt(void *system_table) {
 #ifdef QEV_INTERACTIVE_NAV
     g_nav_prompt_total = 0;
     g_nav_prompt_index = 0;
+    g_nav_event_mask = 0;
+    g_nav_speech_events = 0;
 #endif
 
     for (u32 hi = 0; hi < handles; ++hi) {
@@ -990,15 +1014,18 @@ static int wait_navigation_keys(void *system_table) {
             }
             if (key.unicode_char == (u16)'r' || key.unicode_char == (u16)'R') {
                 marker("HII_GRAPH_NAV_KEY=R");
+                g_nav_event_mask |= NAV_SEEN_R;
                 speak = 1;
             } else if (key.scan_code == 0x0001u) {
                 marker("HII_GRAPH_NAV_KEY=UP");
+                g_nav_event_mask |= NAV_SEEN_UP;
                 u8 next = g_nav_prompt_index ? (u8)(g_nav_prompt_index - 1u)
                                              : (u8)(g_nav_prompt_total - 1u);
                 nav_prompt_load(next);
                 speak = 1;
             } else if (key.scan_code == 0x0002u) {
                 marker("HII_GRAPH_NAV_KEY=DOWN");
+                g_nav_event_mask |= NAV_SEEN_DOWN;
                 u8 next = (u8)(g_nav_prompt_index + 1u);
                 if (next >= g_nav_prompt_total) next = 0;
                 nav_prompt_load(next);
@@ -1015,6 +1042,7 @@ static int wait_navigation_keys(void *system_table) {
                 marker("HII_GRAPH_NAV_SPEECH_DMA=PASS");
                 marker("HII_GRAPH_NAV_SPEECH_HDA=PASS");
                 marker("HII_GRAPH_NAV_LPIB_PROGRESS=PASS");
+                ++g_nav_speech_events;
                 if (g_speech_dma_allocations != 1u) return 0;
                 marker("HII_GRAPH_SPEECH_DMA_REUSE=PASS");
             }
