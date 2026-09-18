@@ -50,14 +50,24 @@ jobs:
           clang $hiiflags -c "$hiiroot/speech_units.c" -o "$hiiroot/units.obj"
           lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$hiiroot/hii-graph.EFI" "$hiiroot/main.obj" "$hiiroot/units.obj"
           test -s "$hiiroot/hii-graph.EFI"
+          clang $hiiflags -c "$hiiroot/hii_graph_prompt_speech_uefi.c" -o "$hiiroot/main-2.obj"
+          clang $hiiflags -c "$hiiroot/speech_units.c" -o "$hiiroot/units-2.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$hiiroot/hii-graph-2.EFI" "$hiiroot/main-2.obj" "$hiiroot/units-2.obj"
+          cmp "$hiiroot/hii-graph.EFI" "$hiiroot/hii-graph-2.EFI"
+          rm -f "$hiiroot/hii-graph-2.EFI"
           sha256sum "$hiiroot/hii-graph.EFI"
+
+          stage=boot/uefi-amd5800h-real-final-v1/build-artifact
+          rm -rf "$stage"
+          mkdir -p "$stage"
+          cp "$root/graph.EFI" "$stage/graph.EFI"
+          cp "$hiiroot/hii-graph.EFI" "$stage/hii-graph.EFI"
           echo AMD5800H_HII_GRAPH_EFI_BUILD=PASS
+          echo AMD5800H_HII_GRAPH_EFI_DETERMINISM=PASS
       - uses: actions/upload-artifact@v4
         with:
           name: amd5800h-graph-efi
-          path: |
-            boot/uefi-hda-graph-speech-v1/graph.EFI
-            boot/uefi-hii-graph-prompt-speech-v1/hii-graph.EFI
+          path: boot/uefi-amd5800h-real-final-v1/build-artifact/
           if-no-files-found: error
 
   amd5800h-final:
@@ -624,12 +634,19 @@ jobs:
             'STATE=START',
             'HII_DATABASE_PROTOCOL=PASS',
             'HII_STRING_PROTOCOL=PASS',
+            'HII_FORMS_HANDLE_LIST=PASS',
+            'HII_FORMS_PACKAGE=PASS',
             'IFR_PROMPT_STRING_ID=PASS',
+            'HII_LANGUAGE_AND_STRING=PASS',
             'HII_PROMPT_TEXT=',
             'HII_PROMPT_SOURCE=PASS',
+            'HDA_MULTIHOP_EFI_SELFTEST=PASS',
+            'HDA_RANGE_AND_SELECTOR_ENGINE=PASS',
+            'NO_FIXED_WIDGET_NIDS=PASS',
             'HDA_CONTROLLER_CODEC=PASS',
             'HDA_GRAPH_SEARCH_LIVE=PASS',
             'HDA_SELECTOR_APPLY_LIVE=PASS',
+            'HDA_SELECTOR_PLAN=PASS',
             'HDA_OUTPUT_PATH_CONFIGURATION=PASS',
             'BDL_RUNTIME_TEXT_SCHEDULE=PASS',
             'HII_GRAPH_SPEECH_DMA=PASS',
@@ -637,9 +654,12 @@ jobs:
             'LPIB_PROGRESS=PASS',
             'STATUS=PASS'
           )
+          if($raw -match 'STATUS=BLOCKED'){ throw "VMware integrated HII->HDA reader blocked: $raw" }
           foreach($m in $required){
             if($raw -notmatch [regex]::Escape($m)){ throw "VMware integrated HII->HDA evidence missing $m : $raw" }
           }
+          if($raw -notmatch 'HII_PROMPT_TEXT=[a-z]{1,8}'){ throw "VMware integrated HII prompt text missing or invalid: $raw" }
+          if($raw -notmatch 'HDA_ROUTE_DEPTH=0x[0-9A-Fa-f]{2}'){ throw "VMware integrated HDA route depth missing: $raw" }
           @(
             'VMWARE_WORKSTATION=PASS'
             'VMWARE_UEFI_LOADER=PASS'
@@ -651,6 +671,7 @@ jobs:
             'VMWARE_GRAPH_HDA_SPEECH=PASS'
             'VMWARE_FULL_HDA_SPEECH=PASS'
             'VMWARE_INTEGRATED_HII_HDA_SPEECH=PASS'
+            'VMWARE_SINGLE_EXECUTION_HII_TO_HDA=PASS'
             'VMWARE_STATUS=PASS'
             ($raw -split "[\r\n]+" | Where-Object { $_ -match '^(HII_PROMPT_TEXT|HDA_PIN_NID|HDA_DAC_NID|HDA_ROUTE_DEPTH|HDA_SELECTOR_WRITES_)=' })
           ) | Set-Content (Join-Path $root 'vmware-result.txt') -Encoding ascii
