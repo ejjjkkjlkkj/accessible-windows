@@ -478,9 +478,295 @@ impl MemoryRecordV1 {
     }
 }
 
+
+/// Native identity for an explicit capability grant.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub struct CapabilityId(u64);
+
+impl CapabilityId {
+    /// Reserved identity meaning "no parent/no capability".
+    pub const ZERO: Self = Self(0);
+
+    /// Creates a capability identity.
+    #[must_use]
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// Returns true for the reserved invalid identity.
+    #[must_use]
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// Native authority domains.
+///
+/// These identities are intentionally distinct. In particular,
+/// `SystemSovereign` is a human authority and is never an alias for
+/// `KernelAuthority`.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthorityDomain {
+    /// Internal non-human kernel authority.
+    KernelAuthority = 1,
+    /// Highest human system authority.
+    SystemSovereign = 2,
+    /// Firmware/pre-boot authority.
+    FirmwareAuthority = 3,
+    /// Recovery environment authority.
+    RecoveryAuthority = 4,
+    /// Cognitive planner. It may propose but must not mutate system state.
+    AgentPlanner = 5,
+    /// Capability-scoped agent action executor.
+    AgentExecutor = 6,
+    /// Ordinary user process domain.
+    UserProcess = 7,
+}
+
+/// Native capability rights.
+pub mod capability_right {
+    /// Observe/read the target.
+    pub const READ: u64 = 1 << 0;
+    /// Modify target state.
+    pub const WRITE: u64 = 1 << 1;
+    /// Invoke a target action.
+    pub const INVOKE: u64 = 1 << 2;
+    /// Change target configuration.
+    pub const CONFIGURE: u64 = 1 << 3;
+    /// Perform recovery operations on the target.
+    pub const RECOVER: u64 = 1 << 4;
+    /// Update/replace the target through its controlled update path.
+    pub const UPDATE: u64 = 1 << 5;
+    /// Delegate a subset of held authority.
+    pub const DELEGATE: u64 = 1 << 6;
+
+    /// Rights that can mutate or extend authority.
+    pub const MUTATING: u64 =
+        WRITE | INVOKE | CONFIGURE | RECOVER | UPDATE | DELEGATE;
+}
+
+/// Target and lifetime of a capability.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CapabilityScopeV1 {
+    /// Semantic resource/action target.
+    pub resource: SemanticObjectId,
+    /// Explicit rights only; no ambient authority exists in this contract.
+    pub rights: u64,
+    /// First system generation in which the capability is valid.
+    pub valid_from_generation: u64,
+    /// Last system generation in which the capability is valid, inclusive.
+    pub valid_until_generation: u64,
+}
+
+impl CapabilityScopeV1 {
+    /// Creates an explicit capability scope.
+    #[must_use]
+    pub const fn new(
+        resource: SemanticObjectId,
+        rights: u64,
+        valid_from_generation: u64,
+        valid_until_generation: u64,
+    ) -> Self {
+        Self {
+            resource,
+            rights,
+            valid_from_generation,
+            valid_until_generation,
+        }
+    }
+
+    /// Returns true when the scope is active for a generation.
+    #[must_use]
+    pub const fn is_active_at(self, generation: u64) -> bool {
+        generation >= self.valid_from_generation
+            && generation <= self.valid_until_generation
+    }
+}
+
+/// Validation errors for a native capability grant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CapabilityGrantError {
+    /// Every grant requires a nonzero identity.
+    MissingId,
+    /// Every grant is scoped to a concrete semantic target.
+    MissingResource,
+    /// A capability with no rights conveys nothing and is invalid.
+    MissingRights,
+    /// Capability lifetime is malformed or starts at generation zero.
+    InvalidGenerationWindow,
+    /// Planning and privileged execution are separated by construction.
+    PlannerMayNotMutate,
+    /// Kernel authority cannot be minted by another domain or delegated.
+    KernelAuthorityNotDelegable,
+}
+
+/// Version-1 explicit capability grant.
+///
+/// This contract models authority flow only. Cryptographic/unforgeable hardware
+/// capability enforcement is not implemented yet and must not be inferred from
+/// the existence of this structure.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CapabilityGrantV1 {
+    /// Stable grant identity.
+    pub id: CapabilityId,
+    /// Parent grant for explicit delegation, or zero for a root grant.
+    pub parent: CapabilityId,
+    /// Authority issuing the grant.
+    pub issuer: AuthorityDomain,
+    /// Authority receiving the grant.
+    pub subject: AuthorityDomain,
+    /// Exact resource, rights and lifetime.
+    pub scope: CapabilityScopeV1,
+}
+
+impl CapabilityGrantV1 {
+    /// Creates a native capability grant.
+    #[must_use]
+    pub const fn new(
+        id: CapabilityId,
+        parent: CapabilityId,
+        issuer: AuthorityDomain,
+        subject: AuthorityDomain,
+        scope: CapabilityScopeV1,
+    ) -> Self {
+        Self {
+            id,
+            parent,
+            issuer,
+            subject,
+            scope,
+        }
+    }
+
+    /// Validates structural authority invariants.
+    pub const fn validate(&self) -> Result<(), CapabilityGrantError> {
+        if self.id.is_zero() {
+            return Err(CapabilityGrantError::MissingId);
+        }
+        if self.scope.resource.is_zero() {
+            return Err(CapabilityGrantError::MissingResource);
+        }
+        if self.scope.rights == 0 {
+            return Err(CapabilityGrantError::MissingRights);
+        }
+        if self.scope.valid_from_generation == 0
+            || self.scope.valid_from_generation > self.scope.valid_until_generation
+        {
+            return Err(CapabilityGrantError::InvalidGenerationWindow);
+        }
+        if matches!(self.subject, AuthorityDomain::AgentPlanner)
+            && (self.scope.rights & capability_right::MUTATING) != 0
+        {
+            return Err(CapabilityGrantError::PlannerMayNotMutate);
+        }
+        if matches!(self.subject, AuthorityDomain::KernelAuthority)
+            && (!matches!(self.issuer, AuthorityDomain::KernelAuthority)
+                || !self.parent.is_zero())
+        {
+            return Err(CapabilityGrantError::KernelAuthorityNotDelegable);
+        }
+        Ok(())
+    }
+
+    /// Returns true only when the grant validates and contains every requested
+    /// right for the given resource and system generation.
+    #[must_use]
+    pub const fn authorizes(
+        &self,
+        resource: SemanticObjectId,
+        requested_rights: u64,
+        generation: u64,
+    ) -> bool {
+        self.validate().is_ok()
+            && !resource.is_zero()
+            && requested_rights != 0
+            && self.scope.resource.value() == resource.value()
+            && (self.scope.rights & requested_rights) == requested_rights
+            && self.scope.is_active_at(generation)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scoped_capability(
+        subject: AuthorityDomain,
+        rights: u64,
+    ) -> CapabilityGrantV1 {
+        CapabilityGrantV1::new(
+            CapabilityId::new(1),
+            CapabilityId::ZERO,
+            AuthorityDomain::SystemSovereign,
+            subject,
+            CapabilityScopeV1::new(SemanticObjectId::new(500), rights, 10, 20),
+        )
+    }
+
+    #[test]
+    fn capability_planner_cannot_receive_mutating_authority() {
+        let grant = scoped_capability(
+            AuthorityDomain::AgentPlanner,
+            capability_right::READ | capability_right::WRITE,
+        );
+        assert_eq!(
+            grant.validate(),
+            Err(CapabilityGrantError::PlannerMayNotMutate)
+        );
+    }
+
+    #[test]
+    fn capability_executor_is_explicitly_scoped_and_time_bounded() {
+        let grant = scoped_capability(
+            AuthorityDomain::AgentExecutor,
+            capability_right::READ | capability_right::INVOKE,
+        );
+        assert_eq!(grant.validate(), Ok(()));
+        assert!(grant.authorizes(
+            SemanticObjectId::new(500),
+            capability_right::INVOKE,
+            15,
+        ));
+        assert!(!grant.authorizes(
+            SemanticObjectId::new(501),
+            capability_right::INVOKE,
+            15,
+        ));
+        assert!(!grant.authorizes(
+            SemanticObjectId::new(500),
+            capability_right::WRITE,
+            15,
+        ));
+        assert!(!grant.authorizes(
+            SemanticObjectId::new(500),
+            capability_right::INVOKE,
+            21,
+        ));
+    }
+
+    #[test]
+    fn capability_kernel_authority_cannot_be_minted_by_human_domain() {
+        let grant = scoped_capability(
+            AuthorityDomain::KernelAuthority,
+            capability_right::READ,
+        );
+        assert_eq!(
+            grant.validate(),
+            Err(CapabilityGrantError::KernelAuthorityNotDelegable)
+        );
+    }
+
+    #[test]
+    fn capability_system_sovereign_and_kernel_authority_are_distinct() {
+        assert_ne!(
+            AuthorityDomain::SystemSovereign,
+            AuthorityDomain::KernelAuthority
+        );
+    }
 
     fn memory_links() -> MemoryLinksV1 {
         MemoryLinksV1::new(

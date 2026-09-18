@@ -16,13 +16,21 @@ The system carries verified human-interaction state through every privileged tra
 4. UEFI entry and boot handoff.
 5. x86-64 kernel entry, memory map and page tables.
 6. Interrupts, timer and scheduler.
-7. Capability/security foundation.
+7. Capability/security foundation. **STRUCTURAL FOUNDATION IMPLEMENTED:** `KernelAuthority`, `SystemSovereign`, planner/executor separation, explicit resource/right/lifetime scopes. Hardware-unforgeable enforcement and cryptographic delegation are not implemented.
 8. ACPI and PCI discovery.
 9. Native audio, USB HID and braille transports.
 10. Native semantic object/graph representation shared by all modalities. **FOUNDATION IMPLEMENTED; renderers not implemented.**
 11. From-zero VFS and persistent storage foundation.
 12. Process model, native shell and recovery environment.
 13. Native cognitive-memory primitives with explicit class, version, provenance, retention and confidence. **MEMORY CONTRACT FOUNDATION IMPLEMENTED; cognition/learning not implemented.**
+
+## Authority invariant
+
+`KernelAuthority` is an internal non-human authority and cannot be minted or delegated by `SystemSovereign` or an agent. `SystemSovereign` is the highest human system authority but is not kernel identity.
+
+The cognitive planner may inspect information through explicit read capabilities but cannot receive mutating rights. An agent executor may act only through an explicit capability scoped to a semantic resource, exact rights and a generation window.
+
+This is currently a structural software contract. Hardware-backed/unforgeable capabilities, cryptographic grant chains and revocation storage are not implemented.
 
 ## Human-I/O invariant
 

@@ -42,6 +42,9 @@ jobs:
           grep -q "NOT IMPLEMENTED" docs/STORAGE.md
           grep -q "pub struct SemanticObjectV1" crates/aw-core/src/lib.rs
           grep -q "pub struct MemoryRecordV1" crates/aw-core/src/lib.rs
+          grep -q "pub struct CapabilityGrantV1" crates/aw-core/src/lib.rs
+          grep -q "KernelAuthority" docs/SECURITY.md
+          grep -q "SystemSovereign" docs/SECURITY.md
 
   host-validation:
     strategy:
@@ -173,6 +176,21 @@ jobs:
         run: rustup toolchain install 1.98.1 --profile minimal
       - name: Native cognitive memory contract
         run: cargo +1.98.1 test -p aw-core memory_ -- --nocapture
+
+  capability-core-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native authority and capability contract
+        run: cargo +1.98.1 test -p aw-core capability_ -- --nocapture
 
   bare-metal-contracts:
     runs-on: ubuntu-24.04
