@@ -1,0 +1,17 @@
+OS-UEFI-HDA-GRAPH-SPEECH-V1
+proof = PENDING_CI
+branch = os
+scope = multi-hop-capable graph-routed first-party UEFI speech over native HDA DMA
+language = C plus deterministic Python build generator
+uefi-framework = none
+edk2 = none
+speech-source = boot/uefi-native-speech-v1/build_uefi_native_speech.py
+speech-kind = first-party deterministic allophone synthesis
+word = aide
+runtime-units = e,d
+unit-bank-order = d,e
+full-utterance-asset = false
+selector-apply-readback = required
+HDA-DMA-LPIB-progress = required
+captured-waveform = required
+physical-ASUS-M1603QA-speech = not-established
