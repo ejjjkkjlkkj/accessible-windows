@@ -1,0 +1,26 @@
+OS-UEFI-ASUS-M1603QA-PREFLIGHT-V1
+role = physical-host read-only preflight for native UEFI accessibility execution on the AMD-5800H-REAL ASUS machine
+system-foundation = true
+depends-on = OS-UEFI-HII-CURRENT-OPTION-SPEECH-V1
+depends-on = OS-UEFI-HII-UP-SPEECH-V1
+execution-domain = Windows host before pre-OS reboot
+target-runner = AMD-5800H-REAL
+target-system-model = ASUS M1603QA
+target-cpu = AMD Ryzen 7 5800H
+hardware-identity-read = CIM read-only
+firmware-mode-read = Windows firmware metadata and SecureBoot state registry read-only
+audio-device-read = Windows PnP read-only inventory
+efi-build = first-party deterministic PE32+ EFI application built locally on target host
+efi-mode = --wait-up-speak
+reboot = forbidden
+boot-order-write = forbidden
+secure-boot-write = forbidden
+uefi-variable-write = forbidden
+disk-partition-write = forbidden
+device-configuration-write = forbidden
+firmware-setting-mutation = forbidden
+physical-pre-os-execution = not-established-in-this-stage
+physical-speaker-audio = not-established-in-this-stage
+claim = success establishes that the exact AMD-5800H-REAL host is the intended ASUS M1603QA class machine, exposes UEFI and audio hardware to Windows read-only inventory, and can deterministically build the same native accessibility EFI locally
+claim = success does not reboot the host, alter boot order, write UEFI variables, change Secure Boot, or claim physical pre-OS speech
+proof = PENDING_CI
