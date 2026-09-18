@@ -99,23 +99,22 @@ jobs:
           assert not(tc&0x80000000)
           assert dc&0x80000000 and not(dc&0x20000000)
           assert bytes.fromhex('72c19fefb2a19346b3276d32fc416042') in image
-          assert bytes.fromhex('7469d90faa23dc4cb9cb98d17750322a') in image
           for token in [
               b'HII_DATABASE_PROTOCOL=PASS\r\n',
-              b'HII_STRING_PROTOCOL=PASS\r\n',
-              b'HII_FORMS_HANDLE=PASS\r\n',
+              b'HII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\n',
+              b'HII_FORMS_PACKAGE=PASS\r\n',
+              b'HII_STRINGS_PACKAGE=PASS\r\n',
               b'IFR_TITLE_STRING_ID=PASS\r\n',
+              b'HII_LANGUAGE=PASS\r\n',
               b'TITLE_TEXT=',
               b'HII_TITLE_STRING=PASS\r\n',
           ]:
               assert token in image,token
           print('HII_TITLE_STATIC=PASS')
           print('HII_DATABASE_GUID=BOUND')
-          print('HII_STRING_GUID=BOUND')
           print('IFR_FORMSET_0E=BOUND')
           print('IFR_FORM_01=BOUND')
-          print('GET_LANGUAGES=BOUND')
-          print('GET_STRING=BOUND')
+          print('DIRECT_HII_STRING_BLOCK_DECODER=BOUND')
           print('W_X=BLOCKED')
 
       - name: Resolve OVMF
@@ -196,7 +195,9 @@ jobs:
             echo 'firmware = OVMF'
             echo 'machine = q35'
             echo 'HII-Database = PASS'
-            echo 'HII-String = PASS'
+            echo 'HII-Forms-package = PASS'
+            echo 'HII-Strings-package = PASS'
+            echo 'direct-string-decoder = PASS'
             echo 'IFR-title-token = PASS'
             echo "resolved-title = $(cat "$root/title.txt")"
             echo 'setting-mutation = false'
