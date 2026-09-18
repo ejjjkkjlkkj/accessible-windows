@@ -197,7 +197,7 @@ jobs:
           source boot/uefi-hii-graph-prompt-speech-v1/ovmf.env
           root=boot/uefi-hii-graph-prompt-speech-v1
           cp "$VARS" "$root/repeat-vars.fd"
-          rm -f "$root/repeat-esp.img" "$root/repeat.serial" "$root/repeat.wav" "$root/repeat.mon"
+          rm -f "$root/repeat-esp.img" "$root/repeat.serial" "$root/repeat.wav" "$root/repeat-qmp.sock"
           truncate -s 64M "$root/repeat-esp.img"
           mkfs.vfat -F 16 "$root/repeat-esp.img"
           mmd -i "$root/repeat-esp.img" ::/EFI
@@ -212,46 +212,50 @@ jobs:
             -audiodev wav,id=aud,path="$root/repeat.wav",out.frequency=48000,out.channels=2 \
             -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0 \
             -device hda-duplex,bus=hda0.0,cad=0,audiodev=aud \
-            -display none -monitor unix:"$root/repeat.mon",server=on,wait=off \
+            -display none -monitor none -qmp unix:"$root/repeat-qmp.sock",server=on,wait=off \
             -serial file:"$root/repeat.serial" -parallel none -net none -no-reboot -no-shutdown &
           qpid=$!
           trap 'kill $qpid 2>/dev/null || true' EXIT
 
           ROOT="$root" python - <<'PY'
           from pathlib import Path
-          import os,socket,time
+          import json,os,socket,time
           root=Path(os.environ['ROOT'])
           serial=root/'repeat.serial'
-          monitor=root/'repeat.mon'
+          qmp=root/'repeat-qmp.sock'
           end=time.time()+60
           while time.time()<end:
               raw=serial.read_bytes() if serial.exists() else b''
               if b'STATUS=BLOCKED\r\n' in raw:
                   raise SystemExit('blocked before repeat key: '+repr(raw[-12000:]))
-              if b'HII_GRAPH_REPEAT_KEY=WAIT_R\r\n' in raw and monitor.exists():
+              if b'HII_GRAPH_REPEAT_KEY=WAIT_R\r\n' in raw and qmp.exists():
                   break
               time.sleep(.05)
           else:
               raise SystemExit('repeat wait marker timeout: '+repr((serial.read_bytes() if serial.exists() else b'')[-12000:]))
 
-          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
-          for _ in range(100):
-              try:
-                  s.connect(str(monitor))
-                  break
-              except OSError:
-                  time.sleep(.05)
-          else:
-              raise SystemExit('QEMU monitor connect timeout')
-          s.settimeout(1)
-          try:
-              try: s.recv(4096)
-              except Exception: pass
-              s.sendall(b'sendkey r\n')
-              try: s.recv(4096)
-              except Exception: pass
-          finally:
-              s.close()
+          with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as s:
+              for _ in range(100):
+                  try:
+                      s.connect(str(qmp))
+                      break
+                  except OSError:
+                      time.sleep(.05)
+              else:
+                  raise SystemExit('QMP connect timeout')
+              f=s.makefile('rwb',buffering=0)
+              greeting=json.loads(f.readline())
+              assert 'QMP' in greeting,greeting
+              f.write((json.dumps({'execute':'qmp_capabilities'})+'\r\n').encode())
+              while True:
+                  m=json.loads(f.readline())
+                  if 'return' in m: break
+                  if 'error' in m: raise SystemExit('QMP capabilities failed: '+repr(m))
+              f.write((json.dumps({'execute':'send-key','arguments':{'keys':[{'type':'qcode','data':'r'}],'hold-time':50}})+'\r\n').encode())
+              while True:
+                  m=json.loads(f.readline())
+                  if 'return' in m: break
+                  if 'error' in m: raise SystemExit('QMP send-key failed: '+repr(m))
 
           req=[
               b'HII_GRAPH_REPEAT_KEY=R\r\n',
