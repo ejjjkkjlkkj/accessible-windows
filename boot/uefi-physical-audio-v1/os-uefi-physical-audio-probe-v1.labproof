@@ -1,0 +1,25 @@
+OS-UEFI-PHYSICAL-AUDIO-PROBE-V1
+role = real AMD-5800H platform audio controller and codec discovery for physical pre-OS speech
+system-foundation = false
+purpose = identify the real machine audio hardware required to replace the SB16 witness with a physical UEFI audio driver
+target-runner = AMD-5800H-REAL
+target-os-observer = Windows only as hardware inventory witness
+target-final-domain = pre-OS UEFI
+collect = Win32_SoundDevice
+collect = PnP MEDIA devices
+collect = PnP AudioEndpoint devices
+collect = PCI hardware IDs
+collect = compatible IDs
+collect = location paths
+collect = location information
+collect = bus reported device description
+collect = driver provider version date INF
+collect = signed driver metadata
+collect = PCI audio-class candidates
+windows-driver-is-foundation = false
+windows-audio-stack-is-foundation = false
+physical-audio-driver = not-established
+physical-UEFI-speech = not-established
+proof = PENDING
+claim = success identifies the physical controller and codec-facing device identities visible on AMD-5800H-REAL and records sufficient evidence to begin a system-owned pre-OS audio driver
+claim = success does not establish direct MMIO codec command transport DMA stream programming pin routing amplifier control or audible pre-OS speech on the physical laptop
