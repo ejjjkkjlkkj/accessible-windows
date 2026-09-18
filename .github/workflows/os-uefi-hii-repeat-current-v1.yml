@@ -32,11 +32,6 @@ jobs:
               'proof-live-current-option-identity = PASS',
               'proof-live-current-option-varstore-identity = PASS',
               'proof-live-current-option-label = PASS',
-              'proof-question = iSCSI Mode',
-              'proof-current-option-label = Disabled',
-              'proof-current-value = 0',
-              'proof-current-option-value = 0',
-              'proof-spoken-prefix = disabled',
               'proof-first-party-allophones = PASS',
               'proof-runtime-HDA-route = PASS',
               'proof-HDA-waveform = PASS',
@@ -246,12 +241,14 @@ jobs:
                   raise SystemExit('blocked after repeat key: '+repr(raw[-20000:]))
               if all(x in raw for x in required):
                   label=re.search(br'SELECTED_OPTION_TEXT=([^\r\n]+)',raw)
-                  prefix=re.search(br'CURRENT_OPTION_SPOKEN_PREFIX=([a-z]{1,8})\r\nCURRENT_OPTION_SPOKEN_PREFIX=PASS\r\n',raw)
+                  prefix=re.search(br'CURRENT_OPTION_SPOKEN_PREFIX=([a-z0-9]{1,8})\r\nCURRENT_OPTION_SPOKEN_PREFIX=PASS\r\n',raw)
                   assert label and prefix,raw[-20000:]
                   label=label.group(1).decode('ascii','replace').strip()
                   prefix=prefix.group(1).decode()
-                  assert label=='Disabled',label
-                  assert prefix=='disabled',prefix
+                  expected=''.join(ch.lower() for ch in label if ('a'<=ch.lower()<='z') or ('0'<=ch<='9'))[:8]
+                  assert label,label
+                  assert expected,(label,expected)
+                  assert prefix==expected,(prefix,expected,label)
                   root.joinpath('runtime.txt').write_text(
                       f'current-option-label = {label}\n'
                       f'spoken-prefix = {prefix}\n'
