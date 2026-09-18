@@ -221,16 +221,18 @@ def build():
  c.emit(b'\x66\x85\xc0'); c.rel32(b'\x0f\x84','ifr_next')
  c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  c.emit(b'\x41\x0f\xb6\x41\x04'); c.lea_rdx_data(L['option_flags']); c.emit(b'\x88\x02')
+ c.emit(b'\x41\x89\xc8') # r8d = opcode Length
  c.emit(b'\x41\x0f\xb6\x41\x05'); c.lea_rdx_data(L['option_type']); c.emit(b'\x88\x02')
  # Only numeric ONE_OF values participate in numeric current-value matching.
  c.emit(b'\x3c\x03'); c.rel32(b'\x0f\x87','ifr_next')
  # width = 1 << Type; require opcode Length >= 6 + width.
  c.emit(b'\x0f\xb6\xc8\xba\x01\x00\x00\x00\xd3\xe2')
- c.emit(b'\x8d\x42\x06\x39\xc1'); c.rel32(b'\x0f\x87','ifr_next')
+ c.emit(b'\x8d\x42\x06\x41\x39\xc0'); c.rel32(b'\x0f\x82','ifr_next')
+ c.emit(b'\x41\x89\xd3') # r11d = typed width
  c.lea_rax_data(L['option_width']); c.emit(b'\x88\x10')
  # Zero-pad destination then copy exactly the typed value width from +6.
  c.lea_rdx_data(L['option_value']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00\xc7\x42\x04\x00\x00\x00\x00')
- c.emit(b'\x49\x8d\x71\x06\x89\xd1')
+ c.emit(b'\x49\x8d\x71\x06\x44\x89\xd9')
  c.label('option_value_copy_loop')
  c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','option_value_copy_done')
  c.emit(b'\x8a\x06\x88\x02\x48\xff\xc6\x48\xff\xc2\xff\xc9'); c.rel32(b'\xe9','option_value_copy_loop')
