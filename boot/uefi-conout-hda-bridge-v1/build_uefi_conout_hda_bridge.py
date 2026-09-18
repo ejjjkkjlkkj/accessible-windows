@@ -151,6 +151,7 @@ def build():
   'conout':48,
   'image_handle':56,
   'child_handle':64,
+  'capture_buf':72,
  }
  struct.pack_into('<Q',data,0,0xffffffff)
  L['child']=len(data); data+=child
@@ -370,8 +371,8 @@ def build():
  # Expand the actual captured CHAR16 string. CR/LF are formatting and are
  # skipped. Every supported Latin letter becomes its first-party letter-name
  # allophone sequence. ebx=BDL entries, r10d=total PCM bytes.
- c.mov_rax_data(L['capture_ptr'])
- c.emit(bytes.fromhex('4889c5'))               # rbp = captured CHAR16 pointer
+ c.lea_rax_data(L['capture_buf'])
+ c.emit(bytes.fromhex('4889c5'))               # rbp = parent-owned captured CHAR16 snapshot
  c.emit(bytes.fromhex('31f6'))                 # esi = spoken grapheme count
  c.emit(bytes.fromhex('31db'))                 # ebx = BDL descriptor count
  c.emit(bytes.fromhex('4531d2'))               # r10d = total PCM bytes
@@ -469,6 +470,19 @@ def build():
  c.emit(bytes.fromhex('4883ec38'))
  c.emit(bytes.fromhex('48894c24204889542428'))
  c.emit(bytes.fromhex('4889d0')); c.mov_data_rax(L['capture_ptr'])
+ # Snapshot the actual OutputString CHAR16 argument while it is unquestionably
+ # valid.  Post-return speech consumes this parent-owned copy, never child memory.
+ c.emit(bytes.fromhex('4989d0'))               # r8 = source CHAR16*
+ c.lea_r9_data(L['capture_buf'])                # r9 = parent-owned snapshot
+ c.emit(bytes.fromhex('b910000000'))            # at most 16 CHAR16 code units
+ c.label('capture_copy')
+ c.emit(bytes.fromhex('410fb700'))              # eax = *r8 (CHAR16)
+ c.emit(bytes.fromhex('66418901'))              # *r9 = ax
+ c.emit(bytes.fromhex('4983c0024983c102'))      # source++, dest++
+ c.emit(bytes.fromhex('6685c0')); c.rel32(bytes.fromhex('0f84'),'capture_copy_done')
+ c.emit(bytes.fromhex('ffc9')); c.rel32(bytes.fromhex('0f85'),'capture_copy')
+ c.emit(bytes.fromhex('6631c066418901'))        # force NUL if source exceeded cap
+ c.label('capture_copy_done')
  serial('capture')
  c.emit(bytes.fromhex('488b4c2420488b542428'))
  c.mov_rax_data(L['orig_output'])
