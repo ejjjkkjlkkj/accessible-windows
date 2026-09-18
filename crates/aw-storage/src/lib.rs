@@ -470,7 +470,8 @@ mod tests {
         }
 
         fn recovered_generation(&self) -> Option<u64> {
-            newest_structurally_valid(&self.anchor_a, &self.anchor_b).map(|anchor| anchor.generation)
+            newest_structurally_valid(&self.anchor_a, &self.anchor_b)
+                .map(|anchor| anchor.generation)
         }
     }
 
