@@ -31,8 +31,8 @@ physical-ASUS-current-option-speech = not-established
 claim = success establishes that one native pre-OS UEFI execution reads the live current ONE_OF value, resolves the selected option text from live HII, derives the spoken graphemes from that text, and produces progressing native HDA DMA audio for those graphemes
 claim = success does not establish physical ASUS M1603QA audio until the AMD-5800H-REAL gate executes on that machine
 proof = PASS
-proof-run = 35397510172
-proof-head-sha = 996d5399c39a1d07c5553ab2e7ad2efeea82709c
+proof-run = 35397717867
+proof-head-sha = df0602806b6ce8ca0234e63a02062145540d3bb0
 proof-live-current-option-identity = PASS
 proof-live-current-option-varstore-identity = PASS
 proof-live-current-option-label = PASS
@@ -55,7 +55,7 @@ proof-route-config-call = false
 proof-set-variable-call = false
 proof-setting-mutation = false
 proof-physical-ASUS-current-option-speech = false
-proof-wave-metrics = frames=18802; peak=13821; active=32720; wav-sha256=97deb1b67928b6292558b3c1609cb312974e30d99dd831e702caa35971eadd09
-proof-efi-sha256 = ab2cab9085e3fc69c5edd316ab19f6815ca6186af6c06171a07970034acd7759
+proof-wave-metrics = frames=18834; peak=13821; active=32784; wav-sha256=a98ddd2d889b75e728652cbbac536946143128c63572af9e8aade070d560a0c8
+proof-efi-sha256 = 676332bb35d85ed16519a8c94b0105c4f216e058ab9fb829fb63b4a26e370e25
 proof-serial-sha256 = b9424fefd326f1e5ec8837748f36f641466b2df336c18be457f700a0800c7f3f
-proof-wav-sha256 = 97deb1b67928b6292558b3c1609cb312974e30d99dd831e702caa35971eadd09
+proof-wav-sha256 = a98ddd2d889b75e728652cbbac536946143128c63572af9e8aade070d560a0c8
