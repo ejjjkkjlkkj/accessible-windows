@@ -1,0 +1,126 @@
+AW0CAT00
+version = 0
+identity = AW0.SYSTEM.COMPLETENESS
+status = ACTIVE
+release-rule = no-required-component-may-be-MISSING
+proof-rule = implemented-does-not-mean-PASS-without-A+B
+
+::domain
+name = bootstrap-machine-boundary
+required = seed; machine-entry; firmware-boundary-adapters; boot-selection; accessible-preboot; recovery-entry
+status = MISSING
+::end
+
+::domain
+name = toolchain
+required = source-format; parser; semantic-analyzer; type-effect-authority-checker; code-generator; instruction-encoder; object-emitter; linker; image-emitter; self-hosting; reproducibility
+status = PARTIAL
+::end
+
+::domain
+name = development-environment
+required = editor; formatter; linter; shell; debugger; disassembler; inspector; profiler; tracing; docs; version-store; CI-proof-runner
+status = MISSING
+::end
+
+::domain
+name = proof-validation
+required = structural-prover; accessibility-verifier; unit-tests; property-tests; integration-tests; fuzzing; fault-injection; benchmarks; adversarial-AI-tests; reproducibility; provenance
+status = PARTIAL
+::end
+
+::domain
+name = kernel-core
+required = machine-entry; interrupt-exception-model; timers; physical-memory; virtual-memory; scheduler; SMP; synchronization; IPC; typed-messages; cell-lifecycle; capability-enforcement; resource-accounting
+status = MISSING
+::end
+
+::domain
+name = security
+required = zero-ambient-authority; capability-provenance; revocation; generations; security-floor; anti-rollback; W-X; code-admission; DMA-isolation; audit; entropy; cryptography-implementation; keys; signatures; attestation; secure-update
+status = MISSING
+::end
+
+::domain
+name = regeneration
+required = genome; morphology; cell-identity; differentiation; quarantine; revocation; validated-state-transfer; regeneration; reintegration; whole-system-recovery; genome-reconstruction
+status = MISSING
+::end
+
+::domain
+name = storage
+required = block-abstraction; allocator; object-graph; namespace; transactions; crash-consistency; integrity; encryption; snapshots; quotas; repair; device-fault-injection; recovery
+status = MISSING
+::end
+
+::domain
+name = device-model
+required = discovery; driver-cells; DMA; IOMMU-policy; PCI-family; USB-family; storage-devices; input-devices; audio; network; display-GPU; NPU; camera; microphone; haptics; braille; power-battery
+status = MISSING
+::end
+
+::domain
+name = networking
+required = link; address-resolution; internet; transport; naming; configuration; firewall-policy; capability-egress; time-sync; diagnostics
+status = MISSING
+::end
+
+::domain
+name = semantic-accessibility
+required = semantic-graph; keyboard; speech; braille; visual-projection; haptic-projection; focus-navigation; text-editing; structured-errors; progress; recovery; protected-sensitive-output; accessibility-A+B
+status = PARTIAL
+::end
+
+::domain
+name = text-locale
+required = native-text-model; normalization; locale; collation; input-methods; fonts; shaping; bidirectional-text; speech-language-resources; braille-resources
+status = MISSING
+::end
+
+::domain
+name = audio-vision-sensors
+required = audio-input; audio-output; vision-camera; GPU-visual-processing; optional-environmental-sensors; perception-routing
+status = MISSING
+::end
+
+::domain
+name = cognition-memory
+required = working-memory; episodic-memory; semantic-memory; procedural-memory; perception; attention; reasoning; planning; self-evaluation; intent; deterministic-authority-gate; learning; provenance; user-control
+status = MISSING
+::end
+
+::domain
+name = identity-session
+required = user-identity; authentication; sessions; delegation; consent; owner-break-glass; accessible-authentication; secrets-boundary
+status = MISSING
+::end
+
+::domain
+name = system-services
+required = time; clocks; timers; randomness; configuration; logging; audit; crash-reporting; service-discovery; resource-budgets; power-management
+status = MISSING
+::end
+
+::domain
+name = package-update
+required = package-format; dependency-model; install; remove; update; rollback; security-floor; provenance; signatures; offline-update; recovery-update
+status = MISSING
+::end
+
+::domain
+name = applications
+required = native-shell; settings; file-object-browser; terminal; editor; diagnostics; updater; recovery; accessibility-settings; developer-tools
+status = MISSING
+::end
+
+::domain
+name = compatibility-boundaries
+required = foreign-files; foreign-filesystems; foreign-network-protocols; foreign-executable-APIs; Windows-boundary; Linux-boundary; Android-boundary; macOS-boundary
+status = FUTURE
+::end
+
+::domain
+name = release-distribution
+required = deterministic-image; signing; provenance; SBOM-equivalent-native-manifest; installer; recovery-image; update-channel; reproducible-release; accessibility-release-evidence
+status = MISSING
+::end

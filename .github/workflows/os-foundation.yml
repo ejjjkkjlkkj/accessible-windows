@@ -19,7 +19,7 @@ jobs:
         run: |
           set -euo pipefail
           test -s sovereign/formats0/registry.awformats0
-          bad="$(find sovereign -type f | grep -Ev '\.(awsource0|awobject0|awspec0|awmanifest0|awhash0|awa11y0|awformats0|awtools0|awproof0|awseed0|awimage0|awpackage0)$' || true)"
+          bad="$(find sovereign -type f | grep -Ev '\.(awsource0|awobject0|awspec0|awmanifest0|awhash0|awa11y0|awformats0|awtools0|awproof0|awseed0|awimage0|awpackage0|awcatalog0|awconfig0|awtrace0|awtest0|awcorpus0|awbench0|awsymbol0|awabi0|awschema0|awmessage0|awcap0|awgenome0|awmorph0|awmemory0|awsemantic0|awsnapshot0|awupdate0|awdevice0|awdriver0|awaudit0|awcrash0|awrecovery0|awdoc0|awreport0|awlocale0|awfont0|awspeech0|awbraille0|awkey0|awsig0)$' || true)"
           if [ -n "$bad" ]; then
             echo "Non-AW0 sovereign extension detected:"
             echo "$bad"
@@ -66,7 +66,7 @@ jobs:
           grep -q 'path keyboard | speech | braille' sovereign/lang0/foundation.awsource0
           grep -q 'accessibility = mandatory-A+B' sovereign/tools0/registry.awtools0
 
-  accessibility-completeness-B:
+  external-byte-witness:
     strategy:
       fail-fast: false
       matrix:
@@ -74,14 +74,14 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
-      - name: Independent AW0 witness on Unix
+      - name: External byte witness on Unix - not accessibility B
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
           find sovereign -type f -print0 | sort -z | xargs -0 sha256sum
           grep -q 'foundation.awsource0|interactive|PASS|UNPROVEN|' sovereign/a11y0/registry.awa11y0
-      - name: Independent AW0 witness on Windows
+      - name: External byte witness on Windows - not accessibility B
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -110,7 +110,14 @@ jobs:
             grep -q 'deny capability.mint' "sovereign/tools0/src/$tool.awsource0"
           done
           test "$(grep -c 'accessibility = mandatory-A+B' sovereign/tools0/registry.awtools0)" -eq 10
-          test "$(grep -c 'B = UNPROVEN' sovereign/tools0/registry.awtools0)" -eq 10
+          test "$(grep -c 'B = UNPROVEN' sovereign/tools0/registry.awtools0)" -ge 10
+      - name: Every required future tool is explicit
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tool in awdecode0 awtest0 awbench0 awdebug0 awprofile0 awinspect0 awformat0 awlint0 awdoc0 awedit0 awshell0 awinstall0 awupdate0 awrecover0 awimage0 awrepro0 awsign0 awverify0 awrepo0 awci0 awschema0 awgenome0 awdevice0 awnet0 awlocale0 awspeech0 awbraille0; do
+            grep -q "name = $tool" sovereign/tools0/registry.awtools0
+          done
 
   claim-discipline:
     runs-on: ubuntu-24.04
@@ -122,3 +129,31 @@ jobs:
           set -euo pipefail
           grep -q 'status = UNPROVEN' sovereign/seed0/seed.awspec0
           grep -q 'foundation.awsource0|interactive|PASS|UNPROVEN|' sovereign/a11y0/registry.awa11y0
+
+  completeness-catalog:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Required architecture domains are never silently omitted
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s sovereign/catalog0/system.awcatalog0
+          for domain in bootstrap-machine-boundary toolchain development-environment proof-validation kernel-core security regeneration storage device-model networking semantic-accessibility text-locale audio-vision-sensors cognition-memory identity-session system-services package-update applications compatibility-boundaries release-distribution; do
+            grep -q "name = $domain" sovereign/catalog0/system.awcatalog0
+          done
+          grep -q 'release-rule = no-required-component-may-be-MISSING' sovereign/catalog0/system.awcatalog0
+
+  accessibility-proof-truth:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Do not confuse byte checks with accessibility Evidence B
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -E '\|PASS\|PASS\|A11Y0\.' sovereign/a11y0/registry.awa11y0; then
+            echo 'Unexpected accessibility B=PASS without native behavioral proof artifacts.'
+            exit 1
+          fi
+          grep -q 'B-PASS-requires-independent-behavioral-witness' sovereign/a11y0/format.awspec0

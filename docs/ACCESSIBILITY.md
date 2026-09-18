@@ -53,7 +53,7 @@ Their core functions must be operable non-visually and must expose the same sema
 
 ## Registry rule
 
-`sovereign/a11y0/REGISTRY.a11y` is the current canonical proof registry.
+`sovereign/a11y0/registry.awa11y0` is the current canonical proof registry.
 
 Every active sovereign artifact must have exactly one registry record containing:
 - path;
@@ -65,3 +65,12 @@ Every active sovereign artifact must have exactly one registry record containing
 The repository policy fails if an active sovereign artifact is missing from the registry.
 
 A status may be `PASS`, `UNPROVEN` or `FAIL`. Release gates accept only required `PASS + PASS`.
+
+
+## Proof truthfulness
+
+A byte hash, file-presence check or cross-host checkout is not by itself Evidence B for accessibility.
+
+Evidence B for accessibility requires behavior: an independent non-visual consumer, keyboard path, error/recovery path, or equivalent executable witness appropriate to the artifact.
+
+Until such a witness exists, B remains `UNPROVEN`.

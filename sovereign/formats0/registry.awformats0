@@ -92,3 +92,218 @@ id = AW0.FORMAT.NO-UNREGISTERED-SOVEREIGN-EXTENSION
 rule = Every file under sovereign/ uses a registered AW0 extension.
 evidence = A+B
 ::end
+
+::format
+extension = .awcatalog0
+magic = AW0CAT00
+role = master completeness catalog
+encoding = utf-8
+::end
+
+::format
+extension = .awconfig0
+magic = AW0CFG00
+role = native configuration
+encoding = utf-8-or-binary
+::end
+
+::format
+extension = .awtrace0
+magic = AW0TRC00
+role = semantic runtime trace
+encoding = binary-or-utf8
+::end
+
+::format
+extension = .awtest0
+magic = AW0TST00
+role = test definition/vector
+encoding = binary-or-utf8
+::end
+
+::format
+extension = .awcorpus0
+magic = AW0CRP00
+role = fuzz/adversarial corpus
+encoding = binary
+::end
+
+::format
+extension = .awbench0
+magic = AW0BNC00
+role = benchmark definition/result
+encoding = binary-or-utf8
+::end
+
+::format
+extension = .awsymbol0
+magic = AW0SYM00
+role = debug/symbol information
+encoding = binary
+::end
+
+::format
+extension = .awabi0
+magic = AW0ABI00
+role = native ABI/interface contract
+encoding = binary-or-utf8
+::end
+
+::format
+extension = .awschema0
+magic = AW0SCH00
+role = schema/type/interface description
+encoding = binary-or-utf8
+::end
+
+::format
+extension = .awmessage0
+magic = AW0MSG00
+role = typed message/IPC schema or instance
+encoding = binary
+::end
+
+::format
+extension = .awcap0
+magic = AW0CAP00
+role = capability/authority description
+encoding = binary
+::end
+
+::format
+extension = .awgenome0
+magic = AW0GEN00
+role = regenerative genome description
+encoding = binary
+::end
+
+::format
+extension = .awmorph0
+magic = AW0MOR00
+role = morphogenetic topology description
+encoding = binary
+::end
+
+::format
+extension = .awmemory0
+magic = AW0MEM00
+role = native cognitive-memory container
+encoding = binary
+::end
+
+::format
+extension = .awsemantic0
+magic = AW0SEM00
+role = native semantic graph/record
+encoding = binary
+::end
+
+::format
+extension = .awsnapshot0
+magic = AW0SNP00
+role = versioned snapshot description
+encoding = binary
+::end
+
+::format
+extension = .awupdate0
+magic = AW0UPD00
+role = update transaction unit
+encoding = binary
+::end
+
+::format
+extension = .awdevice0
+magic = AW0DEV00
+role = device identity/capability description
+encoding = binary
+::end
+
+::format
+extension = .awdriver0
+magic = AW0DRV00
+role = native driver cell image
+encoding = binary
+::end
+
+::format
+extension = .awaudit0
+magic = AW0AUD00
+role = security/provenance audit stream
+encoding = binary
+::end
+
+::format
+extension = .awcrash0
+magic = AW0CRS00
+role = structured crash/fault record
+encoding = binary
+::end
+
+::format
+extension = .awrecovery0
+magic = AW0RCV00
+role = recovery plan/state
+encoding = binary
+::end
+
+::format
+extension = .awdoc0
+magic = AW0DOC00
+role = native semantic documentation
+encoding = binary-or-utf8
+::end
+
+::format
+extension = .awreport0
+magic = AW0RPT00
+role = structured verification/report output
+encoding = binary-or-utf8
+::end
+
+::format
+extension = .awlocale0
+magic = AW0LOC00
+role = locale/language resources
+encoding = binary
+::end
+
+::format
+extension = .awfont0
+magic = AW0FNT00
+role = native font/glyph resource
+encoding = binary
+::end
+
+::format
+extension = .awspeech0
+magic = AW0SPK00
+role = speech/voice resource or model descriptor
+encoding = binary
+::end
+
+::format
+extension = .awbraille0
+magic = AW0BRL00
+role = braille table/device semantic resource
+encoding = binary
+::end
+
+::format
+extension = .awkey0
+magic = AW0KEY00
+role = key material container descriptor
+encoding = binary
+::end
+
+::format
+extension = .awsig0
+magic = AW0SIG00
+role = signature/attestation record
+encoding = binary
+::end
+
+::completeness
+rule = New sovereign artifact classes must be registered before first use.
+rule = Format registration is specification only; implementation remains UNPROVEN until A+B.
+::end

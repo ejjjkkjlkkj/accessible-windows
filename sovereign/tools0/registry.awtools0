@@ -92,3 +92,273 @@ A = PASS
 B = UNPROVEN
 status = SOURCE-DEFINED-UNPROVEN
 ::end
+
+::tool
+name = awdecode0
+role = instruction/object decoder and disassembler
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awtest0
+role = unit/property/integration test runner
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awbench0
+role = benchmark runner and comparator
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awdebug0
+role = interactive semantic debugger
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awprofile0
+role = CPU/GPU/NPU/resource profiler
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awinspect0
+role = artifact/image/object inspector
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awformat0
+role = AWL source formatter
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awlint0
+role = AWL static linter
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awdoc0
+role = semantic documentation generator/viewer
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awedit0
+role = native source editor
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awshell0
+role = native command and task shell
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awinstall0
+role = verified installation/apply tool
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awupdate0
+role = transactional update engine
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awrecover0
+role = recovery and regeneration tool
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awimage0
+role = boot/system image constructor
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awrepro0
+role = reproducibility verifier
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awsign0
+role = signature/attestation producer
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awverify0
+role = signature/provenance verifier
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awrepo0
+role = project-owned source/version store
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awci0
+role = project-owned proof/build automation runner
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awschema0
+role = schema/interface compiler
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awgenome0
+role = genome/morphology validator and builder
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awdevice0
+role = device-description and driver contract tool
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awnet0
+role = network protocol/conformance test tool
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awlocale0
+role = locale/text resource builder
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awspeech0
+role = speech resource/model builder
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end
+
+::tool
+name = awbraille0
+role = braille resource/device contract builder
+source = UNASSIGNED
+accessibility = mandatory-A+B
+A = UNPROVEN
+B = UNPROVEN
+status = MISSING
+::end

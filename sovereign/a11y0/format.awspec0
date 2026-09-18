@@ -1,7 +1,7 @@
 AW0SPEC0
 kind = accessibility-proof-format
 identity = A11Y0
-status = SPECIFICATION-V0
+status = SPECIFICATION-V1
 
 ::record
 fields = path | class | A | B | invariant
@@ -16,6 +16,14 @@ id = A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
 interactive = semantic-source + keyboard + native-nonvisual-path
 noninteractive = structured-state-errors + no-hidden-visual-human-state
 omission = forbidden
+::end
+
+::truth
+rule = file-presence-is-not-accessibility-B
+rule = hash-equality-is-not-accessibility-B
+rule = cross-host-byte-identity-is-not-accessibility-B
+rule = B-PASS-requires-independent-behavioral-witness
+rule = no-proof-means-UNPROVEN
 ::end
 
 ::release
