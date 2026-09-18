@@ -53,11 +53,7 @@ impl SystemState {
     /// Produces the foundational human-I/O contract.
     #[must_use]
     pub const fn human_io_contract(self) -> HumanIoContract {
-        HumanIoContract::new(
-            REQUIRED_ALL,
-            REQUIRED_ANY_OUTPUT,
-            self.verified_human_io,
-        )
+        HumanIoContract::new(REQUIRED_ALL, REQUIRED_ANY_OUTPUT, self.verified_human_io)
     }
 
     /// Produces a boot handoff from this system state.
@@ -82,9 +78,7 @@ mod tests {
     fn semantic_keyboard_and_braille_satisfy_foundation() {
         let mut state = SystemState::new(BootPhase::Firmware);
         state.verify_human_io(
-            human_io::KEYBOARD_INPUT
-                | human_io::SEMANTIC_INTERACTION
-                | human_io::BRAILLE_OUTPUT,
+            human_io::KEYBOARD_INPUT | human_io::SEMANTIC_INTERACTION | human_io::BRAILLE_OUTPUT,
         );
         assert!(state.human_io_contract().is_satisfied());
         state.advance_to(BootPhase::Bootloader);

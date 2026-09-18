@@ -70,9 +70,7 @@ mod tests {
             HumanIoContract::new(
                 human_io::KEYBOARD_INPUT | human_io::SEMANTIC_INTERACTION,
                 human_io::SPEECH_OUTPUT | human_io::BRAILLE_OUTPUT,
-                human_io::KEYBOARD_INPUT
-                    | human_io::SEMANTIC_INTERACTION
-                    | human_io::VISUAL_OUTPUT,
+                human_io::KEYBOARD_INPUT | human_io::SEMANTIC_INTERACTION | human_io::VISUAL_OUTPUT,
             ),
         );
 

@@ -18,8 +18,10 @@ jobs:
         shell: bash
         run: |
           test ! -e crates/aw-accessibility
-          ! find crates boot -type f \( -name '*.rs' -o -name 'Cargo.toml' \) -print0 |
-            xargs -0 grep -nEi 'UIAutomation|MSAA|IAccessible|AT-SPI|AXAPI|Android Accessibility|AccessKit|Electron|GTK|Qt' 
+          if grep -R -nEi --include='*.rs' --include='Cargo.toml'             'UIAutomation|MSAA|IAccessible|AT-SPI|AXAPI|Android Accessibility|AccessKit|Electron|GTK|Qt'             crates boot; then
+            echo "External accessibility/UI framework dependency detected."
+            exit 1
+          fi
       - name: Require architectural constitution
         shell: bash
         run: |
