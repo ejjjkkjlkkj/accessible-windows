@@ -111,14 +111,14 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $proof = Get-Content 'lab11/amd5800h-real.labproof' -Raw
-          if ($proof -notmatch '(?m)^human-facing = false$') {
+          $proofLines = Get-Content 'lab11/amd5800h-real.labproof'
+          if ($proofLines -notcontains 'human-facing = false') {
             throw 'LAB11 accessibility boundary missing human-facing=false'
           }
-          if ($proof -notmatch '(?m)^accessibility-behavior = not-applicable$') {
+          if ($proofLines -notcontains 'accessibility-behavior = not-applicable') {
             throw 'LAB11 accessibility behavior boundary missing'
           }
-          if ($proof -notmatch '(?m)^accessibility-gate = .+$') {
+          if (-not ($proofLines | Where-Object { $_ -like 'accessibility-gate = *' })) {
             throw 'LAB11 accessibility gate missing'
           }
 
