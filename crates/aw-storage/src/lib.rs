@@ -175,7 +175,10 @@ impl SuperblockV1 {
 /// verification and write-order evidence will be added before this function is
 /// used for production recovery.
 #[must_use]
-pub fn newest_structurally_valid<'a>(a: &'a SuperblockV1, b: &'a SuperblockV1) -> Option<&'a SuperblockV1> {
+pub fn newest_structurally_valid<'a>(
+    a: &'a SuperblockV1,
+    b: &'a SuperblockV1,
+) -> Option<&'a SuperblockV1> {
     let a_valid = a.validate_structure().is_ok();
     let b_valid = b.validate_structure().is_ok();
 
