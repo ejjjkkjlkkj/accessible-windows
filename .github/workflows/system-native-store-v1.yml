@@ -84,6 +84,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          Add-Type -TypeDefinition (Get-Content 'system/native-store-v1/NativeStoreWitness.cs' -Raw) -Language CSharp
           $raw=[IO.File]::ReadAllBytes((Join-Path $PWD 'store-runtime/mutated.qstore'))
           if ($raw.Length -ne (256*9)) { throw "mutated store length mismatch: $($raw.Length)" }
 
@@ -105,6 +106,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          Add-Type -TypeDefinition (Get-Content 'system/native-store-v1/NativeStoreWitness.cs' -Raw) -Language CSharp
           $raw=[IO.File]::ReadAllBytes((Join-Path $PWD 'store-runtime/mutated.qstore'))
           [Array]::Copy($raw,0,$raw,9,8)
           [IO.File]::WriteAllBytes((Join-Path $PWD 'store-runtime/ambiguous.qstore'),$raw)
