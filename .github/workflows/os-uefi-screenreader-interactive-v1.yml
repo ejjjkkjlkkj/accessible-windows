@@ -394,6 +394,8 @@ jobs:
         run: |
           set -euo pipefail
           root=boot/uefi-screenreader-interactive-v1
+
+          # Freeze evidence from this tested run before moving to the latest os tip.
           python - <<'PY'
           from pathlib import Path
           import hashlib
@@ -401,11 +403,6 @@ jobs:
           import wave
 
           root=Path('boot/uefi-screenreader-interactive-v1')
-          proof=root/'os-uefi-screenreader-interactive-v1.labproof'
-          text=proof.read_text()
-          if 'proof = PENDING_CI' not in text:
-              raise SystemExit('proof state is not PENDING_CI')
-
           wav=root/'interactive.wav'
           with wave.open(str(wav),'rb') as w:
               frames=w.getnframes()
@@ -413,29 +410,62 @@ jobs:
               raw=w.readframes(frames)
           active=sum(abs(x-128)>=3 for x in raw)
           ratio=active/max(1,len(raw))
-
           efi=(root/'BOOTX64.EFI').read_bytes()
           wav_bytes=wav.read_bytes()
-          text=text.replace('proof = PENDING_CI','proof = PASS')
-          text += (
-              f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
-              f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
-              "proof-keyboard-up-down = PASS\n"
-              "proof-keyboard-enter = PASS\n"
-              "proof-focus-speech = PASS\n"
-              "proof-action-speech = PASS\n"
-              "proof-invalid-key-speech = PASS\n"
-              "proof-audio-waveform = PASS\n"
-              f"proof-audio-frames = {frames}\n"
-              f"proof-audio-duration-seconds = {frames/rate}\n"
-              f"proof-audio-active-ratio = {ratio}\n"
-              f"proof-efi-sha256 = {hashlib.sha256(efi).hexdigest()}\n"
-              f"proof-wav-sha256 = {hashlib.sha256(wav_bytes).hexdigest()}\n"
-          )
-          proof.write_text(text)
+
+          lines=[
+              'proof = PASS',
+              f"proof-run = {os.environ['GITHUB_RUN_ID']}",
+              f"proof-head-sha = {os.environ['GITHUB_SHA']}",
+              'proof-keyboard-up-down = PASS',
+              'proof-keyboard-enter = PASS',
+              'proof-focus-speech = PASS',
+              'proof-action-speech = PASS',
+              'proof-invalid-key-speech = PASS',
+              'proof-audio-waveform = PASS',
+              f'proof-audio-frames = {frames}',
+              f'proof-audio-duration-seconds = {frames/rate}',
+              f'proof-audio-active-ratio = {ratio}',
+              f'proof-efi-sha256 = {hashlib.sha256(efi).hexdigest()}',
+              f'proof-wav-sha256 = {hashlib.sha256(wav_bytes).hexdigest()}',
+          ]
+          Path('/tmp/uefi-interactive-proof.txt').write_text('\n'.join(lines)+'\n')
           PY
+
+          # Preserve every commit that may have landed on os while this job was running.
+          git fetch origin os
+          git checkout -B os origin/os
+
+          python - <<'PY'
+          from pathlib import Path
+
+          proof=Path('boot/uefi-screenreader-interactive-v1/os-uefi-screenreader-interactive-v1.labproof')
+          text=proof.read_text()
+          if 'proof = PASS' in text:
+              print('UEFI_INTERACTIVE_PROOF_ALREADY_RECORDED=PASS')
+              raise SystemExit(0)
+          if 'proof = PENDING_CI' not in text:
+              raise SystemExit('unexpected proof state')
+          verified=Path('/tmp/uefi-interactive-proof.txt').read_text().rstrip('\n')
+          proof.write_text(text.replace('proof = PENDING_CI',verified))
+          PY
+
+          if git diff --quiet -- "$root/os-uefi-screenreader-interactive-v1.labproof"; then
+            exit 0
+          fi
+
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add "$root/os-uefi-screenreader-interactive-v1.labproof"
           git commit -m "Record interactive spoken UEFI proof [skip ci]"
-          git push origin HEAD:os
+
+          # Never force-push. Rebase on any last-second concurrent os commits.
+          for attempt in 1 2 3; do
+            if git push origin os; then
+              exit 0
+            fi
+            git fetch origin os
+            git rebase origin/os
+          done
+          echo "Unable to persist proof without overwriting concurrent work" >&2
+          exit 1
