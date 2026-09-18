@@ -1,0 +1,417 @@
+name: os-uefi-hii-platform-commit-v1
+
+on:
+  push:
+    branches: [os]
+    paths:
+      - 'boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py'
+      - 'boot/uefi-hii-option-speech-v1/build_uefi_hii_option_speech.py'
+      - 'boot/uefi-hii-varstore-def-v1/os-uefi-hii-varstore-def-v1.labproof'
+      - 'boot/uefi-hii-platform-commit-v1/os-uefi-hii-platform-commit-v1.labproof'
+      - '.github/workflows/os-uefi-hii-platform-commit-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  q35-platform-accessible-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Enforce writable PlatformDxe target
+        shell: python
+        run: |
+          from pathlib import Path
+          src=Path('boot/uefi-hii-varstore-def-v1/os-uefi-hii-varstore-def-v1.labproof').read_text().splitlines()
+          have=set(src)
+          for line in [
+              'proof = PASS',
+              'proof-question-text = Change Preferred Resolution for Next Boot',
+              'proof-question-id = 2',
+              'proof-varstore-id = 1',
+              'proof-varstore-info = 32',
+              'proof-varstore-opcode-hex = 24',
+              'proof-varstore-size = 36',
+          ]:
+              assert line in have,line
+          contract=set(Path('boot/uefi-hii-platform-commit-v1/os-uefi-hii-platform-commit-v1.labproof').read_text().splitlines())
+          for line in [
+              'target-driver = OvmfPkg/PlatformDxe',
+              'target-varstore-id = 1',
+              'target-varstore-offset = 32',
+              'target-varstore-size = 36',
+              'commit-key = Enter',
+              'pre-enter-write = forbidden',
+              'physical-host-uefi-variable-write = forbidden',
+          ]:
+              assert line in contract,line
+          print('PLATFORM_WRITABLE_TARGET_CONTRACT=PASS')
+
+      - name: Audit integrated screen reader commit source
+        shell: python
+        run: |
+          from pathlib import Path
+          import ast,re
+          src=Path('boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py').read_text()
+          opt=Path('boot/uefi-hii-option-speech-v1/build_uefi_hii_option_speech.py').read_text()
+          ast.parse(src); ast.parse(opt)
+          labels=re.findall(r"c\.label\('([^']+)'\)",src)
+          dup=sorted({x for x in labels if labels.count(x)>1})
+          assert not dup,dup
+          for token in [
+              'PLATFORM_TARGET_ONLY=False',
+              "'--platform-probe'",
+              "'--wait-platform-commit'",
+              'PLATFORM_WRITABLE_TARGET=PASS',
+              "c.label('wait_down_key')",
+              "c.label('wait_commit_key')",
+              "c.label('commit_focused_option')",
+              'HII_COMMIT_TARGET_STAGED=PASS',
+              'BLOCK_TO_CONFIG=PASS',
+              'ROUTE_CONFIG=PASS',
+              'COMMIT_CONFIRMATION_SPEECH_HDA=PASS',
+          ]:
+              assert token in src,token
+          for digit in '0123456789':
+              assert (" '"+digit+"':") in opt,digit
+          print('PLATFORM_ACCESSIBLE_COMMIT_SOURCE=PASS')
+
+      - name: Install QEMU and OVMF
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+
+      - name: Build deterministic commit and verifier EFI
+        shell: bash
+        run: |
+          set -euo pipefail
+          src=boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py
+          root=boot/uefi-hii-platform-commit-v1
+          python "$src" "$root/BOOTX64.EFI" --wait-platform-commit | tee "$root/build.log"
+          python "$src" "$root/BOOTX64-2.EFI" --wait-platform-commit > "$root/build2.log"
+          cmp "$root/BOOTX64.EFI" "$root/BOOTX64-2.EFI"
+          python "$src" "$root/BOOTX64-VERIFY.EFI" --platform-probe | tee "$root/verify-build.log"
+          grep -F 'platform-target-only=enabled' "$root/build.log"
+          grep -F 'hii-down-commit=enabled' "$root/build.log"
+          grep -F 'platform-target-only=enabled' "$root/verify-build.log"
+          grep -F 'hii-down-commit=disabled' "$root/verify-build.log"
+          sha256sum "$root/BOOTX64.EFI" "$root/BOOTX64-VERIFY.EFI"
+
+      - name: Resolve OVMF
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE=''; VARS=''
+          for pair in \
+            '/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd' \
+            '/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd' \
+            '/usr/share/edk2/ovmf/OVMF_CODE.fd|/usr/share/edk2/ovmf/OVMF_VARS.fd'
+          do
+            IFS='|' read -r code vars <<< "$pair"
+            if [[ -f "$code" && -f "$vars" ]]; then CODE="$code"; VARS="$vars"; break; fi
+          done
+          test -n "$CODE" -a -n "$VARS"
+          printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-hii-platform-commit-v1/ovmf.env
+
+      - name: DOWN speak then ENTER persistent commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-platform-commit-v1
+          source "$root/ovmf.env"
+          cp "$VARS" "$root/vars.fd"
+          rm -rf "$root/esp"; mkdir -p "$root/esp/EFI/BOOT"
+          cp "$root/BOOTX64.EFI" "$root/esp/EFI/BOOT/BOOTX64.EFI"
+          rm -f "$root/commit.serial" "$root/commit.wav" "$root/qmp.sock" "$root/runtime.txt"
+
+          qemu-system-x86_64 \
+            -machine q35,accel=tcg -m 192M \
+            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,file="$root/vars.fd" \
+            -drive format=raw,file=fat:rw:"$root/esp" \
+            -audiodev wav,id=aud,path="$root/commit.wav",out.frequency=48000,out.channels=2 \
+            -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0 \
+            -device hda-micro,bus=hda0.0,cad=0,audiodev=aud,mixer=on \
+            -display none -monitor none \
+            -qmp unix:"$root/qmp.sock",server=on,wait=off \
+            -serial file:"$root/commit.serial" \
+            -parallel none -net none -no-reboot -no-shutdown &
+          qpid=$!
+          trap 'kill "$qpid" 2>/dev/null || true' EXIT
+
+          python - <<'PY'
+          from pathlib import Path
+          import json,re,socket,time
+          root=Path('boot/uefi-hii-platform-commit-v1')
+          serial=root/'commit.serial'; qmp=root/'qmp.sock'
+          def raw(): return serial.read_bytes() if serial.exists() else b''
+          def wait(tokens,label,timeout=45):
+              end=time.time()+timeout
+              while time.time()<end:
+                  data=raw()
+                  if b'STATUS=BLOCKED\r\n' in data:
+                      raise SystemExit(label+' blocked: '+repr(data[-32000:]))
+                  if all(x in data for x in tokens):
+                      return data
+                  time.sleep(.1)
+              raise SystemExit(label+' timeout: '+repr(raw()[-32000:]))
+          def le16(m): return int.from_bytes(bytes.fromhex(m.group(1).decode()),'little')
+          def le32hex(s): return int.from_bytes(bytes.fromhex(s.decode())[:4],'little')
+
+          data=wait([
+              b'PLATFORM_WRITABLE_TARGET=PASS\r\n',
+              b'HII_NAVIGATION_KEY=WAIT_DOWN\r\n',
+              b'VARSTORE_SIZE_LE_HEX=2400\r\n',
+          ],'live platform target')
+          qid=re.search(br'QUESTION_ID_LE_HEX=([0-9A-F]{4})',data)
+          vsid=re.search(br'VARSTORE_ID_LE_HEX=([0-9A-F]{4})',data)
+          info=re.search(br'VARSTORE_INFO_LE_HEX=([0-9A-F]{4})',data)
+          assert qid and vsid and info,data[-16000:]
+          assert (le16(qid),le16(vsid),le16(info))==(2,1,32)
+
+          end=time.time()+10
+          while time.time()<end and not qmp.exists(): time.sleep(.05)
+          if not qmp.exists(): raise SystemExit('QMP socket missing')
+          with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as s:
+              s.connect(str(qmp)); f=s.makefile('rwb',buffering=0)
+              greeting=json.loads(f.readline()); assert 'QMP' in greeting
+              f.write((json.dumps({'execute':'qmp_capabilities'})+'\r\n').encode())
+              while True:
+                  m=json.loads(f.readline())
+                  if 'return' in m: break
+              def send(qcode):
+                  f.write((json.dumps({'execute':'send-key','arguments':{'keys':[{'type':'qcode','data':qcode}],'hold-time':50}})+'\r\n').encode())
+                  while True:
+                      m=json.loads(f.readline())
+                      if 'return' in m: return
+                      if 'error' in m: raise SystemExit('QMP send-key failed: '+repr(m))
+
+              send('down')
+              data=wait([
+                  b'HII_NAVIGATION_KEY=PASS\r\n',
+                  b'NAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\n',
+                  b'QUESTION_TEXT=Change Preferred Resolution for Next Boot\r\n',
+                  b'NAV_FOCUS_OPTION_TEXT=',
+                  b'NAV_FOCUS_SPOKEN_PREFIX=PASS\r\n',
+                  b'NAV_FOCUS_SPEECH_HDA=PASS\r\n',
+                  b'HII_COMMIT_KEY=WAIT_ENTER\r\n',
+              ],'focused writable option')
+              cur=re.findall(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',data)
+              nxt=re.findall(br'NAV_NEXT_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})',data)
+              labels=re.findall(br'NAV_FOCUS_OPTION_TEXT=([^\r\n]+)',data)
+              spoken=re.findall(br'NAV_FOCUS_SPOKEN_PREFIX=([0-9a-z]{1,8})',data)
+              assert cur and nxt and labels and spoken,data[-24000:]
+              initial=le32hex(cur[-1]); target=le32hex(nxt[-1])
+              focus=labels[-1].decode('ascii','replace').strip()
+              prefix=spoken[-1].decode()
+              expected=''.join(ch.lower() for ch in focus if ch.isascii() and ch.isalnum())[:8]
+              assert target!=initial,(initial,target)
+              assert prefix==expected,(prefix,expected,focus)
+              assert b'ROUTE_CONFIG=PASS\r\n' not in data
+              print('PLATFORM_PRE_ENTER_WRITE_BLOCKED=PASS')
+              send('ret')
+
+          data=wait([
+              b'HII_COMMIT_KEY=ENTER\r\n',
+              b'HII_COMMIT_KEY=PASS\r\n',
+              b'HII_COMMIT_TARGET_STAGED=PASS\r\n',
+              b'HII_COMMIT_CONFIG_REQUEST=PASS\r\n',
+              b'BLOCK_TO_CONFIG=PASS\r\n',
+              b'ROUTE_CONFIG=PASS\r\n',
+              b'COMMIT_CONFIRMATION_SPEECH_HDA=PASS\r\n',
+              b'STATUS=PASS\r\n',
+          ],'persistent commit')
+          root.joinpath('runtime.txt').write_text(
+              f'initial-value = {initial}\n'
+              f'target-value = {target}\n'
+              f'focus-label = {focus}\n'
+              f'focus-spoken-prefix = {prefix}\n'
+              'pre-enter-write = blocked\n'
+              'enter-key-event = PASS\n'
+              'block-to-config = PASS\n'
+              'route-config = PASS\n'
+              'confirmation-native-hda-speech = PASS\n'
+          )
+          print('PLATFORM_ACCESSIBLE_COMMIT_RUNTIME=PASS')
+          PY
+
+          sleep 1
+          kill "$qpid" 2>/dev/null || true
+          wait "$qpid" 2>/dev/null || true
+          trap - EXIT
+
+      - name: Validate focus and confirmation audio
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib,struct,wave
+          root=Path('boot/uefi-hii-platform-commit-v1'); p=root/'commit.wav'
+          assert p.exists() and p.stat().st_size>10000,p
+          with wave.open(str(p),'rb') as w:
+              ch=w.getnchannels(); rate=w.getframerate(); width=w.getsampwidth()
+              frames=w.getnframes(); raw=w.readframes(frames)
+          assert (ch,rate,width)==(2,48000,2),(ch,rate,width)
+          vals=struct.unpack('<'+'h'*(len(raw)//2),raw)
+          peak=max(abs(v) for v in vals); active=sum(abs(v)>=500 for v in vals)
+          assert peak>=5000,peak
+          assert active>=4000,active
+          (root/'metrics.txt').write_text(
+              f'frames={frames}\npeak={peak}\nactive={active}\n'
+              f'wav-sha256={hashlib.sha256(p.read_bytes()).hexdigest()}\n')
+          print('PLATFORM_ACCESSIBLE_COMMIT_WAVEFORM=PASS')
+
+      - name: Fresh same-VARS boot proves persisted target
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-platform-commit-v1
+          source "$root/ovmf.env"
+          cp "$root/BOOTX64-VERIFY.EFI" "$root/esp/EFI/BOOT/BOOTX64.EFI"
+          rm -f "$root/post.serial" "$root/post.wav"
+          qemu-system-x86_64 \
+            -machine q35,accel=tcg -m 192M \
+            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,file="$root/vars.fd" \
+            -drive format=raw,file=fat:rw:"$root/esp" \
+            -audiodev wav,id=aud,path="$root/post.wav",out.frequency=48000,out.channels=2 \
+            -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0 \
+            -device hda-micro,bus=hda0.0,cad=0,audiodev=aud,mixer=on \
+            -display none -monitor none -serial file:"$root/post.serial" \
+            -parallel none -net none -no-reboot -no-shutdown &
+          qpid=$!
+          trap 'kill "$qpid" 2>/dev/null || true' EXIT
+          python - <<'PY'
+          from pathlib import Path
+          import re,time
+          root=Path('boot/uefi-hii-platform-commit-v1')
+          vals={}
+          for line in (root/'runtime.txt').read_text().splitlines():
+              if ' = ' in line:
+                  k,v=line.split(' = ',1); vals[k]=v
+          expected=int(vals['target-value'])
+          p=root/'post.serial'
+          end=time.time()+45
+          while time.time()<end:
+              data=p.read_bytes() if p.exists() else b''
+              if b'STATUS=BLOCKED\r\n' in data:
+                  raise SystemExit('fresh boot blocked: '+repr(data[-32000:]))
+              if b'STATUS=PASS\r\n' in data and b'PLATFORM_WRITABLE_TARGET=PASS\r\n' in data:
+                  cur=re.findall(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',data)
+                  q=re.findall(br'QUESTION_TEXT=([^\r\n]+)',data)
+                  assert cur and q,data[-24000:]
+                  got=int.from_bytes(bytes.fromhex(cur[-1].decode())[:4],'little')
+                  assert got==expected,(got,expected)
+                  assert q[-1].decode()=='Change Preferred Resolution for Next Boot'
+                  (root/'runtime.txt').write_text((root/'runtime.txt').read_text()+f'post-boot-value = {got}\npersistence = PASS\n')
+                  print('PLATFORM_ACCESSIBLE_COMMIT_PERSISTENCE=PASS')
+                  break
+              time.sleep(.1)
+          else:
+              raise SystemExit('timeout verifying persisted PlatformDxe value')
+          PY
+          sleep 1
+          kill "$qpid" 2>/dev/null || true
+          wait "$qpid" 2>/dev/null || true
+          trap - EXIT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: os-uefi-hii-platform-commit-v1-linux
+          path: |
+            boot/uefi-hii-platform-commit-v1/BOOTX64.EFI
+            boot/uefi-hii-platform-commit-v1/BOOTX64-VERIFY.EFI
+            boot/uefi-hii-platform-commit-v1/commit.serial
+            boot/uefi-hii-platform-commit-v1/commit.wav
+            boot/uefi-hii-platform-commit-v1/post.serial
+            boot/uefi-hii-platform-commit-v1/runtime.txt
+            boot/uefi-hii-platform-commit-v1/metrics.txt
+          if-no-files-found: error
+
+      - name: Persist revision-bound PlatformDxe proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-platform-commit-v1
+          proof="$root/os-uefi-hii-platform-commit-v1.labproof"
+          builder=boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py
+          workflow=.github/workflows/os-uefi-hii-platform-commit-v1.yml
+          tested_builder="$(git rev-parse "$GITHUB_SHA:$builder")"
+          tested_workflow="$(git rev-parse "$GITHUB_SHA:$workflow")"
+          cp "$root/BOOTX64.EFI" /tmp/platform.efi
+          cp "$root/commit.serial" /tmp/platform.serial
+          cp "$root/commit.wav" /tmp/platform.wav
+          cp "$root/post.serial" /tmp/platform-post.serial
+          cp "$root/runtime.txt" /tmp/platform-runtime.txt
+          cp "$root/metrics.txt" /tmp/platform-metrics.txt
+
+          git fetch origin os
+          git checkout -B os origin/os
+          [[ "$tested_builder" == "$(git rev-parse "os:$builder")" ]] || { echo PLATFORM_STALE_BUILDER=SKIP; exit 0; }
+          [[ "$tested_workflow" == "$(git rev-parse "os:$workflow")" ]] || { echo PLATFORM_STALE_WORKFLOW=SKIP; exit 0; }
+
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,os
+          root=Path('boot/uefi-hii-platform-commit-v1')
+          p=root/'os-uefi-hii-platform-commit-v1.labproof'
+          lines=p.read_text().splitlines()
+          states=[x for x in lines if x.startswith('proof = ')]
+          assert len(states)==1 and states[0] in {'proof = PENDING_CI','proof = PASS'},states
+          vals={}
+          for line in Path('/tmp/platform-runtime.txt').read_text().splitlines():
+              if ' = ' in line:
+                  k,v=line.split(' = ',1); vals[k]=v
+          kept=[x for x in lines if not x.startswith('proof-') and not x.startswith('proof = ')]
+          efi=Path('/tmp/platform.efi').read_bytes()
+          serial=Path('/tmp/platform.serial').read_bytes()
+          wav=Path('/tmp/platform.wav').read_bytes()
+          post=Path('/tmp/platform-post.serial').read_bytes()
+          metrics=Path('/tmp/platform-metrics.txt').read_text().strip().replace('\n','; ')
+          text='\n'.join(kept).rstrip()+'\n'
+          text += (
+              "proof = PASS\n"
+              f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
+              f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
+              "proof-live-platform-target = PASS\n"
+              f"proof-initial-value = {vals['initial-value']}\n"
+              f"proof-target-value = {vals['target-value']}\n"
+              f"proof-focus-label = {vals['focus-label']}\n"
+              f"proof-focus-spoken-prefix = {vals['focus-spoken-prefix']}\n"
+              "proof-pre-enter-write-blocked = PASS\n"
+              "proof-enter-key-event = PASS\n"
+              "proof-block-to-config = PASS\n"
+              "proof-route-config = PASS\n"
+              "proof-confirmation-native-HDA-speech = PASS\n"
+              f"proof-post-boot-value = {vals['post-boot-value']}\n"
+              "proof-persistence-after-fresh-isolated-boot = PASS\n"
+              "proof-physical-host-mutation = false\n"
+              "proof-physical-ASUS-platform-commit = false\n"
+              f"proof-wave-metrics = {metrics}\n"
+              f"proof-efi-sha256 = {hashlib.sha256(efi).hexdigest()}\n"
+              f"proof-serial-sha256 = {hashlib.sha256(serial).hexdigest()}\n"
+              f"proof-wav-sha256 = {hashlib.sha256(wav).hexdigest()}\n"
+              f"proof-post-serial-sha256 = {hashlib.sha256(post).hexdigest()}\n"
+          )
+          p.write_text(text)
+          PY
+
+          if git diff --quiet -- "$proof"; then exit 0; fi
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$proof"
+          git commit -m "Record persistent accessible PlatformDxe HII commit proof [skip ci]"
+          for attempt in 1 2 3; do
+            if git push origin os; then exit 0; fi
+            git fetch origin os
+            [[ "$tested_builder" == "$(git rev-parse "origin/os:$builder")" ]] || { echo PLATFORM_STALE_BUILDER=SKIP; exit 0; }
+            [[ "$tested_workflow" == "$(git rev-parse "origin/os:$workflow")" ]] || { echo PLATFORM_STALE_WORKFLOW=SKIP; exit 0; }
+            git rebase origin/os || { git rebase --abort || true; exit 1; }
+          done
+          exit 1
