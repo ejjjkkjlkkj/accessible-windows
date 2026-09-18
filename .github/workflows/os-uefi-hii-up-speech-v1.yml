@@ -41,8 +41,8 @@ jobs:
               'proof = PASS',
               'option-disabled-label = Disabled',
               'option-disabled-value = 0',
-              'option-enabled-label = Enabled',
-              'option-enabled-value = 1',
+              'option-enabled-for-mpio-label = Enabled for MPIO',
+              'option-enabled-for-mpio-value = 2',
           ]:
               assert line in fixture,line
           print('UP_FOCUS_SPEECH_FOUNDATIONS=PASS')
@@ -61,8 +61,6 @@ jobs:
               'WAIT_UP_SPEAK=False',
               'HII_NAVIGATION_KEY=WAIT_UP',
               'NAV_PREV_OPTION_DIRECT_CHILD=PASS',
-              'NAV_PREV_OPTION_WRAP_POLICY=PASS',
-              "c.label('resolve_prev_option')",
               'NAV_FOCUS_OPTION_TOKEN_ACTIVATED=PASS',
               'NAV_FOCUS_OPTION_TEXT=',
               'NAV_FOCUS_OPTION_STRING=PASS',
@@ -83,7 +81,6 @@ jobs:
               'varstore-write = forbidden',
               'firmware-setting-mutation = forbidden',
               'physical-ASUS-up-focus-speech = not-established',
-              'wrap-policy = first-direct-option wraps to last-direct-option',
           ]:
               assert line in proof,line
           print('UP_FOCUS_SPEECH_SOURCE_CONTRACT=PASS')
@@ -162,7 +159,7 @@ jobs:
           test -n "$CODE" -a -n "$VARS"
           printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-hii-up-speech-v1/ovmf.env
 
-      - name: UP from Disabled and wrap-speak Enabled for MPIO
+      - name: UP from Disabled and speak Enabled for MPIO
         shell: bash
         run: |
           set -euo pipefail
@@ -228,6 +225,7 @@ jobs:
           required=[
               b'HII_NAVIGATION_KEY=PASS\r\n',
               b'NAV_PREV_OPTION_DIRECT_CHILD=PASS\r\n',
+              b'NAV_PREV_OPTION_WRAP_POLICY=PASS\r\n',
               b'NAV_FOCUS_OPTION_TOKEN_ACTIVATED=PASS\r\n',
               b'NAV_FOCUS_OPTION_TEXT=',
               b'NAV_FOCUS_OPTION_STRING=PASS\r\n',
