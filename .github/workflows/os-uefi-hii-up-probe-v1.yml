@@ -58,9 +58,12 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import ast
+          import ast,re
           src=Path('boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py').read_text()
           ast.parse(src)
+          labels=re.findall(r"c\.label\('([^']+)'\)",src)
+          duplicates=sorted({x for x in labels if labels.count(x)>1})
+          assert not duplicates,duplicates
           for token in [
               'WAIT_UP_PROBE=False',
               'HII_NAVIGATION_KEY=WAIT_UP',
@@ -192,7 +195,7 @@ jobs:
             -display none -monitor none \
             -qmp unix:"$root/qmp.sock",server=on,wait=off \
             -serial file:"$root/up.serial" \
-            -parallel none -net none -no-reboot -no-shutup &
+            -parallel none -net none -no-reboot -no-shutdown &
           qpid=$!
           trap 'kill "$qpid" 2>/dev/null || true' EXIT
 
@@ -320,7 +323,7 @@ jobs:
             -device hda-micro,bus=hda0.0,cad=0,audiodev=aud,mixer=on \
             -display none -monitor none \
             -serial file:"$root/post.serial" \
-            -parallel none -net none -no-reboot -no-shutup &
+            -parallel none -net none -no-reboot -no-shutdown &
           qpid=$!
           trap 'kill "$qpid" 2>/dev/null || true' EXIT
 
