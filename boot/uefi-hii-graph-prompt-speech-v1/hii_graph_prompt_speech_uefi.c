@@ -55,6 +55,7 @@ static u8 g_route_index[MAX_NID];
 static volatile u8 *g_hda;
 static u8 g_cad;
 static u8 g_controller_preferred;
+static u32 g_codec_vendor_id;
 static stall_fn g_stall;
 static allocate_pages_fn g_allocate_pages;
 
@@ -175,6 +176,12 @@ static void serial_hex8(u8 value) {
     serial_char(h[(value >> 4) & 0xf]);
     serial_char(h[value & 0xf]);
 }
+static void serial_hex32(u32 value) {
+    serial_hex8((u8)(value >> 24));
+    serial_hex8((u8)(value >> 16));
+    serial_hex8((u8)(value >> 8));
+    serial_hex8((u8)value);
+}
 static void marker(const char *s) {
     serial_puts(s);
     serial_puts("\r\n");
@@ -189,6 +196,12 @@ static void proof_hex8(char *buf, usize cap, usize *n, u8 value) {
         buf[(*n)++] = h[(value >> 4) & 0xf];
         buf[(*n)++] = h[value & 0xf];
     }
+}
+static void proof_hex32(char *buf, usize cap, usize *n, u32 value) {
+    proof_hex8(buf,cap,n,(u8)(value >> 24));
+    proof_hex8(buf,cap,n,(u8)(value >> 16));
+    proof_hex8(buf,cap,n,(u8)(value >> 8));
+    proof_hex8(buf,cap,n,(u8)value);
 }
 static int persist_boot_proof(void *image_handle, void *boot_services,
                               u8 pin, u8 dac, u8 selectors, u8 applied) {
@@ -225,6 +238,12 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HDA_CONTROLLER_SELECTION=");
     proof_puts(proof,sizeof(proof),&n,
         g_controller_preferred ? "PREFERRED_AMD_1022_15E3\r\n" : "GENERIC_CLASS_0403\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_CODEC_VENDOR_DEVICE=0x");
+    proof_hex32(proof,sizeof(proof),&n,g_codec_vendor_id);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_CODEC_SELECTION=");
+    proof_puts(proof,sizeof(proof),&n,
+        g_controller_preferred ? "REALTEK_10EC_0256\r\n" : "GENERIC_RUNTIME\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_GRAPH_SEARCH_LIVE=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_SELECTOR_APPLY_LIVE=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_OUTPUT_PATH_CONFIGURATION=PASS\r\n");
@@ -760,11 +779,22 @@ static int discover_controller(void) {
     u16 state = mmio16(0x0e);
     if (!state) return 0;
     for (u8 cad = 0; cad < 15; ++cad) {
-        if (state & (1u << cad)) {
-            g_cad = cad;
-            return 1;
-        }
+        if (!(state & (1u << cad))) continue;
+        g_cad = cad;
+        u32 codec_id = get_param(0, 0x00);
+        if (codec_id == INVALID_RESP || codec_id == 0 || codec_id == 0xffffffffu) continue;
+
+        if (g_controller_preferred && codec_id != 0x10ec0256u) continue;
+
+        g_codec_vendor_id = codec_id;
+        serial_puts("HDA_CODEC_VENDOR_DEVICE=0x");
+        serial_hex32(codec_id);
+        serial_puts("\r\n");
+        if (g_controller_preferred) marker("HDA_CODEC_SELECTION=REALTEK_10EC_0256");
+        else marker("HDA_CODEC_SELECTION=GENERIC_RUNTIME");
+        return 1;
     }
+    if (g_controller_preferred) marker("HDA_CODEC_SELECTION=REALTEK_10EC_0256_NOT_FOUND");
     return 0;
 }
 
