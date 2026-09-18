@@ -408,8 +408,10 @@ jobs:
           root=boot/uefi-hii-up-speech-v1
           proof="$root/os-uefi-hii-up-speech-v1.labproof"
           builder=boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py
+          fixture=boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof
           workflow=.github/workflows/os-uefi-hii-up-speech-v1.yml
           tested_builder="$(git rev-parse "$GITHUB_SHA:$builder")"
+          tested_fixture="$(git rev-parse "$GITHUB_SHA:$fixture")"
           tested_workflow="$(git rev-parse "$GITHUB_SHA:$workflow")"
           cp "$root/BOOTX64.EFI" /tmp/up-speech.efi
           cp "$root/up-speech.serial" /tmp/up-speech.serial
@@ -422,6 +424,7 @@ jobs:
           git checkout -B os origin/os
           for spec in \
             "$tested_builder|$builder|UP_SPEECH_STALE_BUILDER" \
+            "$tested_fixture|$fixture|UP_SPEECH_STALE_FIXTURE" \
             "$tested_workflow|$workflow|UP_SPEECH_STALE_WORKFLOW"
           do
             IFS='|' read -r expected path msg <<< "$spec"
