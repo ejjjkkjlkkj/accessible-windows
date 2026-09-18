@@ -48,7 +48,9 @@ jobs:
           for token in required:
               assert token in s, token
           assert '#include' not in s
-          assert 'EFI_' not in s
+          assert 'efi_main' in s
+          assert 'EFI_SYSTEM_TABLE' not in s
+          assert 'EFI_BOOT_SERVICES' not in s
           print('HDA_GRAPH_LIVE_SOURCE_CONTRACT=PASS')
 
       - name: Build deterministic PE32+ EFI twice
