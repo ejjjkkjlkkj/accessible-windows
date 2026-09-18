@@ -89,6 +89,10 @@ jobs:
               "HII_HANDLE_LIST=PASS",
               "HII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS",
               "CONFIG_ROUTING_EXPORT_CONFIG=PASS",
+              "c.label('read_buffer_current')",
+              "c.emit(b'\\x48\\x83\\xec\\x28')",
+              "c.emit(b'\\x31\\xc0\\x48\\x83\\xc4\\x28\\xc3')",
+              "c.emit(b'\\xb8\\x01\\x00\\x00\\x00\\x48\\x83\\xc4\\x28\\xc3')",
               "VARSTORE_NAME_CONFIG_MATCH=PASS",
               "CONFIG_TO_BLOCK=PASS",
               "BUFFER_VARSTORE_MATCH=PASS",
@@ -108,6 +112,7 @@ jobs:
           for line in [
               'storage-opcode = 0x24 EFI_IFR_VARSTORE',
               'storage-read-service = EFI_HII_CONFIG_ROUTING_PROTOCOL.ExportConfig',
+              'nested-uefi-call-abi = Microsoft x64 helper reserves 32-byte shadow space plus 8-byte alignment before nested UEFI protocol and Boot Services calls',
               'config-response-selection = UTF-16 GUID= and NAME= fields matched against the live EFI_IFR_VARSTORE GUID and Name',
               'varstore-name-bounds = EFI_IFR_VARSTORE Name must terminate within the opcode length before ConfigHdr comparison',
               'external-caller-routing = required by UEFI; direct EFI_HII_CONFIG_ACCESS_PROTOCOL invocation is not used',
