@@ -58,6 +58,8 @@ static u8 g_controller_preferred;
 static u32 g_codec_vendor_id;
 static stall_fn g_stall;
 static allocate_pages_fn g_allocate_pages;
+static u64 g_speech_dma_base;
+static u8 g_speech_dma_allocations;
 
 typedef u64 (*locate_protocol_fn)(const void *protocol, void *registration, void **interface_out);
 typedef u64 (*handle_protocol_fn)(void *handle, const void *protocol, void **interface_out);
@@ -519,13 +521,25 @@ static void copy_bytes(volatile u8 *dst, const u8 *src, u32 len) {
 
 static int run_speech_dma(const char *text, u32 text_count) {
     if (!g_allocate_pages || !text || !text_count || text_count > 8u) return 0;
-    u64 base = 0xffffffffu;
-    if (g_allocate_pages(1, 4, 128, &base) != 0 || !base || base > 0xffffffffu) return 0;
-
     const u32 pcm_off = 0x1000;
     if (!qev_unit_bank_len || qev_unit_bank_len > (128u * 4096u - pcm_off)) return 0;
+
+    /* Interactive speech must not leak 128 DMA pages on every focus change.
+       Allocate the below-4GiB BDL/unit-bank arena once, then rebuild only the
+       active descriptors for each utterance. LVI bounds the valid descriptor
+       window, so stale descriptors beyond the new entry count are unreachable. */
+    u64 base = g_speech_dma_base;
+    if (!base) {
+        base = 0xffffffffu;
+        if (g_allocate_pages(1, 4, 128, &base) != 0 || !base || base > 0xffffffffu) return 0;
+        g_speech_dma_base = base;
+        ++g_speech_dma_allocations;
+        volatile u8 *pcm_init = (volatile u8 *)(usize)(base + pcm_off);
+        copy_bytes(pcm_init, qev_unit_bank, qev_unit_bank_len);
+        fence();
+    }
+
     volatile u8 *pcm = (volatile u8 *)(usize)(base + pcm_off);
-    copy_bytes(pcm, qev_unit_bank, qev_unit_bank_len);
 
     volatile u8 *bdl = (volatile u8 *)(usize)base;
     u32 entries = 0;
@@ -966,6 +980,12 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("HII_GRAPH_REPEAT_SPEECH_DMA=PASS");
     marker("HII_GRAPH_REPEAT_SPEECH_HDA=PASS");
     marker("HII_GRAPH_REPEAT_LPIB_PROGRESS=PASS");
+    if (g_speech_dma_allocations != 1u) {
+        marker("STATUS=BLOCKED");
+        marker("REASON=HII_GRAPH_SPEECH_DMA_REUSE_FAILED");
+        return 1;
+    }
+    marker("HII_GRAPH_SPEECH_DMA_REUSE=PASS");
 #endif
     if (persist_boot_proof(image_handle, boot_services, pin, dac, selectors, applied)) {
         marker("BOOT_MEDIA_PERSISTENT_PROOF=PASS");
