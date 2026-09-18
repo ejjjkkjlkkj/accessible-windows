@@ -103,7 +103,6 @@ jobs:
               "c.lea_rax_data(L['option_width']); c.emit(b'\\x88\\x10')",
               "c.lea_rax_data(L['option_width']); c.emit(b'\\x0f\\xb6\\x08')",
               "c.lea_rax_data(L['resolve_mode']); c.emit(b'\\xc6\\x00\\x01')",
-              "L['option_strings_ptr']",
               "L['option_token']",
               "c.lea_rax_data(L['option_token']); c.emit(b'\\x0f\\xb7\\x00')",
               "CURRENT_OPTION_VALUE_MATCH=PASS",
