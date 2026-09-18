@@ -52,3 +52,4 @@ secure-boot = not-established
 claim = success establishes that runtime EFI text input is buffered and each supported typed grapheme independently schedules its first-party allophone through dynamically discovered native HDA output
 claim = success does not establish general-purpose grapheme-to-phoneme arbitrary text consonant mapping multi-hop routing physical ASUS output or Secure Boot
 proof = PENDING_CI
+revalidation-request = 2026-09-18T20:56+02:00
