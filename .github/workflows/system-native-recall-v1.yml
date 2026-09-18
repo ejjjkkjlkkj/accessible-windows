@@ -172,8 +172,14 @@ jobs:
             Wait-TraceCount 2
 
             [void][NativeRecallWin32]::SetForegroundWindow([IntPtr]::new($window.Current.NativeWindowHandle))
+            $close.SetFocus()
             Start-Sleep -Milliseconds 250
-            [NativeRecallWin32]::SendVirtualKey(0x27)
+            if (-not $close.Current.HasKeyboardFocus) { throw 'recall stable close control keyboard focus failed before right navigation' }
+            $ws=New-Object -ComObject WScript.Shell
+            [void]$ws.AppActivate([int]$p.Id)
+            Start-Sleep -Milliseconds 200
+            if (-not $close.Current.HasKeyboardFocus) { throw 'recall stable close control lost keyboard focus before right navigation' }
+            $ws.SendKeys('{RIGHT}')
             Wait-TraceCount 3
 
             $window=$root.FindFirst([System.Windows.Automation.TreeScope]::Children,$procCond)
@@ -194,9 +200,16 @@ jobs:
             if (-not $window) { throw 'native recall window disappeared before keyboard previous' }
             $previous=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$previousCond)
             if (-not $previous) { throw 'fresh previous native episode control not found' }
+            $close=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$closeCond)
+            if (-not $close) { throw 'fresh stable close control not found before left navigation' }
             [void][NativeRecallWin32]::SetForegroundWindow([IntPtr]::new($window.Current.NativeWindowHandle))
+            $close.SetFocus()
             Start-Sleep -Milliseconds 250
-            [NativeRecallWin32]::SendVirtualKey(0x25)
+            if (-not $close.Current.HasKeyboardFocus) { throw 'recall stable close control keyboard focus failed before left navigation' }
+            [void]$ws.AppActivate([int]$p.Id)
+            Start-Sleep -Milliseconds 200
+            if (-not $close.Current.HasKeyboardFocus) { throw 'recall stable close control lost keyboard focus before left navigation' }
+            $ws.SendKeys('{LEFT}')
             Wait-TraceCount 6
 
             $previous=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$previousCond)
