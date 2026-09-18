@@ -78,7 +78,7 @@ jobs:
           $fds=@()
           if(Test-Path $share){ $fds=@(Get-ChildItem $share -Recurse -File -Filter '*.fd' -ErrorAction SilentlyContinue) }
           $code=@($fds | Where-Object { $_.Name -match '(?i)x86_64.*code|OVMF_CODE' } | Select-Object -First 1)
-          $vars=@($fds | Where-Object { $_.Name -match '(?i)vars' } | Select-Object -First 1)
+          $vars=@($fds | Where-Object { $_.Name -match '(?i)(i386|x86).*vars' -and $_.Name -notmatch '(?i)arm|aarch64' } | Select-Object -First 1)
           if($code.Count -eq 0 -or $vars.Count -eq 0){
             throw "OVMF/edk2 CODE+VARS not found under $share"
           }
@@ -339,7 +339,7 @@ jobs:
                 if b"STATUS=BLOCKED\r\n" in raw: raise SystemExit("blocked after DOWN: "+repr(raw[-20000:]))
                 if all(x in raw for x in req):
                     label=re.search(br"NAV_FOCUS_OPTION_TEXT=([^\r\n]+)",raw)
-                    spoken=re.search(br"NAV_FOCUS_SPOKEN_PREFIX=([a-z]{1,8})\r\nNAV_FOCUS_SPOKEN_PREFIX=PASS",raw)
+                    spoken=re.search(br"NAV_FOCUS_SPOKEN_PREFIX=([a-z0-9]{1,8})\r\nNAV_FOCUS_SPOKEN_PREFIX=PASS",raw)
                     assert label and spoken,(label,spoken)
                     print("QEMU_UEFI_HII_HDA_SPEECH=PASS")
                     print("QEMU_FOCUS_LABEL="+label.group(1).decode("ascii","replace").strip())
@@ -358,7 +358,7 @@ jobs:
             assert max(abs(v) for v in vals)>=5000
             assert sum(abs(v)>=500 for v in vals)>=3000
             print("QEMU_HDA_WAVEFORM=PASS")
-            '@ | Set-Content $script -Encoding utf8
+          '@ | Set-Content $script -Encoding utf8
             & $env:PYTHON_EXE $script $root | Tee-Object (Join-Path $root 'qemu-result.txt')
             if($LASTEXITCODE -ne 0){ throw 'QEMU UEFI screen reader runtime failed' }
           } finally {
