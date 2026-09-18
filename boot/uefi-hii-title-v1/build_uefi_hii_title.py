@@ -116,12 +116,12 @@ def build():
  c.emit(b'\x4d\x85\xed'); c.rel32(b'\x0f\x84','fail_protocol')
  serial('string_protocol')
 
- # Take one atomic snapshot of every active HII handle into bridge-owned
- # storage.  This avoids the observed OVMF race where a sizing query succeeds
- # but a second ListPackageLists call after AllocatePool returns EFI_NOT_FOUND.
+ # Take one atomic snapshot of active HII Forms handles into bridge-owned
+ # storage.  Static direct filtering avoids both the observed sizing/fetch race
+ # and the ambiguity of exporting unrelated package-list handles.
  c.lea_rdx_data(L['handles_size'])
  c.emit(b'\x48\xc7\x02'+struct.pack('<I',0x1000))  # 512 EFI_HII_HANDLE slots
- c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')  # This, ALL, Guid=NULL
+ c.emit(b'\x4c\x89\xe1\xba\x02\x00\x00\x00\x45\x31\xc0')  # This, FORMS, Guid=NULL
  c.lea_r9_data(L['handles_size'])
  c.lea_rax_data(L['handles_static']); c.emit(b'\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
