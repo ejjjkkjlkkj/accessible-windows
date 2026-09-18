@@ -30,7 +30,7 @@ The intended order is:
 
 A prepared transaction by itself never replaces the active generation. Recovery selects only a valid durable anchor. If publication is missing or the new anchor is torn/corrupt, the previous valid anchor remains authoritative.
 
-The Rust model now tests the state-transition rules above, but physical write ordering, flush/FUA/barrier semantics and cryptographic verification are **NOT IMPLEMENTED**. Therefore these tests are evidence for the publication state machine only, not proof of real-device crash consistency.
+The Rust model now tests the state-transition rules above and includes an abstract durability model that injects a simulated crash before and after each publication barrier. The model verifies that recovery stays on the old generation until the new anchor has crossed the final durability barrier. Real block-device ordering, controller caches, flush/FUA semantics and cryptographic verification are still **NOT IMPLEMENTED**. Therefore this is evidence for the control protocol, not proof of real-device crash consistency.
 
 ## Required properties before a filesystem milestone can be called complete
 
@@ -55,6 +55,6 @@ The Rust model now tests the state-transition rules above, but physical write or
 - derivation of a next-generation anchor from a prepared transaction;
 - preservation of the previous known-good root;
 - rejection of stale and non-prepared transactions;
-- recovery staying on the old generation until a valid new anchor exists.
+- recovery staying on the old generation until a valid new anchor exists;\n- deterministic crash-cut simulation across candidate, transaction and anchor durability barriers.
 
-Cryptographic integrity verification, physical block I/O, durability barriers, allocator, object graph, real crash-fault injection, encryption, repair, snapshots and filesystem projections are **NOT IMPLEMENTED** and must not be reported as PASS.
+Cryptographic integrity verification, physical block I/O, real hardware durability barriers, allocator, object graph, device-level crash-fault injection, encryption, repair, snapshots and filesystem projections are **NOT IMPLEMENTED** and must not be reported as PASS.

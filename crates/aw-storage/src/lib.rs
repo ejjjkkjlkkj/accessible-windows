@@ -411,4 +411,106 @@ mod tests {
             Some(&published)
         );
     }
+
+    #[derive(Clone, Copy)]
+    struct PersistenceModel {
+        anchor_a: SuperblockV1,
+        anchor_b: SuperblockV1,
+        candidate_staged: bool,
+        candidate_durable: bool,
+        transaction_staged: bool,
+        transaction_durable: bool,
+        staged_anchor_b: Option<SuperblockV1>,
+    }
+
+    impl PersistenceModel {
+        fn new(anchor_a: SuperblockV1, anchor_b: SuperblockV1) -> Self {
+            Self {
+                anchor_a,
+                anchor_b,
+                candidate_staged: false,
+                candidate_durable: false,
+                transaction_staged: false,
+                transaction_durable: false,
+                staged_anchor_b: None,
+            }
+        }
+
+        fn stage_candidate_objects(&mut self) {
+            self.candidate_staged = true;
+        }
+
+        fn stage_prepared_transaction(&mut self) {
+            self.transaction_staged = true;
+        }
+
+        fn stage_anchor(&mut self, anchor: SuperblockV1) {
+            self.staged_anchor_b = Some(anchor);
+        }
+
+        fn durability_barrier(&mut self) {
+            if self.candidate_staged {
+                self.candidate_durable = true;
+                self.candidate_staged = false;
+            }
+            if self.transaction_staged {
+                self.transaction_durable = true;
+                self.transaction_staged = false;
+            }
+            if let Some(anchor) = self.staged_anchor_b.take() {
+                self.anchor_b = anchor;
+            }
+        }
+
+        fn crash(mut self) -> Self {
+            self.candidate_staged = false;
+            self.transaction_staged = false;
+            self.staged_anchor_b = None;
+            self
+        }
+
+        fn recovered_generation(&self) -> Option<u64> {
+            newest_structurally_valid(&self.anchor_a, &self.anchor_b).map(|anchor| anchor.generation)
+        }
+    }
+
+    fn assert_crash_recovers(model: PersistenceModel, expected_generation: u64) {
+        let crashed = model.crash();
+        assert_eq!(crashed.recovered_generation(), Some(expected_generation));
+    }
+
+    #[test]
+    fn crash_cut_model_requires_durable_anchor_publication() {
+        let stable = anchor(41, 100, 90, ID_A);
+        let transaction = prepared_transaction(41, 42, 120);
+        let published = prepare_publication(&stable, &transaction).expect("publication candidate");
+
+        let mut invalid_spare = anchor(1, 1, 1, ID_A);
+        invalid_spare.magic = 0;
+
+        let mut model = PersistenceModel::new(stable, invalid_spare);
+        assert_crash_recovers(model, 41);
+
+        model.stage_candidate_objects();
+        assert_crash_recovers(model, 41);
+
+        model.durability_barrier();
+        assert!(model.candidate_durable);
+        assert_crash_recovers(model, 41);
+
+        model.stage_prepared_transaction();
+        assert_crash_recovers(model, 41);
+
+        model.durability_barrier();
+        assert!(model.transaction_durable);
+        assert_crash_recovers(model, 41);
+
+        model.stage_anchor(published);
+        assert_crash_recovers(model, 41);
+
+        model.durability_barrier();
+        assert_eq!(model.recovered_generation(), Some(42));
+        assert_crash_recovers(model, 42);
+    }
+
 }

@@ -75,6 +75,8 @@ jobs:
         run: cargo +1.98.1 test -p aw-storage publication -- --nocapture
       - name: Recovery model
         run: cargo +1.98.1 test -p aw-storage recovery -- --nocapture
+      - name: Crash-cut durability model
+        run: cargo +1.98.1 test -p aw-storage crash_cut -- --nocapture
 
   bare-metal-contracts:
     runs-on: ubuntu-24.04
