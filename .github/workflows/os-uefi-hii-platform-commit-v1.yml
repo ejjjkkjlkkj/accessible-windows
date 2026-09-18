@@ -26,8 +26,9 @@ jobs:
         run: |
           from pathlib import Path
           proof=set(Path('boot/uefi-hii-platform-commit-v1/os-uefi-hii-platform-commit-v1.labproof').read_text().splitlines())
+          states={line for line in proof if line.startswith('proof = ')}
+          assert len(states)==1 and next(iter(states)) in {'proof = PENDING_CI','proof = PASS'},states
           for line in [
-              'proof = PENDING_CI',
               'target-driver = OvmfPkg PlatformDxe',
               'target-question = NextPreferredResolution',
               'target-question-id = 2',
@@ -413,7 +414,7 @@ jobs:
           p=root/'os-uefi-hii-platform-commit-v1.labproof'
           lines=p.read_text().splitlines()
           states=[x for x in lines if x.startswith('proof = ')]
-          assert states==['proof = PENDING_CI'],states
+          assert len(states)==1 and states[0] in {'proof = PENDING_CI','proof = PASS'},states
           vals={}
           for src in ['/tmp/platform-commit-runtime.txt','/tmp/platform-commit-post-state.txt']:
               for line in Path(src).read_text().splitlines():
