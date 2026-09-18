@@ -214,7 +214,89 @@ jobs:
           printf '\x48\xb8\x51\x45\x56\x41\x52\x59\x4e\x58\xc3' > /tmp/qev-seed-reconstructed.bin
           cmp -s "$f" /tmp/qev-seed-reconstructed.bin
           grep -q '^A = PASS$' sovereign/seed0/pulse-x86_64.qevproof0
-          grep -q '^B = UNPROVEN$' sovereign/seed0/pulse-x86_64.qevproof0
+          grep -q '^B = PASS
+          grep -q '^D = PASS$' sovereign/seed0/byte-origin.qevmanifest0
+
+  seed0-runtime-B-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Execute Seed-0 pulse with independent Linux witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/qev_seed_witness.c <<'EOF'
+          #include <stdint.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <sys/mman.h>
+          typedef uint64_t (*seed_fn)(void);
+          int main(int argc, char **argv) {
+              if (argc != 2) return 10;
+              FILE *fp = fopen(argv[1], "rb");
+              if (!fp) return 11;
+              unsigned char src[11];
+              if (fread(src, 1, sizeof(src), fp) != sizeof(src)) return 12;
+              if (fgetc(fp) != EOF) return 13;
+              fclose(fp);
+              void *mem = mmap(NULL, sizeof(src), PROT_READ|PROT_WRITE|PROT_EXEC,
+                               MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+              if (mem == MAP_FAILED) return 14;
+              memcpy(mem, src, sizeof(src));
+              seed_fn run = (seed_fn)mem;
+              const uint64_t expected = UINT64_C(0x584E595241564551);
+              uint64_t value = run();
+              if (value != expected) return 15;
+              ((unsigned char*)mem)[2] ^= 1u;
+              uint64_t corrupt = run();
+              if (corrupt == expected) return 16;
+              printf("QEVARYNOX_SEED0_RUNTIME_B_LINUX=PASS value=%016llx corrupt=%016llx\n",
+                     (unsigned long long)value, (unsigned long long)corrupt);
+              munmap(mem, sizeof(src));
+              return 0;
+          }
+          EOF
+          cc -O2 -Wall -Wextra -o /tmp/qev_seed_witness /tmp/qev_seed_witness.c
+          /tmp/qev_seed_witness sovereign/seed0/pulse-x86_64.qevseed0
+
+  seed0-runtime-B-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - name: Execute Seed-0 pulse with independent Windows witness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class QevSeedWitness {
+              [DllImport("kernel32.dll", SetLastError=true)]
+              static extern IntPtr VirtualAlloc(IntPtr address, UIntPtr size, uint allocationType, uint protect);
+              [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+              public delegate ulong Seed();
+              public static ulong Run(byte[] bytes) {
+                  IntPtr p = VirtualAlloc(IntPtr.Zero, (UIntPtr)bytes.Length, 0x3000, 0x40);
+                  if (p == IntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                  Marshal.Copy(bytes, 0, p, bytes.Length);
+                  Seed f = Marshal.GetDelegateForFunctionPointer<Seed>(p);
+                  return f();
+              }
+          }
+          '@
+          Add-Type -TypeDefinition $src
+          $path = 'sovereign/seed0/pulse-x86_64.qevseed0'
+          [byte[]]$bytes = [IO.File]::ReadAllBytes($path)
+          if ($bytes.Length -ne 11) { throw "Unexpected seed length: $($bytes.Length)" }
+          [UInt64]$expected = [Convert]::ToUInt64('584E595241564551', 16)
+          [UInt64]$value = [QevSeedWitness]::Run($bytes)
+          if ($value -ne $expected) { throw ('Seed returned {0:X16}, expected {1:X16}' -f $value,$expected) }
+          $bytes[2] = $bytes[2] -bxor 1
+          [UInt64]$corrupt = [QevSeedWitness]::Run($bytes)
+          if ($corrupt -eq $expected) { throw 'Corruption negative witness failed' }
+          'QEVARYNOX_SEED0_RUNTIME_B_WINDOWS=PASS value={0:X16} corrupt={1:X16}' -f $value,$corrupt
+ sovereign/seed0/pulse-x86_64.qevproof0
           grep -q '^D = PASS$' sovereign/seed0/byte-origin.qevmanifest0
 
   seed0-runtime-B-linux:

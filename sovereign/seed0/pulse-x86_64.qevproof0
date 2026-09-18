@@ -30,7 +30,7 @@ meaning = near return
 
 ::proof-state
 A = PASS
-B = UNPROVEN
+B = PASS
 C = UNPROVEN
 D = PASS
 accessibility-class = noninteractive
@@ -39,5 +39,7 @@ accessibility-B = UNPROVEN
 
 ::claim
 rule = this-is-an-executable-machine-boundary-pulse-not-a-bootloader-or-kernel
-rule = runtime-B-remains-UNPROVEN-until-independent-host-witnesses-pass
+rule = runtime-B-passed-on-independent-linux-and-windows-host-witnesses
 ::end
+witness-run = 35340432246
+witness-commit = ad9e20a0ad6ed8648896249e92c177ba5ad70cfa
