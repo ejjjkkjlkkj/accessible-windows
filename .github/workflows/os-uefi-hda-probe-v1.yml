@@ -275,10 +275,10 @@ jobs:
           git fetch origin os
           git rebase origin/os
 
-          tested_blob="$(git rev-parse \"${GITHUB_SHA}:${builder}\")"
-          current_blob="$(git rev-parse \"HEAD:${builder}\")"
-          tested_workflow="$(git rev-parse \"${GITHUB_SHA}:${workflow}\")"
-          current_workflow="$(git rev-parse \"HEAD:${workflow}\")"
+          tested_blob="$(git rev-parse "${GITHUB_SHA}:${builder}")"
+          current_blob="$(git rev-parse "HEAD:${builder}")"
+          tested_workflow="$(git rev-parse "${GITHUB_SHA}:${workflow}")"
+          current_workflow="$(git rev-parse "HEAD:${workflow}")"
           if [[ "$tested_blob" != "$current_blob" || "$tested_workflow" != "$current_workflow" ]]; then
             echo "HDA_PROOF_STALE_RUN=SKIP"
             exit 0
