@@ -104,6 +104,8 @@ jobs:
               "c.lea_rax_data(L['option_width']); c.emit(b'\\x0f\\xb6\\x08')",
               "c.lea_rax_data(L['resolve_mode']); c.emit(b'\\xc6\\x00\\x01')",
               "L['option_strings_ptr']",
+              "L['option_token']",
+              "c.lea_rax_data(L['option_token']); c.emit(b'\\x0f\\xb7\\x00')",
               "CURRENT_OPTION_VALUE_MATCH=PASS",
               "CURRENT_OPTION_LANGUAGE_BINDING=PASS",
               "Once resolving the selected option",
@@ -190,6 +192,7 @@ jobs:
               b'ONE_OF_SCOPE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_VALUE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_LANGUAGE_BINDING=PASS\r\n',
+              b'CURRENT_OPTION_STRING_ID_LE_HEX=',
               b'CURRENT_OPTION_FLAGS_HEX=',
               b'CURRENT_OPTION_TYPE_HEX=',
               b'CURRENT_OPTION_WIDTH_HEX=',
@@ -265,6 +268,7 @@ jobs:
               b'ONE_OF_SCOPE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_VALUE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_LANGUAGE_BINDING=PASS\r\n',
+              b'CURRENT_OPTION_STRING_ID_LE_HEX=',
               b'CURRENT_OPTION_METADATA=PASS\r\n',
               b'CURRENT_OPTION_STRING=PASS\r\n',
               b'CURRENT_OPTION_RESOLUTION=PASS\r\n',
@@ -284,15 +288,17 @@ jobs:
               vsguid=re.search(br'VARSTORE_GUID_RAW_HEX=([0-9A-F]{32})',raw)
               cw=re.search(br'CURRENT_VALUE_BYTES_HEX=([0-9A-F]{2})',raw)
               cr=re.search(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
+              tok=re.search(br'CURRENT_OPTION_STRING_ID_LE_HEX=([0-9A-F]{4})',raw)
               of=re.search(br'CURRENT_OPTION_FLAGS_HEX=([0-9A-F]{2})',raw)
               ot=re.search(br'CURRENT_OPTION_TYPE_HEX=([0-9A-F]{2})',raw)
               ow=re.search(br'CURRENT_OPTION_WIDTH_HEX=([0-9A-F]{2})',raw)
               ov=re.search(br'CURRENT_OPTION_RAW8_HEX=([0-9A-F]{16})',raw)
               text=re.search(br'CURRENT_OPTION_TEXT=([^\r\n]+)',raw)
 
-              if all([q,vsid,vinfo,vssize,vsguid,cw,cr,of,ot,ow,ov,text]) and all(x in raw for x in required):
+              if all([q,vsid,vinfo,vssize,vsguid,cw,cr,tok,of,ot,ow,ov,text]) and all(x in raw for x in required):
                   question=q.group(1).decode('ascii','replace').strip()
                   option_text=text.group(1).decode('ascii','replace').strip()
+                  option_token=int.from_bytes(bytes.fromhex(tok.group(1).decode()),'little')
                   current_width=int(cw.group(1),16)
                   option_type=int(ot.group(1),16)
                   option_width=int(ow.group(1),16)
@@ -327,6 +333,12 @@ jobs:
                   assert varstore_offset==int(fixture['varstore-offset']),(varstore_offset,fixture['varstore-offset'])
                   assert varstore_size==int(fixture['varstore-size']),(varstore_size,fixture['varstore-size'])
                   assert varstore_guid==fixture['varstore-guid-raw-hex'],(varstore_guid,fixture['varstore-guid-raw-hex'])
+                  selected_proof={}
+                  for line in Path('boot/uefi-hii-selected-option-v1/os-uefi-hii-selected-option-v1.labproof').read_text().splitlines():
+                      if ' = ' in line:
+                          k,v=line.split(' = ',1)
+                          selected_proof[k]=v
+                  assert option_token==int(selected_proof['proof-selected-option-string-id']),(option_token,selected_proof['proof-selected-option-string-id'])
                   assert current in value_to_label,(current,value_to_label)
                   assert option_text==value_to_label[current],(option_text,value_to_label[current])
 
@@ -339,6 +351,7 @@ jobs:
                       f'current-width = {current_width}\n'
                       f'current-raw8-hex = {current_raw}\n'
                       f'current-value-unsigned = {current}\n'
+                      f'current-option-string-id = {option_token}\n'
                       f'current-option-flags-hex = {of.group(1).decode()}\n'
                       f'current-option-type = {option_type}\n'
                       f'current-option-width = {option_width}\n'
@@ -350,6 +363,7 @@ jobs:
                   print('HII_CURRENT_OPTION_DIRECT_CHILD=PASS')
                   print('HII_CURRENT_OPTION_VARSTORE_IDENTITY=PASS')
                   print('HII_CURRENT_OPTION_VALUE_MATCH=PASS')
+                  print('HII_CURRENT_OPTION_STRING_ID='+str(option_token))
                   print('HII_CURRENT_OPTION_TEXT='+option_text)
                   print('UEFI_HII_CURRENT_OPTION_RUNTIME=PASS')
                   break
@@ -460,6 +474,7 @@ jobs:
               f"proof-varstore-guid-raw-hex = {vals['varstore-guid-raw-hex']}\n"
               f"proof-current-width = {vals['current-width']}\n"
               f"proof-current-value-unsigned = {vals['current-value-unsigned']}\n"
+              f"proof-current-option-string-id = {vals['current-option-string-id']}\n"
               f"proof-current-option-flags-hex = {vals['current-option-flags-hex']}\n"
               f"proof-current-option-type = {vals['current-option-type']}\n"
               f"proof-current-option-width = {vals['current-option-width']}\n"
