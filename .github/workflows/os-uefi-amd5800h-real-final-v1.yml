@@ -1,0 +1,516 @@
+name: os-uefi-amd5800h-real-final-v1
+
+on:
+  push:
+    branches: [os]
+    paths:
+      - 'boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py'
+      - 'boot/uefi-hii-option-speech-v1/build_uefi_hii_option_speech.py'
+      - 'boot/uefi-amd5800h-real-final-v1/os-uefi-amd5800h-real-final-v1.labproof'
+      - '.github/workflows/os-uefi-amd5800h-real-final-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  amd5800h-final:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Bind exact physical runner and inventory host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if ($env:RUNNER_NAME -ne 'AMD-5800H-REAL') { throw "wrong runner: $env:RUNNER_NAME" }
+          $cs=Get-CimInstance Win32_ComputerSystem
+          $cpu=Get-CimInstance Win32_Processor | Select-Object -First 1
+          $bios=Get-CimInstance Win32_BIOS
+          if ([string]$cs.Model -notmatch 'M1603QA') { throw "unexpected model: $($cs.Model)" }
+          if ([string]$cpu.Name -notmatch '5800H') { throw "unexpected cpu: $($cpu.Name)" }
+          New-Item -ItemType Directory -Force boot/uefi-amd5800h-real-final-v1/evidence | Out-Null
+          @(
+            "runner=$env:RUNNER_NAME"
+            "manufacturer=$($cs.Manufacturer)"
+            "model=$($cs.Model)"
+            "cpu=$($cpu.Name)"
+            "bios=$($bios.SMBIOSBIOSVersion)"
+            "host-binding=PASS"
+            "physical-host-reboot=false"
+            "physical-host-firmware-mutation=false"
+          ) | Set-Content boot/uefi-amd5800h-real-final-v1/evidence/host.txt -Encoding utf8
+          'AMD5800H_REAL_BINDING=PASS'
+
+      - name: Discover Python QEMU OVMF and VMware
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          function FirstExisting([string[]]$paths) {
+            foreach($p in $paths) { if($p -and (Test-Path $p)) { return (Resolve-Path $p).Path } }
+            return $null
+          }
+          $py=FirstExisting @(
+            'C:\Python316\python.exe',
+            'C:\Python315\python.exe',
+            'C:\Python314\python.exe',
+            ((Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
+          )
+          if(-not $py){ throw 'Python not found on AMD-5800H-REAL' }
+
+          $qemu=FirstExisting @(
+            'C:\Program Files\qemu\qemu-system-x86_64.exe',
+            'C:\Program Files (x86)\qemu\qemu-system-x86_64.exe',
+            ((Get-Command qemu-system-x86_64.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
+          )
+          if(-not $qemu){ throw 'QEMU x86_64 not found on AMD-5800H-REAL' }
+          $qemuDir=Split-Path $qemu -Parent
+          $qimg=FirstExisting @(
+            (Join-Path $qemuDir 'qemu-img.exe'),
+            ((Get-Command qemu-img.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
+          )
+          if(-not $qimg){ throw 'qemu-img not found' }
+
+          $share=Join-Path $qemuDir 'share'
+          $fds=@()
+          if(Test-Path $share){ $fds=@(Get-ChildItem $share -Recurse -File -Filter '*.fd' -ErrorAction SilentlyContinue) }
+          $code=@($fds | Where-Object { $_.Name -match '(?i)x86_64.*code|OVMF_CODE' } | Select-Object -First 1)
+          $vars=@($fds | Where-Object { $_.Name -match '(?i)vars' } | Select-Object -First 1)
+          if($code.Count -eq 0 -or $vars.Count -eq 0){
+            throw "OVMF/edk2 CODE+VARS not found under $share"
+          }
+
+          $vmrun=FirstExisting @(
+            'C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe',
+            'C:\Program Files\VMware\VMware Workstation\vmrun.exe',
+            ((Get-Command vmrun.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
+          )
+          $vmware=FirstExisting @(
+            'C:\Program Files (x86)\VMware\VMware Workstation\vmware.exe',
+            'C:\Program Files\VMware\VMware Workstation\vmware.exe',
+            ((Get-Command vmware.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
+          )
+
+          "PYTHON_EXE=$py" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "QEMU_EXE=$qemu" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "QEMU_IMG_EXE=$qimg" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "OVMF_CODE=$($code[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "OVMF_VARS=$($vars[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "VMRUN_EXE=$vmrun" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "VMWARE_EXE=$vmware" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+          @(
+            "python=$py"
+            "qemu=$qemu"
+            "qemu-img=$qimg"
+            "ovmf-code=$($code[0].FullName)"
+            "ovmf-vars=$($vars[0].FullName)"
+            "vmrun=$vmrun"
+            "vmware=$vmware"
+          ) | Set-Content boot/uefi-amd5800h-real-final-v1/evidence/tools.txt -Encoding utf8
+          & $qemu --version | Select-Object -First 1
+          if($vmrun){ & $vmrun | Select-Object -First 2 }
+          'AMD5800H_TOOL_DISCOVERY=PASS'
+
+      - name: Build every final reader mode and prove determinism
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='boot/uefi-amd5800h-real-final-v1/evidence'
+          $src='boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py'
+          $modes=[ordered]@{
+            current=''
+            repeat='--wait-repeat'
+            down='--wait-down-probe'
+            downspeech='--wait-down-speak'
+            up='--wait-up-probe'
+            upspeech='--wait-up-speak'
+            focusrepeat='--wait-down-repeat-speak'
+            cancel='--wait-down-cancel'
+            commit='--wait-down-commit'
+          }
+          foreach($name in $modes.Keys){
+            $a=Join-Path $root "$name.EFI"
+            $b=Join-Path $root "$name-2.EFI"
+            $mode=$modes[$name]
+            if($mode){
+              & $env:PYTHON_EXE $src $a $mode | Out-File (Join-Path $root "$name-build.txt") -Encoding utf8
+              if($LASTEXITCODE -ne 0){ throw "build failed: $name" }
+              & $env:PYTHON_EXE $src $b $mode | Out-Null
+            } else {
+              & $env:PYTHON_EXE $src $a | Out-File (Join-Path $root "$name-build.txt") -Encoding utf8
+              if($LASTEXITCODE -ne 0){ throw "build failed: $name" }
+              & $env:PYTHON_EXE $src $b | Out-Null
+            }
+            $h1=(Get-FileHash $a -Algorithm SHA256).Hash
+            $h2=(Get-FileHash $b -Algorithm SHA256).Hash
+            if($h1 -ne $h2){ throw "non deterministic: $name" }
+            Remove-Item $b -Force
+            "$name=$($h1.ToLowerInvariant())" | Out-File (Join-Path $root 'build-sha256.txt') -Append -Encoding ascii
+          }
+          'AMD5800H_ALL_EFI_BUILDS=PASS'
+          'AMD5800H_EFI_DETERMINISM=PASS'
+
+      - name: Static PE security and accessibility audit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='boot/uefi-amd5800h-real-final-v1/evidence/static_audit.py'
+          @'
+          from pathlib import Path
+          import struct
+          root=Path("boot/uefi-amd5800h-real-final-v1/evidence")
+          required=[
+            b"HII_DATABASE_PROTOCOL=PASS\r\n",
+            b"HII_STRING_PROTOCOL=PASS\r\n",
+            b"CURRENT_OPTION_SOURCE=PASS\r\n",
+            b"CURRENT_OPTION_SPEECH_HDA=PASS\r\n",
+            b"HII_NAVIGATION_KEY=WAIT_DOWN\r\n",
+            b"NAV_FOCUS_SPEECH_HDA=PASS\r\n",
+            b"HII_COMMIT_KEY=WAIT_ENTER\r\n",
+            b"ROUTE_CONFIG=PASS\r\n",
+            b"COMMIT_CONFIRMATION_SPEECH_HDA=PASS\r\n",
+            b"HII_CANCEL_NO_ROUTE=PASS\r\n",
+          ]
+          for p in root.glob("*.EFI"):
+              image=p.read_bytes()
+              assert image[:2]==b"MZ",p
+              pe=struct.unpack_from("<I",image,0x3c)[0]
+              assert image[pe:pe+4]==b"PE\0\0",p
+              coff=pe+4; opt=coff+20
+              assert struct.unpack_from("<H",image,coff)[0]==0x8664,p
+              assert struct.unpack_from("<H",image,opt)[0]==0x20b,p
+              assert struct.unpack_from("<H",image,opt+0x44)[0]==10,p
+              nsec=struct.unpack_from("<H",image,coff+2)[0]
+              sec=opt+struct.unpack_from("<H",image,coff+16)[0]
+              for i in range(nsec):
+                  ch=struct.unpack_from("<I",image,sec+i*40+0x24)[0]
+                  assert not ((ch&0x20000000) and (ch&0x80000000)),(p,i,hex(ch))
+          merged=b"".join(p.read_bytes() for p in root.glob("*.EFI"))
+          for token in required:
+              assert token in merged,token
+          print("AMD5800H_PE_SECURITY=PASS")
+          print("AMD5800H_ACCESSIBILITY_WITNESSES=PASS")
+          print("W_X=BLOCKED")
+          '@ | Set-Content $script -Encoding utf8
+          & $env:PYTHON_EXE $script | Tee-Object boot/uefi-amd5800h-real-final-v1/evidence/static-audit.txt
+          if($LASTEXITCODE -ne 0){ throw 'static audit failed' }
+
+      - name: Create deterministic FAT16 UEFI boot disk
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='boot/uefi-amd5800h-real-final-v1/evidence/make_fat16.py'
+          @'
+          from pathlib import Path
+          import math,struct,sys
+          src=Path(sys.argv[1]).read_bytes()
+          out=Path(sys.argv[2])
+          total=131072
+          start=2048
+          psecs=total-start
+          bps=512; spc=4; reserved=1; nfats=2; roots=512
+          rootsecs=(roots*32+bps-1)//bps
+          spf=1
+          while True:
+              clusters=(psecs-reserved-rootsecs-nfats*spf)//spc
+              need=((clusters+2)*2+bps-1)//bps
+              if need==spf: break
+              spf=need
+          data_start=start+reserved+nfats*spf+rootsecs
+          clbytes=bps*spc
+          file_clusters=(len(src)+clbytes-1)//clbytes
+          if 4+file_clusters >= clusters: raise SystemExit("image too small")
+          img=bytearray(total*bps)
+          img[0x1be+0]=0
+          img[0x1be+1:0x1be+4]=b"\xfe\xff\xff"
+          img[0x1be+4]=0x06
+          img[0x1be+5:0x1be+8]=b"\xfe\xff\xff"
+          struct.pack_into("<II",img,0x1be+8,start,psecs)
+          img[510:512]=b"\x55\xaa"
+          bs=start*bps
+          img[bs:bs+3]=b"\xeb\x3c\x90"; img[bs+3:bs+11]=b"MSDOS5.0"
+          struct.pack_into("<HBHBHHBHHHII",img,bs+11,bps,spc,reserved,nfats,roots,0,0xF8,spf,63,255,start,psecs)
+          img[bs+36]=0x80; img[bs+38]=0x29
+          struct.pack_into("<I",img,bs+39,0x51455641)
+          img[bs+43:bs+54]=b"QEVARYNOX  "
+          img[bs+54:bs+62]=b"FAT16   "; img[bs+510:bs+512]=b"\x55\xaa"
+          fat=bytearray(spf*bps)
+          def setfat(n,v): struct.pack_into("<H",fat,n*2,v)
+          setfat(0,0xFFF8); setfat(1,0xFFFF); setfat(2,0xFFFF); setfat(3,0xFFFF)
+          first=4
+          for i in range(file_clusters):
+              n=first+i; setfat(n,0xFFFF if i==file_clusters-1 else n+1)
+          for k in range(nfats):
+              off=(start+reserved+k*spf)*bps
+              img[off:off+len(fat)]=fat
+          root=(start+reserved+nfats*spf)*bps
+          def ent(off,name,attr,cluster,size=0):
+              img[off:off+11]=name
+              img[off+11]=attr
+              struct.pack_into("<H",img,off+26,cluster)
+              struct.pack_into("<I",img,off+28,size)
+          ent(root,b"EFI        ",0x10,2)
+          def coff(n): return (data_start+(n-2)*spc)*bps
+          e=coff(2)
+          ent(e,b".          ",0x10,2); ent(e+32,b"..         ",0x10,0); ent(e+64,b"BOOT       ",0x10,3)
+          b=coff(3)
+          ent(b,b".          ",0x10,3); ent(b+32,b"..         ",0x10,2); ent(b+64,b"BOOTX64 EFI",0x20,first,len(src))
+          pos=0
+          for i in range(file_clusters):
+              o=coff(first+i)
+              chunk=src[pos:pos+clbytes]; img[o:o+len(chunk)]=chunk; pos+=len(chunk)
+          out.write_bytes(img)
+          print(f"FAT16_UEFI_DISK=PASS bytes={len(img)} clusters={file_clusters}")
+          '@ | Set-Content $script -Encoding utf8
+          & $env:PYTHON_EXE $script boot/uefi-amd5800h-real-final-v1/evidence/downspeech.EFI boot/uefi-amd5800h-real-final-v1/evidence/esp.raw |
+            Tee-Object boot/uefi-amd5800h-real-final-v1/evidence/fat16-build.txt
+          if($LASTEXITCODE -ne 0){ throw 'FAT16 disk creation failed' }
+
+      - name: Full QEMU OVMF keyboard HII HDA speech test on AMD host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path 'boot/uefi-amd5800h-real-final-v1/evidence').Path
+          Copy-Item $env:OVMF_VARS (Join-Path $root 'vars.fd') -Force
+          $serial=Join-Path $root 'qemu.serial'
+          $wav=Join-Path $root 'qemu.wav'
+          Remove-Item $serial,$wav -Force -ErrorAction SilentlyContinue
+          $args=@(
+            '-machine','q35,accel=tcg','-m','192M',
+            '-drive',"if=pflash,format=raw,readonly=on,file=$env:OVMF_CODE",
+            '-drive',"if=pflash,format=raw,file=$(Join-Path $root 'vars.fd')",
+            '-drive',"file=$(Join-Path $root 'esp.raw'),format=raw",
+            '-audiodev',"wav,id=aud,path=$wav,out.frequency=48000,out.channels=2",
+            '-device','ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0',
+            '-device','hda-micro,bus=hda0.0,cad=0,audiodev=aud,mixer=on',
+            '-display','none','-monitor','none',
+            '-qmp','tcp:127.0.0.1:45555,server=on,wait=off',
+            '-serial',"file:$serial",
+            '-parallel','none','-net','none','-no-reboot','-no-shutdown'
+          )
+          $p=Start-Process -FilePath $env:QEMU_EXE -ArgumentList $args -PassThru -WindowStyle Hidden
+          try {
+            $script=Join-Path $root 'qemu_test.py'
+            @'
+            from pathlib import Path
+            import json,re,socket,sys,time,wave,struct
+            root=Path(sys.argv[1]); serial=root/"qemu.serial"
+            end=time.time()+45
+            while time.time()<end:
+                raw=serial.read_bytes() if serial.exists() else b""
+                if b"STATUS=BLOCKED\r\n" in raw: raise SystemExit("blocked before DOWN: "+repr(raw[-16000:]))
+                if b"HII_NAVIGATION_KEY=WAIT_DOWN\r\n" in raw: break
+                time.sleep(.1)
+            else: raise SystemExit("timeout waiting DOWN: "+repr((serial.read_bytes() if serial.exists() else b"")[-16000:]))
+            for _ in range(100):
+                try:
+                    s=socket.create_connection(("127.0.0.1",45555),.5); break
+                except OSError: time.sleep(.1)
+            else: raise SystemExit("QMP unavailable")
+            with s:
+                f=s.makefile("rwb",buffering=0)
+                json.loads(f.readline())
+                f.write((json.dumps({"execute":"qmp_capabilities"})+"\r\n").encode())
+                while True:
+                    m=json.loads(f.readline())
+                    if "return" in m: break
+                f.write((json.dumps({"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"down"}],"hold-time":50}})+"\r\n").encode())
+                while True:
+                    m=json.loads(f.readline())
+                    if "return" in m: break
+                    if "error" in m: raise SystemExit(repr(m))
+            req=[
+                b"HII_NAVIGATION_KEY=PASS\r\n",
+                b"NAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\n",
+                b"NAV_FOCUS_OPTION_STRING=PASS\r\n",
+                b"NAV_FOCUS_LABEL_BINDING=PASS\r\n",
+                b"NAV_FOCUS_SOURCE=PASS\r\n",
+                b"LPIB_PROGRESS=PASS\r\n",
+                b"NAV_FOCUS_SPEECH_HDA=PASS\r\n",
+                b"STATUS=PASS\r\n",
+            ]
+            end=time.time()+45
+            while time.time()<end:
+                raw=serial.read_bytes() if serial.exists() else b""
+                if b"STATUS=BLOCKED\r\n" in raw: raise SystemExit("blocked after DOWN: "+repr(raw[-20000:]))
+                if all(x in raw for x in req):
+                    label=re.search(br"NAV_FOCUS_OPTION_TEXT=([^\r\n]+)",raw)
+                    spoken=re.search(br"NAV_FOCUS_SPOKEN_PREFIX=([a-z]{1,8})\r\nNAV_FOCUS_SPOKEN_PREFIX=PASS",raw)
+                    assert label and spoken,(label,spoken)
+                    print("QEMU_UEFI_HII_HDA_SPEECH=PASS")
+                    print("QEMU_FOCUS_LABEL="+label.group(1).decode("ascii","replace").strip())
+                    print("QEMU_SPOKEN_PREFIX="+spoken.group(1).decode())
+                    break
+                time.sleep(.1)
+            else: raise SystemExit("timeout final speech")
+            wav=root/"qemu.wav"
+            end=time.time()+10
+            while time.time()<end and (not wav.exists() or wav.stat().st_size<10000): time.sleep(.1)
+            assert wav.exists() and wav.stat().st_size>10000,wav
+            with wave.open(str(wav),"rb") as w:
+                assert (w.getnchannels(),w.getframerate(),w.getsampwidth())==(2,48000,2)
+                raw=w.readframes(w.getnframes())
+            vals=struct.unpack("<"+"h"*(len(raw)//2),raw)
+            assert max(abs(v) for v in vals)>=5000
+            assert sum(abs(v)>=500 for v in vals)>=3000
+            print("QEMU_HDA_WAVEFORM=PASS")
+            '@ | Set-Content $script -Encoding utf8
+            & $env:PYTHON_EXE $script $root | Tee-Object (Join-Path $root 'qemu-result.txt')
+            if($LASTEXITCODE -ne 0){ throw 'QEMU UEFI screen reader runtime failed' }
+          } finally {
+            if($p -and -not $p.HasExited){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+      - name: VMware Workstation independent UEFI loader test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path 'boot/uefi-amd5800h-real-final-v1/evidence').Path
+          if(-not $env:VMRUN_EXE -or -not (Test-Path $env:VMRUN_EXE)){
+            'VMWARE_WORKSTATION=NOT_FOUND' | Tee-Object (Join-Path $root 'vmware-result.txt')
+            exit 0
+          }
+          $vmdk=Join-Path $root 'esp.vmdk'
+          & $env:QEMU_IMG_EXE convert -f raw -O vmdk (Join-Path $root 'esp.raw') $vmdk
+          if($LASTEXITCODE -ne 0){ throw 'qemu-img VMDK conversion failed' }
+          $serial=Join-Path $root 'vmware.serial'
+          $vmx=Join-Path $root 'qevarynx-uefi.vmx'
+          @"
+          .encoding = "UTF-8"
+          config.version = "8"
+          virtualHW.version = "20"
+          displayName = "Qevarynx UEFI Screen Reader Validation"
+          guestOS = "other-64"
+          firmware = "efi"
+          uefi.secureBoot.enabled = "FALSE"
+          memsize = "256"
+          numvcpus = "1"
+          ide0:0.present = "TRUE"
+          ide0:0.fileName = "$($vmdk.Replace('\','/'))"
+          ide0:0.deviceType = "disk"
+          sound.present = "TRUE"
+          sound.virtualDev = "hdaudio"
+          serial0.present = "TRUE"
+          serial0.fileType = "file"
+          serial0.fileName = "$($serial.Replace('\','/'))"
+          floppy0.present = "FALSE"
+          ethernet0.present = "FALSE"
+          "@ | Set-Content $vmx -Encoding ascii
+          Remove-Item $serial -Force -ErrorAction SilentlyContinue
+          & $env:VMRUN_EXE -T ws start $vmx nogui
+          if($LASTEXITCODE -ne 0){ throw 'vmrun start failed' }
+          try {
+            $ok=$false
+            for($i=0;$i -lt 90;$i++){
+              Start-Sleep -Milliseconds 500
+              if(Test-Path $serial){
+                $raw=[IO.File]::ReadAllText($serial)
+                if($raw -match 'STATE=START' -and $raw -match 'HII_DATABASE_PROTOCOL=PASS' -and $raw -match 'HII_STRING_PROTOCOL=PASS'){
+                  $ok=$true; break
+                }
+              }
+            }
+            if(-not $ok){
+              $tail=if(Test-Path $serial){ Get-Content $serial -Raw }else{'<no serial>'}
+              throw "VMware UEFI reader did not establish loader+HII protocols: $tail"
+            }
+            @(
+              'VMWARE_WORKSTATION=PASS'
+              'VMWARE_UEFI_LOADER=PASS'
+              'VMWARE_HII_DATABASE_PROTOCOL=PASS'
+              'VMWARE_HII_STRING_PROTOCOL=PASS'
+              'VMWARE_FULL_HDA_SPEECH=' + $(if((Get-Content $serial -Raw) -match 'CURRENT_OPTION_SPEECH_HDA=PASS|NAV_FOCUS_SPEECH_HDA=PASS'){'PASS'}else{'NOT_ESTABLISHED'})
+            ) | Set-Content (Join-Path $root 'vmware-result.txt') -Encoding ascii
+          } finally {
+            & $env:VMRUN_EXE -T ws stop $vmx hard 2>$null | Out-Null
+          }
+
+      - name: Final evidence manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='boot/uefi-amd5800h-real-final-v1/evidence'
+          Get-ChildItem $root -File |
+            Where-Object { $_.Name -ne 'manifest.sha256' } |
+            Sort-Object Name |
+            ForEach-Object {
+              $h=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              "$h  $($_.Name)"
+            } | Set-Content "$root/manifest.sha256" -Encoding ascii
+          @(
+            'OS-UEFI-AMD5800H-REAL-FINAL-V1'
+            'AMD5800H_REAL_BINDING=PASS'
+            'ALL_EFI_BUILDS=PASS'
+            'EFI_DETERMINISM=PASS'
+            'PE_SECURITY=PASS'
+            'QEMU_OVMF_UEFI_SCREEN_READER=PASS'
+            'QEMU_HII_KEYBOARD_NAVIGATION=PASS'
+            'QEMU_HDA_SPEECH=PASS'
+            'QEMU_HDA_WAVEFORM=PASS'
+            'PHYSICAL_HOST_REBOOT=false'
+            'PHYSICAL_HOST_FIRMWARE_MUTATION=false'
+          ) | Set-Content "$root/final-result.txt" -Encoding ascii
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: os-uefi-amd5800h-real-final-v1
+          path: boot/uefi-amd5800h-real-final-v1/evidence
+          if-no-files-found: error
+
+      - name: Persist revision-bound AMD final proof
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='boot/uefi-amd5800h-real-final-v1'
+          $proof="$root/os-uefi-amd5800h-real-final-v1.labproof"
+          $builder='boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py'
+          $workflow='.github/workflows/os-uefi-amd5800h-real-final-v1.yml'
+          $testedBuilder=(git rev-parse "$($env:GITHUB_SHA):$builder").Trim()
+          $testedWorkflow=(git rev-parse "$($env:GITHUB_SHA):$workflow").Trim()
+          git fetch origin os
+          git checkout -B os origin/os
+          if($testedBuilder -ne (git rev-parse "origin/os:$builder").Trim()){ 'AMD_FINAL_STALE_BUILDER=SKIP'; exit 0 }
+          if($testedWorkflow -ne (git rev-parse "origin/os:$workflow").Trim()){ 'AMD_FINAL_STALE_WORKFLOW=SKIP'; exit 0 }
+          $lines=Get-Content $proof | Where-Object { $_ -notmatch '^proof(-| = )' }
+          $vm='NOT_FOUND'
+          if(Test-Path "$root/evidence/vmware-result.txt"){
+            $vr=Get-Content "$root/evidence/vmware-result.txt" -Raw
+            if($vr -match 'VMWARE_WORKSTATION=PASS'){ $vm='PASS' }
+          }
+          $sha=(Get-FileHash "$root/evidence/downspeech.EFI" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $manifest=(Get-FileHash "$root/evidence/manifest.sha256" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $lines += 'proof = PASS'
+          $lines += "proof-run = $env:GITHUB_RUN_ID"
+          $lines += "proof-head-sha = $env:GITHUB_SHA"
+          $lines += "proof-runner = $env:RUNNER_NAME"
+          $lines += 'proof-all-efi-builds = PASS'
+          $lines += 'proof-determinism = PASS'
+          $lines += 'proof-PE-security = PASS'
+          $lines += 'proof-qemu-ovmf-runtime = PASS'
+          $lines += 'proof-qemu-keyboard-navigation = PASS'
+          $lines += 'proof-qemu-hda-speech = PASS'
+          $lines += 'proof-qemu-waveform = PASS'
+          $lines += "proof-vmware-workstation = $vm"
+          $lines += 'proof-physical-host-reboot = false'
+          $lines += 'proof-physical-host-firmware-mutation = false'
+          $lines += 'proof-physical-pre-os-speaker = not-established-by-virtualization-test'
+          $lines += "proof-downspeech-efi-sha256 = $sha"
+          $lines += "proof-manifest-sha256 = $manifest"
+          Set-Content $proof $lines -Encoding utf8
+          if(git diff --quiet -- $proof){ exit 0 }
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $proof
+          git commit -m "Record AMD-5800H final UEFI screen reader proof [skip ci]"
+          for($i=0;$i -lt 3;$i++){
+            git push origin os
+            if($LASTEXITCODE -eq 0){ exit 0 }
+            git fetch origin os
+            git rebase origin/os
+            if($LASTEXITCODE -ne 0){ git rebase --abort; throw 'proof rebase failed' }
+          }
+          throw 'proof push failed'
