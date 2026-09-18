@@ -31,7 +31,7 @@ impl ObjectId {
 
     /// Returns true when the identity is the reserved zero value.
     #[must_use]
-    pub const fn is_zero(self) -> bool {
+    pub fn is_zero(self) -> bool {
         self.0 == [0; OBJECT_ID_BYTES]
     }
 
@@ -143,7 +143,7 @@ impl SuperblockV1 {
     /// Performs version-1 structural validation.
     ///
     /// This is intentionally not called cryptographic verification.
-    pub const fn validate_structure(&self) -> Result<(), SuperblockError> {
+    pub fn validate_structure(&self) -> Result<(), SuperblockError> {
         if self.magic != STORAGE_MAGIC {
             return Err(SuperblockError::BadMagic);
         }
@@ -175,10 +175,10 @@ impl SuperblockV1 {
 /// verification and write-order evidence will be added before this function is
 /// used for production recovery.
 #[must_use]
-pub const fn newest_structurally_valid<'a>(
-    a: &'a SuperblockV1,
-    b: &'a SuperblockV1,
-) -> Option<&'a SuperblockV1> {
+pub fn newest_structurally_valid(
+    a: &SuperblockV1,
+    b: &SuperblockV1,
+) -> Option<&SuperblockV1> {
     let a_valid = a.validate_structure().is_ok();
     let b_valid = b.validate_structure().is_ok();
 
@@ -231,7 +231,7 @@ pub struct TransactionRecordV1 {
 impl TransactionRecordV1 {
     /// Returns true when the descriptor obeys version-1 monotonicity rules.
     #[must_use]
-    pub const fn is_structurally_valid(&self) -> bool {
+    pub fn is_structurally_valid(&self) -> bool {
         !self.transaction_id.is_zero()
             && self.next_generation == self.base_generation.saturating_add(1)
             && self.base_generation != u64::MAX
