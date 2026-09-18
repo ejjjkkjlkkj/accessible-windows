@@ -1,0 +1,22 @@
+LAB9
+role = external-witness-record
+system-foundation = false
+purpose = exhaust a complete finite external space to test relation and reconstruction beyond the original material
+external-width = 16
+external-source-configurations = 65536
+external-relation-candidates = 65536
+expected-distinct-derived-relations = 32768
+expected-sources-per-derived-relation = 2
+expected-reconstructable-relation-candidates = 32768
+expected-nonreconstructable-relation-candidates = 32768
+external-state-marks = 00,ff
+ordering = external-carrier-only
+system-semantics = none
+proof = UNPROVEN
+human-facing = false
+accessibility-behavior = not-applicable
+accessibility-gate = any future human-facing state must be perceivable and operable without requiring vision at the same native layer
+claim = success would prove the established external relation rule partitions every tested source configuration into exactly one globally exchanged pair
+claim = success would prove every reconstructable tested relation yields exactly two globally exchanged external representations from the two possible anchors
+claim = success would prove exactly half of all tested relation candidates close consistently under the external circular ordering
+claim = success would not establish system-owned boolean logic algebra encoding memory language instruction computation runtime cpu process api model or ui semantics
