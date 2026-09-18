@@ -287,6 +287,7 @@ def build():
  c.rel32(b'\x0f\x85','read_key')
  c.lea_rdx_data(L['keybuf'])
  c.emit(b'\x0f\xb7\x42\x02')
+ c.emit(b'\x66\x85\xc0'); c.rel32(b'\x0f\x84','read_key')  # ignore scan-only events
  c.emit(b'\x66\x3d\x0d\x00'); c.rel32(b'\x0f\x84','text_commit')
  c.emit(b'\x66\x83\xc8\x20')  # ASCII uppercase -> lowercase
  for char,name in (('a','a'),('e','e'),('i','i'),('o','o'),('u','u')):
