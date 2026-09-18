@@ -186,7 +186,8 @@ def build_parent(child:bytes, speech:bytes):
 
     c=Code()
     # EFI entry.
-    c.emit(b"\x41\x54\x41\x55\x41\x56\x41\x57")  # save nonvolatile r12-r15\n    c.emit(b"\x49\x89\xcc")              # r12=image handle
+    c.emit(b"\x41\x54\x41\x55\x41\x56\x41\x57")  # save nonvolatile r12-r15
+    c.emit(b"\x49\x89\xcc")              # r12=image handle
     c.emit(b"\x49\x89\xd5")              # r13=system table
     c.emit(b"\x4c\x8b\x72\x60")          # r14=BootServices
     c.emit(b"\x4c\x8b\x7a\x40")          # r15=ConOut
@@ -269,14 +270,16 @@ def build_parent(child:bytes, speech:bytes):
     c.mov_rax_data(L["orig_output"])
     c.emit(b"\x49\x89\x47\x08")
     serial("done")
-    c.emit(b"\x31\xc0\x48\x83\xc4\x38")\n    c.emit(b"\x41\x5f\x41\x5e\x41\x5d\x41\x5c\xc3")
+    c.emit(b"\x31\xc0\x48\x83\xc4\x38")
+    c.emit(b"\x41\x5f\x41\x5e\x41\x5d\x41\x5c\xc3")
 
     c.label("restore_fail")
     c.mov_rax_data(L["orig_output"])
     c.emit(b"\x49\x89\x47\x08")
     c.label("fail")
     serial("fail")
-    c.emit(b"\xb8\x01\x00\x00\x00\x48\x83\xc4\x38")\n    c.emit(b"\x41\x5f\x41\x5e\x41\x5d\x41\x5c\xc3")
+    c.emit(b"\xb8\x01\x00\x00\x00\x48\x83\xc4\x38")
+    c.emit(b"\x41\x5f\x41\x5e\x41\x5d\x41\x5c\xc3")
 
     # Hook: call original OutputString, then match target and speak it.
     c.label("hook")
