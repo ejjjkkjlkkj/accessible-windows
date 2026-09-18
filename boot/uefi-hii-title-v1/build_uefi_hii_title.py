@@ -55,6 +55,7 @@ class Code:
  def lea_rax_data(self,off): self.data_disp(b'\x48\x8d\x05',off)
  def lea_rcx_data(self,off): self.data_disp(b'\x48\x8d\x0d',off)
  def lea_rdx_data(self,off): self.data_disp(b'\x48\x8d\x15',off)
+ def lea_rsi_data(self,off): self.data_disp(b'\x48\x8d\x35',off)
  def lea_r8_data(self,off): self.data_disp(b'\x4c\x8d\x05',off)
  def lea_r9_data(self,off): self.data_disp(b'\x4c\x8d\x0d',off)
  def patch(self):
