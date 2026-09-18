@@ -613,8 +613,8 @@ jobs:
           # at its legacy direct-route HDA policy; that is accepted only after the
           # live HII prompt source itself has been established.
           $promptRaw=Invoke-QevarynxUefiVm (Join-Path $root 'prompt.EFI') 'qevarynx-hii-prompt'
-          if(-not ($promptRaw -match 'STATE=START' -and $promptRaw -match 'HII_DATABASE_PROTOCOL=PASS' -and $promptRaw -match 'HII_STRING_PROTOCOL=PASS' -and $promptRaw -match 'HII_PROMPT_SOURCE=PASS')){
-            throw "VMware live HII prompt discovery failed: $promptRaw"
+          if(-not ($promptRaw -match 'STATE=START' -and $promptRaw -match 'HII_DATABASE_PROTOCOL=PASS' -and $promptRaw -match 'HII_STRING_PROTOCOL=PASS' -and $promptRaw -match 'HII_PROMPT_SOURCE=PASS' -and $promptRaw -match 'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403')){
+            throw "VMware live HII prompt discovery/controller selection failed: $promptRaw"
           }
           $promptIntegrated=($promptRaw -match 'LPIB_PROGRESS=PASS' -and $promptRaw -match 'HII_PROMPT_SPEECH_HDA=PASS' -and $promptRaw -match 'STATUS=PASS')
           if(-not $promptIntegrated -and $promptRaw -notmatch 'REASON=AUTO_OUTPUT_ROUTE_DISCOVERY_FAILED'){
@@ -653,6 +653,7 @@ jobs:
             'VMWARE_HII_DATABASE_PROTOCOL=PASS'
             'VMWARE_HII_STRING_PROTOCOL=PASS'
             'VMWARE_LIVE_HII_PROMPT_SOURCE=PASS'
+            'VMWARE_HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403'
             'VMWARE_HDA_GRAPH_ROUTE=PASS'
             'VMWARE_HDA_DMA_PROGRESS=PASS'
             'VMWARE_GRAPH_HDA_SPEECH=PASS'
