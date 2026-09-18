@@ -212,6 +212,8 @@ jobs:
           required=[
             b"HII_DATABASE_PROTOCOL=PASS\r\n",
             b"HII_STRING_PROTOCOL=PASS\r\n",
+            b"HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3\r\n",
+            b"HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403\r\n",
             b"CURRENT_OPTION_SOURCE=PASS\r\n",
             b"CURRENT_OPTION_SPEECH_HDA=PASS\r\n",
             b"HII_NAVIGATION_KEY=WAIT_DOWN\r\n",
@@ -395,6 +397,7 @@ jobs:
               f.close()
           req=[
               b"HII_NAVIGATION_KEY=PASS\r\n",
+              b"HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403\r\n",
               b"NAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\n",
               b"NAV_FOCUS_OPTION_STRING=PASS\r\n",
               b"NAV_FOCUS_LABEL_BINDING=PASS\r\n",
@@ -695,6 +698,9 @@ jobs:
             'QEMU_HII_KEYBOARD_NAVIGATION=PASS'
             'QEMU_HDA_SPEECH=PASS'
             'QEMU_HDA_DMA_PROGRESS=PASS'
+            'QEMU_HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403'
+            'PHYSICAL_TARGET_HDA_CONTROLLER=PCI_VEN_1022_DEV_15E3'
+            'PHYSICAL_TARGET_CODEC=HDAUDIO_VEN_10EC_DEV_0256'
             'PHYSICAL_HOST_REBOOT=false'
             'PHYSICAL_HOST_FIRMWARE_MUTATION=false'
           ) | Set-Content "$root/final-result.txt" -Encoding ascii
@@ -752,6 +758,9 @@ jobs:
           $lines += 'proof-qemu-ovmf-runtime = PASS'
           $lines += 'proof-qemu-keyboard-navigation = PASS'
           $lines += 'proof-qemu-hda-speech = PASS'
+          $lines += 'proof-qemu-hda-controller-selection = GENERIC_CLASS_0403_FALLBACK_PASS'
+          $lines += 'proof-physical-target-hda-controller = PCI_VEN_1022_DEV_15E3'
+          $lines += 'proof-physical-target-codec = HDAUDIO_VEN_10EC_DEV_0256'
           $lines += "proof-qemu-waveform = $qemuWave"
           $lines += "proof-vmware-workstation = $vm"
           $lines += "proof-vmware-hda-graph-speech = $vmSpeech"
