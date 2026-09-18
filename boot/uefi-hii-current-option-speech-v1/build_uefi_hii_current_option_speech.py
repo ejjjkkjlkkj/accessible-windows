@@ -148,6 +148,8 @@ MARKS={
  'commit_route_fail': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=ROUTE_CONFIG_FAILED\r\nEND\r\n',
  'commit_verify_fail': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=POST_COMMIT_REREAD_MISMATCH\r\nEND\r\n',
  'done': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=PASS\r\nEND\r\n',
+ 'controller_preferred': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3\r\nEND\r\n',
+ 'controller_generic': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403\r\nEND\r\n',
  'no_hda': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_PCI_NOT_FOUND\r\nEND\r\n',
  'bad_hda': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_CONTROLLER_OR_CODEC_FAILED\r\nEND\r\n',
  'dma_alloc': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=DMA_ALLOC_FAILED\r\nEND\r\n',
@@ -658,17 +660,39 @@ def build():
   serial('repeat_accept')
 
  c.label('hda_begin')
- # Scan full PCI config mechanism-1 segment for class 04/subclass 03.
+ # Two-pass PCI HDA selection. On AMD-5800H-REAL, the internal speakers are
+ # behind AMD 1022:15E3 -> Realtek 10EC:0256. The 1002:1637 HDA function is
+ # HDMI audio, so a plain first-class-0403 policy can route speech off-laptop.
+ # Pass 1 prefers the proven analog controller; pass 2 preserves generic QEMU/
+ # VMware and non-ASUS operation.
+ c.emit(b'\x45\x31\xe4')
+ c.label('scan_preferred')
+ c.emit(b'\x44\x89\xe0\xc1\xe0\x08\x0d\x00\x00\x00\x80\x41\x89\xc5')
+ c.rel32(b'\xe8','pci_read32')
+ c.emit(b'\x66\x3d\xff\xff'); c.rel32(b'\x0f\x84','scan_preferred_next')
+ c.emit(b'\x3d'+struct.pack('<I',0x15E31022)); c.rel32(b'\x0f\x85','scan_preferred_next')
+ c.emit(b'\x44\x89\xe8\x83\xc8\x08'); c.rel32(b'\xe8','pci_read32')
+ c.emit(b'\xc1\xe8\x10\x66\x3d\x03\x04'); c.rel32(b'\x0f\x85','scan_preferred_next')
+ serial('controller_preferred')
+ c.rel32(b'\xe9','found')
+ c.label('scan_preferred_next')
+ c.emit(b'\x41\xff\xc4\x41\x81\xfc\x00\x00\x01\x00'); c.rel32(b'\x0f\x82','scan_preferred')
+
+ # Generic fallback: first standards-class HDA controller.
  c.emit(b'\x45\x31\xe4')
  c.label('scan')
  c.emit(b'\x44\x89\xe0\xc1\xe0\x08\x0d\x00\x00\x00\x80\x41\x89\xc5')
  c.rel32(b'\xe8','pci_read32')
  c.emit(b'\x66\x3d\xff\xff'); c.rel32(b'\x0f\x84','scan_next')
  c.emit(b'\x44\x89\xe8\x83\xc8\x08'); c.rel32(b'\xe8','pci_read32')
- c.emit(b'\xc1\xe8\x10\x66\x3d\x03\x04'); c.rel32(b'\x0f\x84','found')
+ c.emit(b'\xc1\xe8\x10\x66\x3d\x03\x04'); c.rel32(b'\x0f\x84','found_generic')
  c.label('scan_next')
  c.emit(b'\x41\xff\xc4\x41\x81\xfc\x00\x00\x01\x00'); c.rel32(b'\x0f\x82','scan')
  c.rel32(b'\xe9','fail_no_hda')
+
+ c.label('found_generic')
+ serial('controller_generic')
+ c.rel32(b'\xe9','found')
 
  c.label('found')
  # Enable PCI memory space and bus mastering.
