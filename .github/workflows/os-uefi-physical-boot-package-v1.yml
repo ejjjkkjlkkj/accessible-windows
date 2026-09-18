@@ -46,6 +46,97 @@ jobs:
           out="$root/build"
           touch -t 202601010000 "$out/BOOTX64.EFI" "$root/physical-boot.profile" "$root/verify_physical_boot_proof.ps1"
 
+          cat > "$out/normalize_fat_timestamps.py" <<'PY'
+          import struct, sys
+          from pathlib import Path
+
+          p=Path(sys.argv[1])
+          b=bytearray(p.read_bytes())
+          bps=struct.unpack_from("<H",b,11)[0]
+          spc=b[13]
+          reserved=struct.unpack_from("<H",b,14)[0]
+          fats=b[16]
+          root_entries=struct.unpack_from("<H",b,17)[0]
+          fat16=struct.unpack_from("<H",b,22)[0]
+          fat32=struct.unpack_from("<I",b,36)[0]
+          fat_sectors=fat16 or fat32
+          fat_off=reserved*bps
+          data_sector=reserved+fats*fat_sectors
+          cluster_bytes=bps*spc
+          fixed_date=((2026-1980)<<9)|(1<<5)|1
+
+          def cluster_off(cluster):
+              return (data_sector+(cluster-2)*spc)*bps
+
+          def fat_next(cluster):
+              if fat16:
+                  return struct.unpack_from("<H",b,fat_off+cluster*2)[0]
+              return struct.unpack_from("<I",b,fat_off+cluster*4)[0] & 0x0fffffff
+
+          def is_eoc(v):
+              return v >= (0xfff8 if fat16 else 0x0ffffff8)
+
+          seen=set()
+          def normalize_dir(start_cluster):
+              if start_cluster in seen or start_cluster < 2:
+                  return
+              seen.add(start_cluster)
+              cluster=start_cluster
+              stop=False
+              while not stop:
+                  off=cluster_off(cluster)
+                  for pos in range(off,off+cluster_bytes,32):
+                      first=b[pos]
+                      if first==0:
+                          stop=True
+                          break
+                      if first==0xe5:
+                          continue
+                      attr=b[pos+11]
+                      if attr==0x0f:
+                          continue
+                      b[pos+13]=0
+                      struct.pack_into("<H",b,pos+14,0)
+                      struct.pack_into("<H",b,pos+16,fixed_date)
+                      struct.pack_into("<H",b,pos+18,fixed_date)
+                      struct.pack_into("<H",b,pos+22,0)
+                      struct.pack_into("<H",b,pos+24,fixed_date)
+                      name=bytes(b[pos:pos+11])
+                      if attr & 0x10 and name not in (b".          ",b"..         "):
+                          hi=struct.unpack_from("<H",b,pos+20)[0] if not fat16 else 0
+                          lo=struct.unpack_from("<H",b,pos+26)[0]
+                          normalize_dir((hi<<16)|lo)
+                  nxt=fat_next(cluster)
+                  if stop or nxt==0 or is_eoc(nxt):
+                      break
+                  cluster=nxt
+
+          if root_entries:
+              root_sector=reserved+fats*fat_sectors
+              root_off=root_sector*bps
+              root_len=root_entries*32
+              for pos in range(root_off,root_off+root_len,32):
+                  first=b[pos]
+                  if first==0:
+                      break
+                  if first==0xe5 or b[pos+11]==0x0f:
+                      continue
+                  b[pos+13]=0
+                  struct.pack_into("<H",b,pos+14,0)
+                  struct.pack_into("<H",b,pos+16,fixed_date)
+                  struct.pack_into("<H",b,pos+18,fixed_date)
+                  struct.pack_into("<H",b,pos+22,0)
+                  struct.pack_into("<H",b,pos+24,fixed_date)
+                  if b[pos+11] & 0x10:
+                      normalize_dir(struct.unpack_from("<H",b,pos+26)[0])
+          else:
+              root_cluster=struct.unpack_from("<I",b,44)[0]
+              normalize_dir(root_cluster)
+
+          p.write_bytes(b)
+          print("FAT_TIMESTAMP_NORMALIZATION=PASS")
+          PY
+
           build_image() {
             local image="$1"
             local part="$2"
@@ -73,6 +164,7 @@ jobs:
               'AUDIBLE_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' > "$out/PENDING.TXT"
             touch -t 202601010000 "$out/PENDING.TXT"
             mcopy -m -i "$part" "$out/PENDING.TXT" ::/QEVARYNOX-PENDING.TXT
+            python "$out/normalize_fat_timestamps.py" "$part"
             dd if="$part" of="$image" bs=512 seek=2048 conv=notrunc status=none
             sgdisk -v "$image"
           }
