@@ -55,6 +55,12 @@ MARKS={
  'key_fail': b'QEVARYNOX-UEFI-HII-QUESTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=TEXT_INPUT_INVALID_OR_TOO_LONG\r\nEND\r\n',
  'topology_fail': b'QEVARYNOX-UEFI-HII-QUESTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=AUTO_OUTPUT_ROUTE_DISCOVERY_FAILED\r\nEND\r\n',
  'policy_fail': b'QEVARYNOX-UEFI-HII-QUESTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=OUTPUT_POLICY_FAILED\r\nEND\r\n',
+ 'meta_qid': b'QEVARYNOX-UEFI-HII-QUESTION-SPEECH-V1\r\nQUESTION_ID_LE_HEX=',
+ 'meta_vsid': b'\r\nVARSTORE_ID_LE_HEX=',
+ 'meta_vinfo': b'\r\nVARSTORE_INFO_LE_HEX=',
+ 'meta_qflags': b'\r\nQUESTION_FLAGS_HEX=',
+ 'meta_oflags': b'\r\nONEOF_FLAGS_HEX=',
+ 'meta_done': b'\r\nQUESTION_METADATA=PASS\r\nEND\r\n',
 }
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -150,7 +156,7 @@ def make_pcm():
 def build():
  pcm=make_pcm()
  data=bytearray(0x101100)
- L={'maxaddr':0,'keybuf':8,'dac_nid':16,'pin_nid':20,'textbuf':32,'text_count':56,'db_guid':64,'str_guid':80,'dbptr':96,'strptr':104,'handles_size':112,'handles_ptr':120,'pkg_size':128,'pkg_ptr':136,'langs_size':144,'langs_ptr':152,'string_size':160,'string_ptr':168,'token':176,'temp_handle':184,'handle_cursor':192,'handles_remaining':200,'forms_ptr':208,'strings_ptr':216,'list_len':224,'handles_static':0x100,'pkg_static':0x1100}
+ L={'maxaddr':0,'keybuf':8,'dac_nid':16,'pin_nid':20,'textbuf':32,'text_count':56,'db_guid':64,'str_guid':80,'dbptr':96,'strptr':104,'handles_size':112,'handles_ptr':120,'pkg_size':128,'pkg_ptr':136,'langs_size':144,'langs_ptr':152,'string_size':160,'string_ptr':168,'token':176,'temp_handle':184,'handle_cursor':192,'handles_remaining':200,'forms_ptr':208,'strings_ptr':216,'list_len':224,'question_id':232,'varstore_id':234,'varstore_info':236,'question_flags':238,'oneof_flags':239,'handles_static':0x100,'pkg_static':0x1100}
  struct.pack_into('<Q',data,0,0xffffffff)
  struct.pack_into('<IHH8B',data,L['db_guid'],0xef9fc172,0xa1b2,0x4693,0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42)
  struct.pack_into('<IHH8B',data,L['str_guid'],0x0fd96974,0x23aa,0x4cdc,0xb9,0xcb,0x98,0xd1,0x77,0x50,0x32,0x2a)
@@ -285,6 +291,11 @@ def build():
  c.emit(b'\x83\xf9\x0e'); c.rel32(b'\x0f\x82','ifr_next')
  c.emit(b'\x41\x0f\xb7\x41\x08')
  c.emit(b'\x66\x85\xc0'); c.rel32(b'\x0f\x84','ifr_next')
+ c.lea_rdx_data(L['varstore_id']); c.emit(b'\x66\x89\x02')
+ c.emit(b'\x41\x0f\xb7\x41\x06'); c.lea_rdx_data(L['question_id']); c.emit(b'\x66\x89\x02')
+ c.emit(b'\x41\x0f\xb7\x41\x0a'); c.lea_rdx_data(L['varstore_info']); c.emit(b'\x66\x89\x02')
+ c.emit(b'\x41\x0f\xb6\x41\x0c'); c.lea_rdx_data(L['question_flags']); c.emit(b'\x88\x02')
+ c.emit(b'\x41\x0f\xb6\x41\x0d'); c.lea_rdx_data(L['oneof_flags']); c.emit(b'\x88\x02')
  c.emit(b'\x41\x0f\xb7\x41\x02')
  c.label('token_candidate')
  c.emit(b'\x66\x85\xc0'); c.rel32(b'\x0f\x84','ifr_next')
@@ -416,6 +427,7 @@ def build():
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\xc7\x00\x00\x00')
  c.lea_rdx_data(L['text_count']); c.emit(b'\x89\x3a')
  serial('hii')
+ c.rel32(b'\xe8','emit_question_meta')
 
  # Scan full PCI config mechanism-1 segment for class 04/subclass 03.
  c.emit(b'\x45\x31\xe4')
@@ -697,6 +709,25 @@ def build():
 
  c.label('pci_read32'); c.emit(b'\x66\xba\xf8\x0c\xef\x66\xba\xfc\x0c\xed\xc3')
  c.label('pci_write32'); c.emit(b'\x66\xba\xf8\x0c\xef\x89\xc8\x66\xba\xfc\x0c\xef\xc3')
+
+ c.label('emit_question_meta')
+ for mark,name in (('meta_qid','question_id'),('meta_vsid','varstore_id'),('meta_vinfo','varstore_info')):
+  serial(mark); c.lea_rsi_data(L[name]); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x8a\x46\x01'); c.rel32(b'\xe8','hex8_emit')
+ serial('meta_qflags'); c.lea_rsi_data(L['question_flags']); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit')
+ serial('meta_oflags'); c.lea_rsi_data(L['oneof_flags']); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit')
+ serial('meta_done'); c.emit(b'\xc3')
+
+ c.label('hex8_emit')
+ c.emit(b'\x41\x88\xc3\xc0\xe8\x04'); c.rel32(b'\xe8','hex_nibble_emit')
+ c.emit(b'\x44\x88\xd8\x24\x0f'); c.rel32(b'\xe8','hex_nibble_emit'); c.emit(b'\xc3')
+ c.label('hex_nibble_emit')
+ c.emit(b'\x3c\x09'); c.rel32(b'\x0f\x86','hex_digit')
+ c.emit(b'\x04\x37'); c.rel32(b'\xe9','hex_char_ready')
+ c.label('hex_digit'); c.emit(b'\x04\x30')
+ c.label('hex_char_ready'); c.emit(b'\x88\xc3\x66\xba\xfd\x03')
+ c.label('hex_wait'); c.emit(b'\xec\xa8\x20'); c.rel8(0x74,'hex_wait')
+ c.emit(b'\x66\xba\xf8\x03\x88\xd8\xee\xc3')
+
  c.label('serial_emit')
  c.emit(b'\x49\x89\xd0\x66\xba\xfd\x03')
  c.label('serial_wait'); c.emit(b'\xec\xa8\x20'); c.rel8(0x74,'serial_wait')
