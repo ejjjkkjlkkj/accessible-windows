@@ -7,6 +7,7 @@ TEXT_RVA=0x1000
 DATA_RVA=0x8000
 WAIT_REPEAT_KEY=False
 WAIT_DOWN_PROBE=False
+WAIT_DOWN_SPEAK=False
 
 ROOT=Path(__file__).resolve().parents[2]
 SPEECH_BUILDER=ROOT/'boot'/'uefi-hii-option-speech-v1'/'build_uefi_hii_option_speech.py'
@@ -106,6 +107,10 @@ MARKS={
  'nav_type': b'\r\nNAV_NEXT_OPTION_TYPE_HEX=',
  'nav_raw': b'\r\nNAV_NEXT_OPTION_VALUE_RAW8_HEX=',
  'nav_done': b'\r\nNAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\nEND\r\n',
+ 'nav_focus_activate': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_FOCUS_OPTION_TOKEN_ACTIVATED=PASS\r\nEND\r\n',
+ 'nav_speech_hii': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_FOCUS_SOURCE=LIVE_DIRECT_SIBLING_HII_LABEL\r\nNAV_FOCUS_SOURCE=PASS\r\nEND\r\n',
+ 'nav_spoken_prefix': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_FOCUS_SPOKEN_PREFIX=',
+ 'nav_spoken_prefix_done': b'\r\nNAV_FOCUS_SPOKEN_PREFIX=PASS\r\nEND\r\n',
  'nav_fail': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=NAV_NEXT_OPTION_NOT_FOUND\r\nEND\r\n',
  'done': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=PASS\r\nEND\r\n',
  'no_hda': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_PCI_NOT_FOUND\r\nEND\r\n',
@@ -189,7 +194,7 @@ def build():
 
  c=Code()
  c.emit(b'\x53\x55\x56\x57\x41\x54\x41\x55\x41\x56\x41\x57')
- if WAIT_REPEAT_KEY or WAIT_DOWN_PROBE:
+ if WAIT_REPEAT_KEY or WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK:
   c.emit(b'\x48\x8b\x6a\x30')  # rbp=ConIn for accessibility keyboard commands
  c.emit(b'\x4c\x8b\x7a\x60')  # r15=BootServices
  c.emit(b'\x48\x83\xec\x68\xfc')
@@ -464,10 +469,13 @@ def build():
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
- if WAIT_DOWN_PROBE:
+ if WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK:
   c.rel32(b'\xe8','wait_down_key'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','resolve_next_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','emit_nav_meta')
+  if WAIT_DOWN_SPEAK:
+   c.lea_rax_data(L['nav_option_token']); c.emit(b'\x0f\xb7\x00'); c.lea_rdx_data(L['selected_option_token']); c.emit(b'\x66\x89\x02')
+   serial('nav_focus_activate')
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x8b\x32')
  serial('prefix'); c.rel32(b'\xe8','serial_scsu_ascii')
  c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_string')
@@ -481,10 +489,13 @@ def build():
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
- if WAIT_DOWN_PROBE:
+ if WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK:
   c.rel32(b'\xe8','wait_down_key'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','resolve_next_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','emit_nav_meta')
+  if WAIT_DOWN_SPEAK:
+   c.lea_rax_data(L['nav_option_token']); c.emit(b'\x0f\xb7\x00'); c.lea_rdx_data(L['selected_option_token']); c.emit(b'\x66\x89\x02')
+   serial('nav_focus_activate')
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x8b\x32')
  serial('prefix'); c.rel32(b'\xe8','serial_utf16')
  serial('suffix'); c.rel32(b'\xe9','begin_selected_label')
@@ -539,8 +550,12 @@ def build():
  c.emit(b'\x85\xff'); c.rel32(b'\x0f\x84','fail_speech_text')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\xc7\x00\x00\x00')
  c.lea_rdx_data(L['text_count']); c.emit(b'\x89\x3a')
- serial('speech_hii')
- serial('spoken_prefix'); c.rel32(b'\xe8','serial_textbuf'); serial('spoken_prefix_done')
+ if WAIT_DOWN_SPEAK:
+  serial('nav_speech_hii')
+  serial('nav_spoken_prefix'); c.rel32(b'\xe8','serial_textbuf'); serial('nav_spoken_prefix_done')
+ else:
+  serial('speech_hii')
+  serial('spoken_prefix'); c.rel32(b'\xe8','serial_textbuf'); serial('spoken_prefix_done')
  if WAIT_REPEAT_KEY:
   # ReadKeyStroke is read-only. Ignore EFI_NOT_READY and unrelated keys; only
   # Latin R/r authorizes the already-resolved current label to reach HDA.
@@ -1383,11 +1398,12 @@ def validate(image,pcm):
   assert token in image,token
 
 def main():
- global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE
- if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe]')
+ global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE, WAIT_DOWN_SPEAK
+ if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak]')
  if len(sys.argv)==3:
   if sys.argv[2]=='--wait-repeat': WAIT_REPEAT_KEY=True
   elif sys.argv[2]=='--wait-down-probe': WAIT_DOWN_PROBE=True
+  elif sys.argv[2]=='--wait-down-speak': WAIT_DOWN_SPEAK=True
   else: raise SystemExit('unknown mode: '+sys.argv[2])
  image,pcm=build(); validate(image,pcm)
  p=Path(sys.argv[1]); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(image)
@@ -1397,6 +1413,7 @@ def main():
  print('current-option-max-spoken-graphemes=8')
  print('accessibility-repeat-key=' + ('enabled' if WAIT_REPEAT_KEY else 'disabled'))
  print('hii-down-probe=' + ('enabled' if WAIT_DOWN_PROBE else 'disabled'))
+ print('hii-down-speak=' + ('enabled' if WAIT_DOWN_SPEAK else 'disabled'))
  print('pcm-bytes='+str(len(pcm)))
  print('pcm-sha256='+hashlib.sha256(pcm).hexdigest())
  print('sha256='+hashlib.sha256(image).hexdigest())
