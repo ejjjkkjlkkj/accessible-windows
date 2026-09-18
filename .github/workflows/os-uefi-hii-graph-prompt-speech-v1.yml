@@ -182,7 +182,52 @@ jobs:
           grep -F 'HII_PROMPT_SOURCE=PASS' "$proof"
           grep -F 'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403' "$proof"
           grep -F 'HDA_CODEC_SELECTION=GENERIC_RUNTIME' "$proof"
-          grep -E '^HDA_CODEC_VENDOR_DEVICE=0x[0-9A-F]{8}$' "$proof"
+          tr -d '\r' < "$proof" | grep -E '^HDA_CODEC_VENDOR_DEVICE=0x[0-9A-F]{8}
+          grep -F 'HDA_GRAPH_SEARCH_LIVE=PASS' "$proof"
+          grep -F 'HDA_SELECTOR_APPLY_LIVE=PASS' "$proof"
+          grep -F 'HDA_OUTPUT_PATH_CONFIGURATION=PASS' "$proof"
+          grep -F 'HII_GRAPH_SPEECH_DMA=PASS' "$proof"
+          grep -F 'LPIB_PROGRESS=PASS' "$proof"
+          grep -F 'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$proof"
+          echo HII_GRAPH_BOOT_MEDIA_PERSISTENT_PROOF=PASS
+
+      # Interactive repeat runtime is proven independently by
+      # os-uefi-hii-graph-repeat-v1 using QMP send-key. Keep this workflow
+      # focused on the base live-HII -> graph-HDA path and boot-media proof.
+
+      - name: Validate waveform
+        shell: python
+        run: |
+          from pathlib import Path
+          import struct,wave
+          p=Path('boot/uefi-hii-graph-prompt-speech-v1/runtime.wav')
+          assert p.exists() and p.stat().st_size>10000,p
+          with wave.open(str(p),'rb') as w:
+              assert w.getnchannels()==2
+              assert w.getframerate()==48000
+              assert w.getsampwidth()==2
+              raw=w.readframes(w.getnframes())
+          vals=struct.unpack('<'+'h'*(len(raw)//2),raw)
+          peak=max(abs(v) for v in vals)
+          active=sum(abs(v)>=500 for v in vals)
+          assert peak>=5000,peak
+          assert active>=1000,active
+          print(f'peak={peak} active={active}')
+          print('HII_GRAPH_PROMPT_SPEECH_WAVEFORM=PASS')
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: os-uefi-hii-graph-prompt-speech-v1
+          path: |
+            boot/uefi-hii-graph-prompt-speech-v1/BOOTX64.EFI
+            boot/uefi-hii-graph-prompt-speech-v1/BOOTX64-REPEAT.EFI
+            boot/uefi-hii-graph-prompt-speech-v1/runtime.serial
+            boot/uefi-hii-graph-prompt-speech-v1/runtime.wav
+            boot/uefi-hii-graph-prompt-speech-v1/runtime-boot-media-proof.txt
+            boot/uefi-hii-graph-prompt-speech-v1/speech-unit-metadata.txt
+            boot/uefi-hii-graph-prompt-speech-v1/build.sha256
+          if-no-files-found: error
+
           grep -F 'HDA_GRAPH_SEARCH_LIVE=PASS' "$proof"
           grep -F 'HDA_SELECTOR_APPLY_LIVE=PASS' "$proof"
           grep -F 'HDA_OUTPUT_PATH_CONFIGURATION=PASS' "$proof"
