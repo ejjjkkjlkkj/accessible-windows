@@ -738,8 +738,10 @@ def build():
  c.emit(b'\x8d\x42\x06\x41\x39\xc0'); c.rel32(b'\x0f\x82','current_option_scope_and_advance')
  # Option width must equal the live ONE_OF current-value width.
  c.lea_rax_data(L['current_width']); c.emit(b'\x0f\xb6\x00\x39\xd0'); c.rel32(b'\x0f\x85','current_option_scope_and_advance')
- c.emit(b'\x41\x89\xd3') # r11d = width
- c.emit(b'\x49\x8d\x71\x06'); c.lea_rdi_data(L['current_raw']); c.emit(b'\x44\x89\xd9')
+ # Keep r11d untouched: it still carries the raw Length/Scope header byte and
+ # is needed if a non-matching ONE_OF_OPTION itself opens a nested scope.
+ c.lea_rax_data(L['option_width']); c.emit(b'\x88\x10') # option_width = dl
+ c.emit(b'\x49\x8d\x71\x06'); c.lea_rdi_data(L['current_raw']); c.emit(b'\x89\xd1')
  c.label('current_option_compare')
  c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','current_option_equal')
  c.emit(b'\x8a\x06\x3a\x07'); c.rel32(b'\x0f\x85','current_option_scope_and_advance')
@@ -749,9 +751,9 @@ def build():
  c.emit(b'\x41\x0f\xb7\x41\x02'); c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  c.emit(b'\x41\x0f\xb6\x41\x04'); c.lea_rdx_data(L['option_flags']); c.emit(b'\x88\x02')
  c.emit(b'\x41\x0f\xb6\x41\x05'); c.lea_rdx_data(L['option_type']); c.emit(b'\x88\x02')
- c.lea_rax_data(L['option_width']); c.emit(b'\x44\x88\x18')
+ c.lea_rax_data(L['option_width']); c.emit(b'\x0f\xb6\x08')
  c.lea_rdx_data(L['option_value']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00\xc7\x42\x04\x00\x00\x00\x00')
- c.emit(b'\x49\x8d\x71\x06\x44\x89\xd9')
+ c.emit(b'\x49\x8d\x71\x06')
  c.label('current_option_copy')
  c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','current_option_copied')
  c.emit(b'\x8a\x06\x88\x02\x48\xff\xc6\x48\xff\xc2\xff\xc9'); c.rel32(b'\xe9','current_option_copy')
