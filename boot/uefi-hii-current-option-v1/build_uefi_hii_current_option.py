@@ -39,6 +39,9 @@ MARKS={
  'opt_meta_done': b'\r\nCURRENT_OPTION_METADATA=PASS\r\nEND\r\n',
  'opt_prefix': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_TEXT=',
  'opt_done': b'\r\nCURRENT_OPTION_STRING=PASS\r\nCURRENT_OPTION_RESOLUTION=PASS\r\nSTATUS=PASS\r\nEND\r\n',
+ 'speech_ready': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_SPEECH_BUFFER=PASS\r\nEND\r\n',
+ 'speech_prefix': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_SPEECH_PREFIX=',
+ 'speech_prefix_done': b'\r\nCURRENT_OPTION_SPEECH_PREFIX=PASS\r\nEND\r\n',
  'meta_qid': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nQUESTION_ID_LE_HEX=',
  'meta_varstore': b'\r\nVARSTORE_ID_LE_HEX=',
  'meta_varinfo': b'\r\nVARSTORE_INFO_LE_HEX=',
@@ -121,6 +124,7 @@ def build():
   'varstore_name_ptr':360,'varstore_name_remaining':368,
   'resolve_mode':372,'option_flags':373,'option_type':374,'option_width':375,
   'option_value':376,'option_scope_depth':384,'option_strings_ptr':392,'option_token':400,
+  'option_string_ptr':408,'speech_count':416,'speechbuf':424,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -423,9 +427,13 @@ def build():
  c.rel32(b'\xe9','resolve_string_package')
 
  c.label('selected_scsu_found')
+ c.lea_rdx_data(L['option_string_ptr']); c.emit(b'\x48\x89\x32')
  c.rel32(b'\xe8','emit_option_meta')
- serial('opt_prefix'); c.rel32(b'\xe8','serial_scsu_ascii')
+ serial('opt_prefix'); c.lea_rdx_data(L['option_string_ptr']); c.emit(b'\x48\x8b\x32'); c.rel32(b'\xe8','serial_scsu_ascii')
  c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
+ c.lea_rdx_data(L['option_string_ptr']); c.emit(b'\x48\x8b\x32'); c.rel32(b'\xe8','capture_speech_scsu')
+ c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
+ serial('speech_ready'); serial('speech_prefix'); c.rel32(b'\xe8','serial_speechbuf'); serial('speech_prefix_done')
  serial('opt_done'); c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
 
  c.label('direct_ucs_found')
@@ -450,8 +458,12 @@ def build():
  c.rel32(b'\xe9','resolve_string_package')
 
  c.label('selected_ucs_found')
+ c.lea_rdx_data(L['option_string_ptr']); c.emit(b'\x48\x89\x32')
  c.rel32(b'\xe8','emit_option_meta')
- serial('opt_prefix'); c.rel32(b'\xe8','serial_utf16')
+ serial('opt_prefix'); c.lea_rdx_data(L['option_string_ptr']); c.emit(b'\x48\x8b\x32'); c.rel32(b'\xe8','serial_utf16')
+ c.lea_rdx_data(L['option_string_ptr']); c.emit(b'\x48\x8b\x32'); c.rel32(b'\xe8','capture_speech_ucs')
+ c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
+ serial('speech_ready'); serial('speech_prefix'); c.rel32(b'\xe8','serial_speechbuf'); serial('speech_prefix_done')
  serial('opt_done'); c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
 
  c.label('fail_protocol'); serial('no_protocol'); c.rel32(b'\xe9','return_fail')
@@ -534,6 +546,44 @@ def build():
  c.emit(b'\x66\xba\xf8\x03\x88\xd8\xee\x48\xff\xc6'); c.rel32(b'\xe9','scsu_ascii_loop')
  c.label('scsu_ascii_ok'); c.emit(b'\x31\xc0\xc3')
  c.label('scsu_ascii_bad'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
+
+ c.label('capture_speech_scsu')
+ # Input RSI points at the selected SCSU/ASCII option text. Keep only the
+ # first eight Latin letters, normalize A-Z to a-z, and store UTF-16 units.
+ c.emit(b'\x31\xff')
+ c.label('speech_scsu_loop')
+ c.emit(b'\x8a\x06\x84\xc0'); c.rel32(b'\x0f\x84','speech_capture_done')
+ c.emit(b'\x48\xff\xc6\x0c\x20\x3c\x61'); c.rel32(b'\x0f\x82','speech_scsu_loop')
+ c.emit(b'\x3c\x7a'); c.rel32(b'\x0f\x87','speech_scsu_loop')
+ c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','speech_capture_done')
+ c.lea_rdx_data(L['speechbuf']); c.emit(b'\x89\xf9\x48\x8d\x0c\x4a\x66\x89\x01\xff\xc7')
+ c.rel32(b'\xe9','speech_scsu_loop')
+
+ c.label('capture_speech_ucs')
+ # Input RSI points at UTF-16 selected-option text; accept ASCII Latin only.
+ c.emit(b'\x31\xff')
+ c.label('speech_ucs_loop')
+ c.emit(b'\x0f\xb7\x06\x85\xc0'); c.rel32(b'\x0f\x84','speech_capture_done')
+ c.emit(b'\x48\x83\xc6\x02\x83\xc8\x20\x83\xf8\x61'); c.rel32(b'\x0f\x82','speech_ucs_loop')
+ c.emit(b'\x83\xf8\x7a'); c.rel32(b'\x0f\x87','speech_ucs_loop')
+ c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','speech_capture_done')
+ c.lea_rdx_data(L['speechbuf']); c.emit(b'\x89\xf9\x48\x8d\x0c\x4a\x66\x89\x01\xff\xc7')
+ c.rel32(b'\xe9','speech_ucs_loop')
+
+ c.label('speech_capture_done')
+ c.emit(b'\x85\xff'); c.rel32(b'\x0f\x84','speech_capture_fail')
+ c.lea_rdx_data(L['speechbuf']); c.emit(b'\x89\xf9\x48\x8d\x0c\x4a\x66\xc7\x01\x00\x00')
+ c.lea_rdx_data(L['speech_count']); c.emit(b'\x89\x3a\x31\xc0\xc3')
+ c.label('speech_capture_fail'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
+
+ c.label('serial_speechbuf')
+ c.lea_rsi_data(L['speechbuf']); c.lea_rdx_data(L['speech_count']); c.emit(b'\x8b\x0a')
+ c.label('serial_speechbuf_loop')
+ c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','serial_speechbuf_done')
+ c.emit(b'\x0f\xb7\x06\x48\x83\xc6\x02\x88\xc3\x66\xba\xfd\x03')
+ c.label('serial_speechbuf_wait'); c.emit(b'\xec\xa8\x20'); c.rel8(0x74,'serial_speechbuf_wait')
+ c.emit(b'\x66\xba\xf8\x03\x88\xd8\xee\xff\xc9'); c.rel32(b'\xe9','serial_speechbuf_loop')
+ c.label('serial_speechbuf_done'); c.emit(b'\xc3')
 
  c.label('resolve_varstore')
  # Re-scan the selected Forms package from its first IFR opcode and match the
@@ -934,6 +984,9 @@ def validate(image):
   b'CURRENT_OPTION_TEXT=',
   b'CURRENT_OPTION_STRING=PASS',
   b'CURRENT_OPTION_RESOLUTION=PASS',
+  b'CURRENT_OPTION_SPEECH_BUFFER=PASS',
+  b'CURRENT_OPTION_SPEECH_PREFIX=',
+  b'CURRENT_OPTION_SPEECH_PREFIX=PASS',
   b'VARSTORE_OPCODE_HEX=',
   b'VARSTORE_SIZE_LE_HEX=',
   b'VARSTORE_ATTRIBUTES_LE_HEX=',
