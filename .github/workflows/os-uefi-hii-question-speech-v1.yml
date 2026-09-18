@@ -142,6 +142,7 @@ jobs:
               b'HII_STRINGS_PACKAGE=PASS\r\n',
               b'IFR_ONE_OF_PROMPT_STRING_ID=PASS\r\n',
               b'HII_QUESTION_SOURCE=PASS\r\n',
+              b'NONZERO_VARSTORE_ID=PASS\r\n',
               b'AFG_RUNTIME_DISCOVERY=PASS\r\n',
               b'AUTO_DAC_WIDGET=PASS\r\n',
               b'AUTO_OUTPUT_PIN_WIDGET=PASS\r\n',
@@ -266,10 +267,10 @@ jobs:
           root=boot/uefi-hii-question-speech-v1
           sha256sum "$root/BOOTX64.EFI" "$root/hii-question-speech.serial" "$root/hii-question-speech.wav" "$root/hii-question-speech-metrics.txt" > "$root/evidence.sha256"
           cat > "$root/linux-evidence.txt" <<'EOF'
-          OS-UEFI-HII-SPEECH-V1
+          OS-UEFI-HII-QUESTION-SPEECH-V1
           firmware = OVMF
           machine = q35
-          HII-live-title-source = PASS
+          HII-live-question-source = PASS
           HII-global-package-export = PASS
           HII-direct-string-decoder = PASS
           HII-question-hardcoded = false
@@ -278,7 +279,7 @@ jobs:
           HDA-runtime-waveform = PASS
           keyboard-input-required = false
           setting-mutation = false
-          physical-ASUS-HII-speech = not-established
+          physical-ASUS-HII-question-speech = not-established
           result = PASS
           EOF
 
