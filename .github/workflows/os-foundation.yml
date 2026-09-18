@@ -37,8 +37,14 @@ jobs:
         run: |
           test -s docs/CONSTITUTION.md
           test -s docs/STORAGE.md
+          test -s docs/SOVEREIGN_TOOLCHAIN.md
           grep -q "Accessibility is intrinsic" docs/CONSTITUTION.md
-          grep -q "GitHub Actions is authoritative" docs/CONSTITUTION.md
+          grep -q "GitHub Actions is authoritative evidence" docs/CONSTITUTION.md
+          grep -q "Evidence A" docs/CONSTITUTION.md
+          grep -q "Evidence B" docs/CONSTITUTION.md
+          grep -q "Sovereign language and toolchain" docs/CONSTITUTION.md
+          grep -q "Accessibility contract for every tool" docs/SOVEREIGN_TOOLCHAIN.md
+          grep -q '"Better" requires comparison evidence' docs/SOVEREIGN_TOOLCHAIN.md
           grep -q "NOT IMPLEMENTED" docs/STORAGE.md
           grep -q "pub struct SemanticObjectV1" crates/aw-core/src/lib.rs
           grep -q "pub struct MemoryRecordV1" crates/aw-core/src/lib.rs
