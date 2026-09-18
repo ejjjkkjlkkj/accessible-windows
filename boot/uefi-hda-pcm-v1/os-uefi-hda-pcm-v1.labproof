@@ -2,6 +2,7 @@ OS-UEFI-HDA-PCM-V1
 role = native pre-OS HDA PCM stream DMA and audible-backend proof v1
 system-foundation = true
 depends-on = OS-UEFI-HDA-VERB-V1
+depends-on = OS-UEFI-HDA-WIDGET-V1
 execution-domain = pre-OS UEFI
 artifact-format = PE32+ EFI application
 architecture = x86-64
@@ -27,6 +28,7 @@ qemu-witness-controller = ich9-intel-hda
 qemu-witness-codec = hda-duplex
 qemu-witness-codec-vendor = 0x1AF4
 qemu-witness-route = DAC node 2 to output pin node 3
+qemu-witness-route-prevalidated-by = OS-UEFI-HDA-WIDGET-V1
 qemu-witness-pin-control = output-enable
 qemu-witness-audio-backend = wav
 required-runtime-dma-progress = true
