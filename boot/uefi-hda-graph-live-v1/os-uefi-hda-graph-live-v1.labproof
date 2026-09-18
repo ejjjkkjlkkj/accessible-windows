@@ -1,5 +1,4 @@
 OS-UEFI-HDA-GRAPH-LIVE-V1
-proof = PENDING_CI
 branch = os
 scope = freestanding first-party UEFI HDA graph engine
 language = C
@@ -18,3 +17,17 @@ selector-plan-701h = implemented
 live-QEMU-HDA-graph = pending
 physical-ASUS-M1603QA-topology = not-established
 physical-ASUS-M1603QA-speech = not-established
+proof = PASS
+proof-run = 35389374080
+proof-head-sha = d0c0fdcabd2d0cc25a1baf20a46247113e67a2e3
+proof-freestanding-UEFI = PASS
+proof-EDK2 = none
+proof-multihop-EFI-selftest = PASS
+proof-live-HDA-widget-enumeration = PASS
+proof-live-HDA-connection-decode = PASS
+proof-live-HDA-graph-search = PASS
+proof-live-selector-plan = PASS
+proof-physical-ASUS-M1603QA-speech = not-established
+proof-live-metrics = pin-nid=0x03; dac-nid=0x02; route-depth=1; selector-writes-required=0
+proof-efi-sha256 = de9bd9cca7a42c62e2d6f9c39f21801f961217b02e8670f66e1ca9e43a365174
+proof-serial-sha256 = dced9a2d746ad0fbb993f66c5e75c05127a4bf9573412d413164b57c1d8c5ede
