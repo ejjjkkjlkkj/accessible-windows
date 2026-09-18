@@ -85,6 +85,39 @@ public static class NativeStoreV1
         return result;
     }
 
+    public static string ValidateMutated(
+        string tablePath,
+        string locationsPath,
+        string mutatedStorePath)
+    {
+        byte[] table = File.ReadAllBytes(tablePath);
+        if (table.Length != 4) throw new Exception("LAB21 relation table length mismatch");
+        byte[] states = States(table);
+        byte identity = Identity(table, states);
+
+        byte[] locations = File.ReadAllBytes(locationsPath);
+        if (locations.Length != 256 * KeyWidth)
+            throw new Exception("native location artifact length mismatch");
+        byte[] store = File.ReadAllBytes(mutatedStorePath);
+        if (store.Length != 256 * RecordWidth)
+            throw new Exception("native store artifact length mismatch");
+
+        int lookups = 0;
+        for (int location = 0; location < 256; location++)
+        {
+            int keyOffset = location * KeyWidth;
+            byte initial = FoldKey(table, states, identity, locations, keyOffset);
+            byte action = locations[keyOffset];
+            byte expected = Compose(table, states, initial, action);
+            byte actual = Lookup(store, locations, keyOffset);
+            if (actual != expected)
+                throw new Exception("order-independent mutated store lookup mismatch");
+            lookups++;
+        }
+
+        return "NATIVE_STORE_V1_VALIDATE_MUTATED=PASS;LOOKUPS=" + lookups;
+    }
+
     public static string BuildAndMutate(
         string tablePath,
         string locationsPath,
