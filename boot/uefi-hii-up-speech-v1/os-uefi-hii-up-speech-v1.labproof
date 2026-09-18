@@ -26,8 +26,8 @@ physical-ASUS-up-focus-speech = not-established
 claim = success establishes that UP moves accessibility focus to the previous direct ONE_OF_OPTION sibling using first-to-last wrap, resolves that sibling live HII label, and speaks that focused label over native HDA while leaving the firmware current value unchanged
 claim = success does not establish physical ASUS keyboard/audio behavior
 proof = PASS
-proof-run = 35397852153
-proof-head-sha = 448cbfb50e43807aac3fcf53b7970e4a34f1b25c
+proof-run = 35397948616
+proof-head-sha = 49df06a7381b13781e3308b567e4aa47f5636830
 proof-up-key-event = PASS
 proof-prev-direct-sibling = PASS
 proof-wrap-policy = PASS
@@ -43,8 +43,8 @@ proof-post-state-current-value = 0
 proof-post-state-current-label = Disabled
 proof-setting-mutation = false
 proof-physical-ASUS-up-focus-speech = false
-proof-wave-metrics = frames=18777; peak=13355; active=33882; wav-sha256=6b428a88ec7e7051cd080796327ebe8305939b0a911221a1c0d0084b782de94e
-proof-efi-sha256 = 73a1ebab4a676f8cd4fe74d310873708f94b0fb35a41b9dde17eba64a973e2f2
+proof-wave-metrics = frames=18785; peak=13355; active=33898; wav-sha256=6851220273ccf7a9c3e76d9e782c06ab2f7008c235ba09ec87c9fca4221078a6
+proof-efi-sha256 = a2115ca5a96a14b787709fcb733a5dd498d71f645a7649987ebafe0b08d3d7ba
 proof-serial-sha256 = 2bd993a4bba3d38792584683a005a1b5fc5c6f732398a93a6fd60659e6211512
-proof-wav-sha256 = 6b428a88ec7e7051cd080796327ebe8305939b0a911221a1c0d0084b782de94e
+proof-wav-sha256 = 6851220273ccf7a9c3e76d9e782c06ab2f7008c235ba09ec87c9fca4221078a6
 proof-post-serial-sha256 = b9424fefd326f1e5ec8837748f36f641466b2df336c18be457f700a0800c7f3f
