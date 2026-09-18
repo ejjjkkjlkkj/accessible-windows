@@ -7,7 +7,7 @@ typedef unsigned long long usize;
 typedef u64 (*stall_fn)(usize microseconds);
 typedef u64 (*allocate_pages_fn)(u32 type, u32 memory_type, usize pages, u64 *memory);
 
-#ifdef QEV_INTERACTIVE_REPEAT
+#if defined(QEV_INTERACTIVE_REPEAT) || defined(QEV_INTERACTIVE_NAV)
 typedef struct {
     u16 scan_code;
     u16 unicode_char;
@@ -135,6 +135,14 @@ static u8 g_hii_package[1024u * 1024u];
 static void *g_hii_handles[256];
 static char g_prompt_text[9];
 static u32 g_prompt_count;
+
+#ifdef QEV_INTERACTIVE_NAV
+#define MAX_HII_NAV_PROMPTS 32
+static char g_nav_prompts[MAX_HII_NAV_PROMPTS][9];
+static u8 g_nav_prompt_lengths[MAX_HII_NAV_PROMPTS];
+static u8 g_nav_prompt_total;
+static u8 g_nav_prompt_index;
+#endif
 
 static inline void outb(u16 port, u8 value) {
     __asm__ volatile("outb %0, %1" :: "a"(value), "d"(port));
@@ -655,6 +663,35 @@ static int get_hii_string(hii_string_protocol *str, void *handle, u16 token, cha
     }
     return normalize_prompt(text, out, count_out);
 }
+
+#ifdef QEV_INTERACTIVE_NAV
+static int nav_prompt_add(const char *text, u32 count) {
+    if (!text || !count || count > 8u) return 0;
+    for (u8 i = 0; i < g_nav_prompt_total; ++i) {
+        if (g_nav_prompt_lengths[i] != (u8)count) continue;
+        u32 same = 1;
+        for (u32 j = 0; j < count; ++j) {
+            if (g_nav_prompts[i][j] != text[j]) { same = 0; break; }
+        }
+        if (same) return 0;
+    }
+    if (g_nav_prompt_total >= MAX_HII_NAV_PROMPTS) return 0;
+    u8 slot = g_nav_prompt_total++;
+    for (u32 j = 0; j < count; ++j) g_nav_prompts[slot][j] = text[j];
+    g_nav_prompts[slot][count] = 0;
+    g_nav_prompt_lengths[slot] = (u8)count;
+    return 1;
+}
+
+static void nav_prompt_load(u8 index) {
+    if (index >= g_nav_prompt_total) return;
+    g_nav_prompt_index = index;
+    g_prompt_count = g_nav_prompt_lengths[index];
+    for (u32 j = 0; j < g_prompt_count; ++j) g_prompt_text[j] = g_nav_prompts[index][j];
+    g_prompt_text[g_prompt_count] = 0;
+}
+#endif
+
 static int resolve_hii_prompt(void *system_table) {
     void *bs = *(void **)((u8 *)system_table + 0x60);
     if (!bs) return 0;
@@ -673,6 +710,10 @@ static int resolve_hii_prompt(void *system_table) {
         !handle_bytes || handle_bytes > sizeof(g_hii_handles)) return 0;
     u32 handles = (u32)(handle_bytes / sizeof(void *));
     marker("HII_FORMS_HANDLE_LIST=PASS");
+#ifdef QEV_INTERACTIVE_NAV
+    g_nav_prompt_total = 0;
+    g_nav_prompt_index = 0;
+#endif
 
     for (u32 hi = 0; hi < handles; ++hi) {
         void *handle = g_hii_handles[hi];
@@ -700,6 +741,13 @@ static int resolve_hii_prompt(void *system_table) {
                     if (oplen < 2u || q + oplen > end) break;
                     if (prompt_opcode(op) && oplen >= 4u) {
                         u16 token = rd16(q + 2);
+#ifdef QEV_INTERACTIVE_NAV
+                        char candidate[9];
+                        u32 candidate_count = 0;
+                        if (token && get_hii_string(str, handle, token, candidate, &candidate_count)) {
+                            nav_prompt_add(candidate, candidate_count);
+                        }
+#else
                         if (token && get_hii_string(str, handle, token, g_prompt_text, &g_prompt_count)) {
                             marker("IFR_PROMPT_STRING_ID=PASS");
                             marker("HII_LANGUAGE_AND_STRING=PASS");
@@ -709,6 +757,7 @@ static int resolve_hii_prompt(void *system_table) {
                             marker("HII_PROMPT_SOURCE=PASS");
                             return 1;
                         }
+#endif
                     }
                     q += oplen;
                 }
@@ -716,6 +765,22 @@ static int resolve_hii_prompt(void *system_table) {
             p += len;
         }
     }
+#ifdef QEV_INTERACTIVE_NAV
+    if (g_nav_prompt_total) {
+        nav_prompt_load(0);
+        marker("IFR_PROMPT_STRING_ID=PASS");
+        marker("HII_LANGUAGE_AND_STRING=PASS");
+        marker("HII_GRAPH_NAV_PROMPT_COLLECTION=PASS");
+        serial_puts("HII_GRAPH_NAV_PROMPT_TOTAL=0x");
+        serial_hex8(g_nav_prompt_total);
+        serial_puts("\r\n");
+        serial_puts("HII_PROMPT_TEXT=");
+        serial_puts(g_prompt_text);
+        serial_puts("\r\n");
+        marker("HII_PROMPT_SOURCE=PASS");
+        return 1;
+    }
+#endif
     return 0;
 }
 
@@ -899,6 +964,66 @@ static int wait_repeat_key(void *system_table) {
 }
 #endif
 
+#ifdef QEV_INTERACTIVE_NAV
+static int wait_navigation_keys(void *system_table) {
+    if (!system_table || g_nav_prompt_total < 2u) return 0;
+    simple_text_input_protocol *conin =
+        *(simple_text_input_protocol **)((u8 *)system_table + 0x30);
+    if (!conin || !conin->read_key) return 0;
+
+    marker("HII_GRAPH_NAV_READY=PASS");
+    serial_puts("HII_GRAPH_NAV_TOTAL=0x");
+    serial_hex8(g_nav_prompt_total);
+    serial_puts("\r\n");
+
+    for (;;) {
+        efi_input_key key;
+        key.scan_code = 0;
+        key.unicode_char = 0;
+        u64 st = conin->read_key(conin, &key);
+        if (st == 0) {
+            u8 speak = 0;
+            if (key.unicode_char == 0x001bu) {
+                marker("HII_GRAPH_NAV_KEY=ESC");
+                marker("HII_GRAPH_NAV_EXIT=PASS");
+                return 1;
+            }
+            if (key.unicode_char == (u16)'r' || key.unicode_char == (u16)'R') {
+                marker("HII_GRAPH_NAV_KEY=R");
+                speak = 1;
+            } else if (key.scan_code == 0x0001u) {
+                marker("HII_GRAPH_NAV_KEY=UP");
+                u8 next = g_nav_prompt_index ? (u8)(g_nav_prompt_index - 1u)
+                                             : (u8)(g_nav_prompt_total - 1u);
+                nav_prompt_load(next);
+                speak = 1;
+            } else if (key.scan_code == 0x0002u) {
+                marker("HII_GRAPH_NAV_KEY=DOWN");
+                u8 next = (u8)(g_nav_prompt_index + 1u);
+                if (next >= g_nav_prompt_total) next = 0;
+                nav_prompt_load(next);
+                speak = 1;
+            }
+            if (speak) {
+                serial_puts("HII_GRAPH_NAV_INDEX=0x");
+                serial_hex8(g_nav_prompt_index);
+                serial_puts("\r\n");
+                serial_puts("HII_GRAPH_NAV_TEXT=");
+                serial_puts(g_prompt_text);
+                serial_puts("\r\n");
+                if (!run_speech_dma(g_prompt_text, g_prompt_count)) return 0;
+                marker("HII_GRAPH_NAV_SPEECH_DMA=PASS");
+                marker("HII_GRAPH_NAV_SPEECH_HDA=PASS");
+                marker("HII_GRAPH_NAV_LPIB_PROGRESS=PASS");
+                if (g_speech_dma_allocations != 1u) return 0;
+                marker("HII_GRAPH_SPEECH_DMA_REUSE=PASS");
+            }
+        }
+        if (g_stall) g_stall(1000);
+    }
+}
+#endif
+
 __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     serial_init();
     marker("QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V1");
@@ -972,6 +1097,13 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("HII_GRAPH_SPEECH_DMA=PASS");
     marker("HII_PROMPT_SPEECH_HDA=PASS");
     marker("LPIB_PROGRESS=PASS");
+#ifdef QEV_INTERACTIVE_NAV
+    if (!wait_navigation_keys(system_table)) {
+        marker("STATUS=BLOCKED");
+        marker("REASON=HII_GRAPH_NAVIGATION_FAILED");
+        return 1;
+    }
+#endif
 #ifdef QEV_INTERACTIVE_REPEAT
     if (!wait_repeat_key(system_table)) {
         marker("STATUS=BLOCKED");
