@@ -11,6 +11,8 @@ MARKS={
  'database': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_DATABASE_PROTOCOL=PASS\r\nEND\r\n',
  'string_protocol': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_STRING_PROTOCOL=PASS\r\nEND\r\n',
  'forms_handle': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_FORMS_HANDLE=PASS\r\nEND\r\n',
+ 'first_handle': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_FIRST_HANDLE_NONZERO=PASS\r\nEND\r\n',
+ 'static_empty': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_BUFFER_NOT_WRITTEN\r\nEND\r\n',
  'handle_export': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_HANDLE_EXPORT=PASS\r\nEND\r\n',
  'forms_package_seen': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_FORMS_PACKAGE_IN_SELECTED_HANDLE=PASS\r\nEND\r\n',
  'ifr': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nIFR_TITLE_STRING_ID=PASS\r\nEND\r\n',
@@ -129,6 +131,9 @@ def build():
  c.emit(b'\x83\xf8\x05'); c.rel32(b'\x0f\x84','fail_list_static_small')
  c.rel32(b'\xe9','fail_list_fetch')
  c.label('list_fetch_ready')
+ c.lea_rdx_data(L['handles_static']); c.emit(b'\x48\x83\x3a\x00')
+ c.rel32(b'\x0f\x84','fail_static_empty')
+ serial('first_handle')
 
  # Persist cursor and actual byte count; protocol calls may clobber volatile regs.
  c.lea_rax_data(L['handles_static'])
@@ -272,6 +277,7 @@ def build():
  c.label('fail_list_fetch_bts_twice'); serial('list_fetch_bts_twice'); c.rel32(b'\xe9','return_fail')
  c.label('fail_list_static_small'); serial('list_static_small'); c.rel32(b'\xe9','return_fail')
  c.label('fail_no_handle'); serial('no_handle'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_static_empty'); serial('static_empty'); c.rel32(b'\xe9','return_fail')
  c.label('fail_alloc'); serial('alloc'); c.rel32(b'\xe9','return_fail')
  c.label('fail_export'); serial('export'); c.rel32(b'\xe9','return_fail')
  c.label('fail_ifr'); serial('ifr_fail'); c.rel32(b'\xe9','return_fail')
