@@ -27,8 +27,8 @@ physical-ASUS-focus-repeat = not-established
 claim = success establishes persistent accessibility focus across two separate EFI keyboard events: DOWN moves focus from Disabled to Enabled, then R authorizes native HDA speech of Enabled while firmware current value remains Disabled
 claim = success does not mutate the firmware setting and does not yet establish the same interaction on physical ASUS pre-OS hardware
 proof = PASS
-proof-run = 35398765558
-proof-head-sha = 656e55aed709cce426fdd1c8341d7333a64d2b38
+proof-run = 35398818659
+proof-head-sha = 93dd8e4a87b5b6d39ac4b1bfe0bbedf5a16030f7
 proof-down-key-event = PASS
 proof-repeat-key-event = PASS
 proof-repeat-key = R
@@ -46,8 +46,8 @@ proof-post-state-current-value = 0
 proof-post-state-current-label = Disabled
 proof-setting-mutation = false
 proof-physical-ASUS-focus-repeat = false
-proof-wave-metrics = frames=18774; peak=13355; active=33876; wav-sha256=26bb920960b9359195cda450c1c58b039c0681822507e3c5fed1c02ed43000f2
-proof-efi-sha256 = 83626de12a0b4a6073bdc2baf3f72ece8c0c3d17a4944740589e331b5b7524e8
+proof-wave-metrics = frames=18788; peak=13355; active=33904; wav-sha256=83183c84f04006090f844b3feea6ce4c047d37bee66e77e3d98cf68ca1c495fc
+proof-efi-sha256 = a39d28898f8648700588f796d37890a2e8d8c5bda55f4adea5310d60dd556422
 proof-serial-sha256 = 2b5ef83cdc094eba27098ec10064b95deeb1a3d452e1bb3c4cd71fe5f0d89ee1
-proof-wav-sha256 = 26bb920960b9359195cda450c1c58b039c0681822507e3c5fed1c02ed43000f2
+proof-wav-sha256 = 83183c84f04006090f844b3feea6ce4c047d37bee66e77e3d98cf68ca1c495fc
 proof-post-serial-sha256 = 822e2783ec16f5233fed283f33e10012aeac09992876b874e8df4ef7c6685487
