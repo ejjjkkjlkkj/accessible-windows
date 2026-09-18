@@ -1,0 +1,265 @@
+name: lab10-machine-binary-scale
+on:
+  push:
+    branches: [os]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-machine-binary-scale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove recursive binary scale with witness A
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from hashlib import sha256
+
+          widths = (2,4,8,16,32,64,128,256)
+          expected_hash = {
+              2: "06eb7d6a69ee19e5fbdf749018d3d2abfa04bcbd1365db312eb86dc7169389b8",
+              4: "10db5223d19bd1d58c2b8eb3c723b0ba104cf17564f9434e53e1b9e642fb3b37",
+              8: "22f97a10117efa48887eb57f502823b581afafaee624d78af2620451d1ad5c31",
+              16: "d1c9053487d0fe37767d7df8297c9ba5ca3811b09c1606b706f60e720291614c",
+              32: "6a7109f48afd4406884c435207d8b9c7709b9d153001b65afc8220f7888fe62c",
+              64: "ad5bc614754bf2bee307f6ade5d655a9feb4b5d76608220cc57680e46088f32f",
+              128: "67f753181f4c0f0c58a87530af04684ec3d6b690779a1f0bd913b3dfa8560afc",
+              256: "4fb01cc48ebb4496c1a4306e6251a920a6d59e98091777e2aff15de7838db8e6",
+          }
+
+          def exchange(src):
+              return bytes(0xff if x == 0x00 else 0x00 for x in src)
+
+          def derive(src):
+              out = bytearray(len(src))
+              prev = src[-1]
+              for i, cur in enumerate(src):
+                  if cur not in (0x00, 0xff):
+                      raise SystemExit("unexpected witness state")
+                  out[i] = 0x00 if cur == prev else 0xff
+                  prev = cur
+              return bytes(out)
+
+          def recover(rel, anchor):
+              out = bytearray(len(rel))
+              out[0] = anchor
+              for i in range(1, len(rel)):
+                  if rel[i] == 0x00:
+                      out[i] = out[i-1]
+                  elif rel[i] == 0xff:
+                      out[i] = 0xff if out[i-1] == 0x00 else 0x00
+                  else:
+                      raise SystemExit("unexpected relation state")
+              closure = 0x00 if out[0] == out[-1] else 0xff
+              if closure != rel[0]:
+                  raise SystemExit("closure mismatch")
+              return bytes(out)
+
+          def flip(src, *positions):
+              out = bytearray(src)
+              for pos in positions:
+                  out[pos] = 0xff if out[pos] == 0x00 else 0x00
+              return bytes(out)
+
+          material = bytes((0x00, 0xff))
+
+          for stage, width in enumerate(widths):
+              if len(material) != width:
+                  raise SystemExit(f"width mismatch at {width}")
+              if sha256(material).hexdigest() != expected_hash[width]:
+                  raise SystemExit(f"hash mismatch at {width}")
+              if material.count(0x00) != width // 2 or material.count(0xff) != width // 2:
+                  raise SystemExit(f"balance mismatch at {width}")
+
+              opposite = exchange(material)
+              relation = derive(material)
+              if derive(opposite) != relation:
+                  raise SystemExit(f"global polarity mismatch at {width}")
+              if recover(relation, material[0]) != material:
+                  raise SystemExit(f"primary recovery mismatch at {width}")
+              if recover(relation, opposite[0]) != opposite:
+                  raise SystemExit(f"opposite recovery mismatch at {width}")
+
+              # Every single externally imposed state exchange.
+              for i in range(width):
+                  changed = derive(flip(material, i))
+                  diff = [k for k,(a,b) in enumerate(zip(changed, relation)) if a != b]
+                  expected = sorted({i, (i+1) % width})
+                  if diff != expected:
+                      raise SystemExit(f"single locality mismatch width={width} position={i}: {diff} != {expected}")
+
+              # Every unordered pair of distinct externally imposed exchanges.
+              for i in range(width):
+                  for j in range(i+1, width):
+                      left = flip(flip(material, i), j)
+                      right = flip(flip(material, j), i)
+                      if left != right:
+                          raise SystemExit(f"pair order mismatch width={width} pair={i},{j}")
+                      rel2 = derive(left)
+                      incident = [i, (i+1)%width, j, (j+1)%width]
+                      expected = sorted(k for k in set(incident) if incident.count(k) % 2 == 1)
+                      diff = [k for k,(a,b) in enumerate(zip(rel2, relation)) if a != b]
+                      if diff != expected:
+                          raise SystemExit(f"pair locality mismatch width={width} pair={i},{j}: {diff} != {expected}")
+                      if derive(exchange(left)) != rel2:
+                          raise SystemExit(f"pair polarity mismatch width={width} pair={i},{j}")
+
+              if stage + 1 < len(widths):
+                  next_material = material + opposite
+                  if len(next_material) != width * 2:
+                      raise SystemExit(f"doubling mismatch at {width}")
+                  if next_material[:width] != material or next_material[width:] != opposite:
+                      raise SystemExit(f"recursive composition mismatch at {width}")
+                  material = next_material
+
+          print("LAB10_LINUX=PASS")
+          PY
+
+  windows-machine-binary-scale:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove recursive binary scale with witness B
+        shell: pwsh
+        run: |
+          $widths = @(2,4,8,16,32,64,128,256)
+          $expected = @{
+            2   = "06eb7d6a69ee19e5fbdf749018d3d2abfa04bcbd1365db312eb86dc7169389b8"
+            4   = "10db5223d19bd1d58c2b8eb3c723b0ba104cf17564f9434e53e1b9e642fb3b37"
+            8   = "22f97a10117efa48887eb57f502823b581afafaee624d78af2620451d1ad5c31"
+            16  = "d1c9053487d0fe37767d7df8297c9ba5ca3811b09c1606b706f60e720291614c"
+            32  = "6a7109f48afd4406884c435207d8b9c7709b9d153001b65afc8220f7888fe62c"
+            64  = "ad5bc614754bf2bee307f6ade5d655a9feb4b5d76608220cc57680e46088f32f"
+            128 = "67f753181f4c0f0c58a87530af04684ec3d6b690779a1f0bd913b3dfa8560afc"
+            256 = "4fb01cc48ebb4496c1a4306e6251a920a6d59e98091777e2aff15de7838db8e6"
+          }
+
+          function Exchange([byte[]]$src) {
+            [byte[]]$out = New-Object byte[] $src.Length
+            for ($i=0; $i -lt $src.Length; $i++) {
+              if ($src[$i] -eq 0) { $out[$i]=255 }
+              elseif ($src[$i] -eq 255) { $out[$i]=0 }
+              else { throw "unexpected witness state" }
+            }
+            return ,$out
+          }
+
+          function Derive([byte[]]$src) {
+            [byte[]]$out = New-Object byte[] $src.Length
+            [byte]$prev = $src[$src.Length-1]
+            for ($i=0; $i -lt $src.Length; $i++) {
+              if ($src[$i] -ne 0 -and $src[$i] -ne 255) { throw "unexpected witness state" }
+              if ($src[$i] -eq $prev) { $out[$i]=0 } else { $out[$i]=255 }
+              $prev=$src[$i]
+            }
+            return ,$out
+          }
+
+          function Recover([byte[]]$rel,[byte]$anchor) {
+            [byte[]]$out = New-Object byte[] $rel.Length
+            $out[0]=$anchor
+            for ($i=1; $i -lt $rel.Length; $i++) {
+              if ($rel[$i] -eq 0) { $out[$i]=$out[$i-1] }
+              elseif ($rel[$i] -eq 255) {
+                if ($out[$i-1] -eq 0) { $out[$i]=255 } else { $out[$i]=0 }
+              } else { throw "unexpected relation state" }
+            }
+            [byte]$closure=0
+            if ($out[0] -ne $out[$out.Length-1]) { $closure=255 }
+            if ($closure -ne $rel[0]) { throw "closure mismatch" }
+            return ,$out
+          }
+
+          function Flip([byte[]]$src,[int[]]$positions) {
+            [byte[]]$out = New-Object byte[] $src.Length
+            [Array]::Copy($src,$out,$src.Length)
+            foreach ($pos in $positions) {
+              if ($out[$pos] -eq 0) { $out[$pos]=255 } else { $out[$pos]=0 }
+            }
+            return ,$out
+          }
+
+          [byte[]]$material = @(0,255)
+
+          for ($stage=0; $stage -lt $widths.Count; $stage++) {
+            $width=$widths[$stage]
+            if ($material.Length -ne $width) { throw "width mismatch at $width" }
+
+            $hash=[Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($material)).ToLowerInvariant()
+            if ($hash -ne $expected[$width]) { throw "hash mismatch at $width" }
+
+            $zeros=0
+            $ones=0
+            foreach ($x in $material) {
+              if ($x -eq 0) { $zeros++ }
+              elseif ($x -eq 255) { $ones++ }
+              else { throw "unexpected witness state" }
+            }
+            if ($zeros -ne ($width/2) -or $ones -ne ($width/2)) { throw "balance mismatch at $width" }
+
+            [byte[]]$opposite = Exchange $material
+            [byte[]]$relation = Derive $material
+            [byte[]]$relationOpposite = Derive $opposite
+
+            for ($k=0; $k -lt $width; $k++) {
+              if ($relation[$k] -ne $relationOpposite[$k]) { throw "global polarity mismatch at $width position $k" }
+            }
+
+            [byte[]]$ra = Recover $relation $material[0]
+            [byte[]]$rb = Recover $relation $opposite[0]
+            for ($k=0; $k -lt $width; $k++) {
+              if ($ra[$k] -ne $material[$k]) { throw "primary recovery mismatch at $width position $k" }
+              if ($rb[$k] -ne $opposite[$k]) { throw "opposite recovery mismatch at $width position $k" }
+            }
+
+            for ($i=0; $i -lt $width; $i++) {
+              [byte[]]$changed = Derive (Flip $material @($i))
+              $diff=@()
+              for ($k=0; $k -lt $width; $k++) {
+                if ($changed[$k] -ne $relation[$k]) { $diff += $k }
+              }
+              $expectedSingle=@($i,(($i+1)%$width)) | Sort-Object -Unique
+              if (($diff -join ',') -ne ($expectedSingle -join ',')) { throw "single locality mismatch at $width position $i" }
+            }
+
+            for ($i=0; $i -lt $width; $i++) {
+              for ($j=$i+1; $j -lt $width; $j++) {
+                [byte[]]$left = Flip (Flip $material @($i)) @($j)
+                [byte[]]$right = Flip (Flip $material @($j)) @($i)
+                for ($k=0; $k -lt $width; $k++) {
+                  if ($left[$k] -ne $right[$k]) { throw "pair order mismatch at $width pair $i,$j" }
+                }
+
+                [byte[]]$rel2=Derive $left
+                $incident=@($i,(($i+1)%$width),$j,(($j+1)%$width))
+                $expectedPair=@()
+                for ($k=0; $k -lt $width; $k++) {
+                  $count=@($incident | Where-Object { $_ -eq $k }).Count
+                  if (($count % 2) -eq 1) { $expectedPair += $k }
+                }
+                $diff=@()
+                for ($k=0; $k -lt $width; $k++) {
+                  if ($rel2[$k] -ne $relation[$k]) { $diff += $k }
+                }
+                if (($diff -join ',') -ne ($expectedPair -join ',')) { throw "pair locality mismatch at $width pair $i,$j" }
+
+                [byte[]]$polarityRel=Derive (Exchange $left)
+                for ($k=0; $k -lt $width; $k++) {
+                  if ($polarityRel[$k] -ne $rel2[$k]) { throw "pair polarity mismatch at $width pair $i,$j" }
+                }
+              }
+            }
+
+            if ($stage+1 -lt $widths.Count) {
+              [byte[]]$next=New-Object byte[] ($width*2)
+              [Array]::Copy($material,0,$next,0,$width)
+              [Array]::Copy($opposite,0,$next,$width,$width)
+              $material=$next
+            }
+          }
+
+          "LAB10_WINDOWS=PASS"
