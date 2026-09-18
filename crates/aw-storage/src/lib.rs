@@ -864,10 +864,8 @@ mod tests {
 
     #[test]
     fn namespace_binding_requires_native_name_object() {
-        let binding = NamespaceBindingV1::new(
-            namespace_relation(TX_ID, ID_A, ID_B),
-            ObjectId::ZERO,
-        );
+        let binding =
+            NamespaceBindingV1::new(namespace_relation(TX_ID, ID_A, ID_B), ObjectId::ZERO);
 
         assert_eq!(
             binding.validate_structure(),
@@ -886,10 +884,7 @@ mod tests {
             ID_B,
             0,
         );
-        let binding = NamespaceBindingV1::new(
-            relation,
-            ObjectId::new([0xE5; OBJECT_ID_BYTES]),
-        );
+        let binding = NamespaceBindingV1::new(relation, ObjectId::new([0xE5; OBJECT_ID_BYTES]));
 
         assert_eq!(
             binding.validate_structure(),
@@ -900,10 +895,7 @@ mod tests {
     #[test]
     fn namespace_binding_projects_graph_without_path_primitive() {
         let name = ObjectId::new([0xE5; OBJECT_ID_BYTES]);
-        let binding = NamespaceBindingV1::new(
-            namespace_relation(TX_ID, ID_A, ID_B),
-            name,
-        );
+        let binding = NamespaceBindingV1::new(namespace_relation(TX_ID, ID_A, ID_B), name);
 
         assert_eq!(binding.validate_structure(), Ok(()));
         assert_eq!(binding.namespace(), ID_A);
