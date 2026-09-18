@@ -30,6 +30,7 @@ MARKS={
  'opt_scope': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nONE_OF_SCOPE_MATCH=PASS\r\nEND\r\n',
  'opt_match': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_VALUE_MATCH=PASS\r\nEND\r\n',
  'opt_language': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_LANGUAGE_BINDING=PASS\r\nEND\r\n',
+ 'opt_token': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_STRING_ID_LE_HEX=',
  'opt_flags': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_FLAGS_HEX=',
  'opt_type': b'\r\nCURRENT_OPTION_TYPE_HEX=',
  'opt_width': b'\r\nCURRENT_OPTION_WIDTH_HEX=',
@@ -118,7 +119,7 @@ def build():
   'matched_hii_handle':320,'block_size':328,'current_width':336,'current_raw':344,'config_boundary':352,
   'varstore_name_ptr':360,'varstore_name_remaining':368,
   'resolve_mode':372,'option_flags':373,'option_type':374,'option_width':375,
-  'option_value':376,'option_scope_depth':384,'option_strings_ptr':392,
+  'option_value':376,'option_scope_depth':384,'option_strings_ptr':392,'option_token':400,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -409,6 +410,11 @@ def build():
  c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  serial('suffix')
  c.rel32(b'\xe8','resolve_current_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
+ # Move the proven selected-option StringId into the generic string decoder
+ # only now.  Keeping it separate prevents protocol/metadata work from
+ # accidentally reusing the original question Prompt StringId.
+ c.lea_rax_data(L['option_token']); c.emit(b'\x0f\xb7\x00')
+ c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\xc6\x00\x01')
  c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x8b\x02')
  c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x02')
@@ -433,6 +439,8 @@ def build():
  serial('prefix'); c.rel32(b'\xe8','serial_utf16')
  serial('suffix')
  c.rel32(b'\xe8','resolve_current_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
+ c.lea_rax_data(L['option_token']); c.emit(b'\x0f\xb7\x00')
+ c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\xc6\x00\x01')
  c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x8b\x02')
  c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x02')
@@ -765,7 +773,7 @@ def build():
  c.emit(b'\x48\xff\xc6\x48\xff\xc7\xff\xc9'); c.rel32(b'\xe9','current_option_compare')
 
  c.label('current_option_equal')
- c.emit(b'\x41\x0f\xb7\x41\x02'); c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
+ c.emit(b'\x41\x0f\xb7\x41\x02'); c.lea_rdx_data(L['option_token']); c.emit(b'\x66\x89\x02')
  c.emit(b'\x41\x0f\xb6\x41\x04'); c.lea_rdx_data(L['option_flags']); c.emit(b'\x88\x02')
  c.emit(b'\x41\x0f\xb6\x41\x05'); c.lea_rdx_data(L['option_type']); c.emit(b'\x88\x02')
  c.lea_rax_data(L['option_width']); c.emit(b'\x0f\xb6\x08')
@@ -790,6 +798,9 @@ def build():
  c.label('current_option_not_found'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
 
  c.label('emit_option_meta')
+ c.lea_rsi_data(L['option_token']); c.emit(b'\xb9\x02\x00\x00\x00')
+ serial('opt_token')
+ c.label('current_option_token_hex_loop'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','current_option_token_hex_loop')
  serial('opt_flags'); c.lea_rax_data(L['option_flags']); c.emit(b'\x8a\x00'); c.rel32(b'\xe8','hex8_emit')
  serial('opt_type'); c.lea_rax_data(L['option_type']); c.emit(b'\x8a\x00'); c.rel32(b'\xe8','hex8_emit')
  serial('opt_width'); c.lea_rax_data(L['option_width']); c.emit(b'\x8a\x00'); c.rel32(b'\xe8','hex8_emit')
