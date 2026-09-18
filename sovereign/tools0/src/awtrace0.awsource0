@@ -1,0 +1,34 @@
+AW0SRC00
+cell AwTrace0 {
+    identity tool.awtrace0
+    generation system.current
+
+    authority {
+        require semantic.read
+        require trace.emit
+        deny kernel.authority
+        deny genome.mutate
+        deny capability.mint
+    }
+
+    memory {
+        keep status : trusted<semantic.record>
+        shed workspace : own<bytes[65536]>
+    }
+
+    human {
+        semantic tool.awtrace0
+        path keyboard | speech | braille
+    }
+
+    proof accessibility {
+        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        evidence A structural
+        evidence B required
+    }
+
+    flow trace(input : untrusted<semantic.event>) -> trusted<trace.record> {
+        effects validate(input) | use(semantic.read) | use(trace.emit)
+        body emit_semantic_diagnostic_trace(input)
+    }
+}

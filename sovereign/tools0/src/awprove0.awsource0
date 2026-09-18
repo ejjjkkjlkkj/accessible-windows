@@ -1,0 +1,34 @@
+AW0SRC00
+cell AwProve0 {
+    identity tool.awprove0
+    generation system.current
+
+    authority {
+        require artifact.read
+        require proof.emit
+        deny kernel.authority
+        deny genome.mutate
+        deny capability.mint
+    }
+
+    memory {
+        keep status : trusted<semantic.record>
+        shed workspace : own<bytes[65536]>
+    }
+
+    human {
+        semantic tool.awprove0
+        path keyboard | speech | braille
+    }
+
+    proof accessibility {
+        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        evidence A structural
+        evidence B required
+    }
+
+    flow prove(input : untrusted<artifact.record>) -> trusted<proof.record> {
+        effects validate(input) | use(artifact.read) | use(proof.emit)
+        body prove_declared_invariants(input)
+    }
+}

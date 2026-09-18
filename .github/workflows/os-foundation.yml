@@ -103,8 +103,14 @@ jobs:
           set -euo pipefail
           for tool in awseed0 awencode0 awlink0 awcompile0 awprove0 awa11y0 awbuild0 awtrace0 awfuzz0 awpack0; do
             grep -q "name = $tool" sovereign/tools0/registry.awtools0
+            test -s "sovereign/tools0/src/$tool.awsource0"
+            grep -q '^AW0SRC00' "sovereign/tools0/src/$tool.awsource0"
+            grep -q 'proof accessibility' "sovereign/tools0/src/$tool.awsource0"
+            grep -q 'path keyboard | speech | braille' "sovereign/tools0/src/$tool.awsource0"
+            grep -q 'deny capability.mint' "sovereign/tools0/src/$tool.awsource0"
           done
-          test "$(grep -c 'accessibility = .*A+B' sovereign/tools0/registry.awtools0)" -ge 10
+          test "$(grep -c 'accessibility = mandatory-A+B' sovereign/tools0/registry.awtools0)" -eq 10
+          test "$(grep -c 'B = UNPROVEN' sovereign/tools0/registry.awtools0)" -eq 10
 
   claim-discipline:
     runs-on: ubuntu-24.04

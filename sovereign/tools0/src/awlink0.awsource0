@@ -1,0 +1,34 @@
+AW0SRC00
+cell AwLink0 {
+    identity tool.awlink0
+    generation system.current
+
+    authority {
+        require object.read
+        require image.emit
+        deny kernel.authority
+        deny genome.mutate
+        deny capability.mint
+    }
+
+    memory {
+        keep status : trusted<semantic.record>
+        shed workspace : own<bytes[65536]>
+    }
+
+    human {
+        semantic tool.awlink0
+        path keyboard | speech | braille
+    }
+
+    proof accessibility {
+        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        evidence A structural
+        evidence B required
+    }
+
+    flow link(input : untrusted<object.set>) -> trusted<image.record> {
+        effects validate(input) | use(object.read) | use(image.emit)
+        body link_verified_objects(input)
+    }
+}

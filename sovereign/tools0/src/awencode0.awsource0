@@ -1,0 +1,34 @@
+AW0SRC00
+cell AwEncode0 {
+    identity tool.awencode0
+    generation system.current
+
+    authority {
+        require source.read
+        require object.emit
+        deny kernel.authority
+        deny genome.mutate
+        deny capability.mint
+    }
+
+    memory {
+        keep status : trusted<semantic.record>
+        shed workspace : own<bytes[65536]>
+    }
+
+    human {
+        semantic tool.awencode0
+        path keyboard | speech | braille
+    }
+
+    proof accessibility {
+        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        evidence A structural
+        evidence B required
+    }
+
+    flow encode(input : untrusted<source.record>) -> trusted<object.record> {
+        effects validate(input) | use(source.read) | use(object.emit)
+        body encode_verified_instruction_records(input)
+    }
+}

@@ -1,0 +1,35 @@
+AW0SRC00
+cell AwA11y0 {
+    identity tool.awa11y0
+    generation system.current
+
+    authority {
+        require artifact.read
+        require proof.emit
+        require semantic.inspect
+        deny kernel.authority
+        deny genome.mutate
+        deny capability.mint
+    }
+
+    memory {
+        keep status : trusted<semantic.record>
+        shed workspace : own<bytes[65536]>
+    }
+
+    human {
+        semantic tool.awa11y0
+        path keyboard | speech | braille
+    }
+
+    proof accessibility {
+        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        evidence A structural
+        evidence B required
+    }
+
+    flow audit(input : untrusted<artifact.record>) -> trusted<proof.record> {
+        effects validate(input) | use(artifact.read) | use(semantic.inspect) | use(proof.emit)
+        body verify_accessibility_A_and_request_B(input)
+    }
+}

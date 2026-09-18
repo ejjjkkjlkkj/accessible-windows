@@ -1,0 +1,35 @@
+AW0SRC00
+cell AwPack0 {
+    identity tool.awpack0
+    generation system.current
+
+    authority {
+        require artifact.read
+        require package.emit
+        require proof.read
+        deny kernel.authority
+        deny genome.mutate
+        deny capability.mint
+    }
+
+    memory {
+        keep status : trusted<semantic.record>
+        shed workspace : own<bytes[65536]>
+    }
+
+    human {
+        semantic tool.awpack0
+        path keyboard | speech | braille
+    }
+
+    proof accessibility {
+        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        evidence A structural
+        evidence B required
+    }
+
+    flow pack(input : untrusted<artifact.graph>) -> trusted<package.record> {
+        effects validate(input) | use(artifact.read) | use(proof.read) | use(package.emit)
+        body pack_verified_artifacts(input)
+    }
+}

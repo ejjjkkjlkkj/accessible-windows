@@ -1,0 +1,35 @@
+AW0SRC00
+cell AwCompile0 {
+    identity tool.awcompile0
+    generation system.current
+
+    authority {
+        require source.read
+        require object.emit
+        require proof.emit
+        deny kernel.authority
+        deny genome.mutate
+        deny capability.mint
+    }
+
+    memory {
+        keep status : trusted<semantic.record>
+        shed workspace : own<bytes[65536]>
+    }
+
+    human {
+        semantic tool.awcompile0
+        path keyboard | speech | braille
+    }
+
+    proof accessibility {
+        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        evidence A structural
+        evidence B required
+    }
+
+    flow compile(input : untrusted<source.record>) -> trusted<object.record> {
+        effects validate(input) | use(source.read) | use(object.emit) | use(proof.emit)
+        body compile_with_authority_and_accessibility_proofs(input)
+    }
+}

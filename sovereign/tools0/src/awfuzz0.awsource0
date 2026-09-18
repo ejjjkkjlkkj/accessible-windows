@@ -1,0 +1,35 @@
+AW0SRC00
+cell AwFuzz0 {
+    identity tool.awfuzz0
+    generation system.current
+
+    authority {
+        require surface.read
+        require case.emit
+        require proof.emit
+        deny kernel.authority
+        deny genome.mutate
+        deny capability.mint
+    }
+
+    memory {
+        keep status : trusted<semantic.record>
+        shed workspace : own<bytes[65536]>
+    }
+
+    human {
+        semantic tool.awfuzz0
+        path keyboard | speech | braille
+    }
+
+    proof accessibility {
+        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        evidence A structural
+        evidence B required
+    }
+
+    flow attack(input : untrusted<attack.surface>) -> trusted<proof.record> {
+        effects validate(input) | use(surface.read) | use(case.emit) | use(proof.emit)
+        body generate_bounded_adversarial_cases(input)
+    }
+}

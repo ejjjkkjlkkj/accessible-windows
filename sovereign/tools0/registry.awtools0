@@ -1,94 +1,94 @@
 AW0TLS00
 version = 0
 identity = AW0.TOOLS.G0
-status = DESIGN
+status = SOURCE-DEFINED-EXECUTION-UNPROVEN
 
 ::tool
 name = awseed0
-role = minimal sovereign seed executor
-input = .awseed0
-output = verified-next-stage
+source = sovereign/tools0/src/awseed0.awsource0
 accessibility = mandatory-A+B
-status = UNPROVEN
+A = PASS
+B = UNPROVEN
+status = SOURCE-DEFINED-UNPROVEN
 ::end
 
 ::tool
 name = awencode0
-role = instruction encoder
-input = .awsource0
-output = .awobject0
+source = sovereign/tools0/src/awencode0.awsource0
 accessibility = mandatory-A+B
-status = UNPROVEN
+A = PASS
+B = UNPROVEN
+status = SOURCE-DEFINED-UNPROVEN
 ::end
 
 ::tool
 name = awlink0
-role = linker and image emitter
-input = .awobject0
-output = .awimage0
+source = sovereign/tools0/src/awlink0.awsource0
 accessibility = mandatory-A+B
-status = UNPROVEN
+A = PASS
+B = UNPROVEN
+status = SOURCE-DEFINED-UNPROVEN
 ::end
 
 ::tool
 name = awcompile0
-role = AWL0 compiler
-input = .awsource0
-output = .awobject0
+source = sovereign/tools0/src/awcompile0.awsource0
 accessibility = mandatory-A+B
-status = UNPROVEN
+A = PASS
+B = UNPROVEN
+status = SOURCE-DEFINED-UNPROVEN
 ::end
 
 ::tool
 name = awprove0
-role = invariant verifier
-input = sovereign-artifacts
-output = .awproof0
+source = sovereign/tools0/src/awprove0.awsource0
 accessibility = mandatory-A+B
-status = UNPROVEN
+A = PASS
+B = UNPROVEN
+status = SOURCE-DEFINED-UNPROVEN
 ::end
 
 ::tool
 name = awa11y0
-role = accessibility verifier
-input = .awa11y0
-output = .awproof0
-accessibility = self-applicable-A+B
-status = UNPROVEN
+source = sovereign/tools0/src/awa11y0.awsource0
+accessibility = mandatory-A+B
+A = PASS
+B = UNPROVEN
+status = SOURCE-DEFINED-UNPROVEN
 ::end
 
 ::tool
 name = awbuild0
-role = deterministic build graph executor
-input = .awmanifest0
-output = artifact-graph
+source = sovereign/tools0/src/awbuild0.awsource0
 accessibility = mandatory-A+B
-status = UNPROVEN
+A = PASS
+B = UNPROVEN
+status = SOURCE-DEFINED-UNPROVEN
 ::end
 
 ::tool
 name = awtrace0
-role = semantic debugger and diagnostic trace engine
-input = semantic-events
-output = structured-trace
+source = sovereign/tools0/src/awtrace0.awsource0
 accessibility = mandatory-A+B
-status = UNPROVEN
+A = PASS
+B = UNPROVEN
+status = SOURCE-DEFINED-UNPROVEN
 ::end
 
 ::tool
 name = awfuzz0
-role = adversarial state generator
-input = declared-attack-surface
-output = .awproof0
+source = sovereign/tools0/src/awfuzz0.awsource0
 accessibility = mandatory-A+B
-status = UNPROVEN
+A = PASS
+B = UNPROVEN
+status = SOURCE-DEFINED-UNPROVEN
 ::end
 
 ::tool
 name = awpack0
-role = package and update constructor
-input = verified-artifact-graph
-output = .awpackage0
+source = sovereign/tools0/src/awpack0.awsource0
 accessibility = mandatory-A+B
-status = UNPROVEN
+A = PASS
+B = UNPROVEN
+status = SOURCE-DEFINED-UNPROVEN
 ::end

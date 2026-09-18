@@ -1,0 +1,35 @@
+AW0SRC00
+cell AwBuild0 {
+    identity tool.awbuild0
+    generation system.current
+
+    authority {
+        require manifest.read
+        require artifact.emit
+        require proof.read
+        deny kernel.authority
+        deny genome.mutate
+        deny capability.mint
+    }
+
+    memory {
+        keep status : trusted<semantic.record>
+        shed workspace : own<bytes[65536]>
+    }
+
+    human {
+        semantic tool.awbuild0
+        path keyboard | speech | braille
+    }
+
+    proof accessibility {
+        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        evidence A structural
+        evidence B required
+    }
+
+    flow build(input : untrusted<manifest.record>) -> trusted<artifact.graph> {
+        effects validate(input) | use(manifest.read) | use(proof.read) | use(artifact.emit)
+        body execute_deterministic_verified_graph(input)
+    }
+}
