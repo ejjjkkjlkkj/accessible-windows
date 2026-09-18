@@ -77,7 +77,7 @@ def build():
   'handles_size':48,'handles_ptr':56,'pkg_size':64,'pkg_ptr':72,
   'langs_size':80,'langs_ptr':88,'string_size':96,'string_ptr':104,
   'token':112,'temp_handle':120,'handle_cursor':128,'handles_remaining':136,
-  'forms_ptr':144,'strings_ptr':152,'list_len':160,
+  'forms_ptr':144,'strings_ptr':152,'list_len':160,'ifr_next_ptr':168,'ifr_next_remaining':176,
   'handles_static':0x100,'pkg_static':0x1100,
  }
  struct.pack_into('<IHH8B',data,L['db_guid'],
@@ -203,6 +203,12 @@ def build():
  c.emit(b'\x41\x0f\xb7\x41\x02')
  c.emit(b'\x66\x85\xc0'); c.rel32(b'\x0f\x84','ifr_next')
  c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
+ # Preserve the next IFR opcode so an unresolved Prompt StringId does not
+ # terminate discovery; real firmware can contain sparse language strings.
+ c.emit(b'\x4c\x89\xc8\x48\x01\xc8')
+ c.lea_rdx_data(L['ifr_next_ptr']); c.emit(b'\x48\x89\x02')
+ c.emit(b'\x44\x89\xd0\x29\xc8')
+ c.lea_rdx_data(L['ifr_next_remaining']); c.emit(b'\x89\x02')
  serial('ifr')
 
  # Resolve the IFR StringId directly inside the selected Strings package.
@@ -322,7 +328,12 @@ def build():
  c.label('fail_export'); serial('export'); c.rel32(b'\xe9','return_fail')
  c.label('fail_ifr'); serial('ifr_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_language'); serial('lang_fail'); c.rel32(b'\xe9','return_fail')
- c.label('fail_string'); serial('string_fail')
+ c.label('fail_string')
+ # Try the next real IFR prompt before declaring the package unresolvable.
+ c.lea_rdx_data(L['ifr_next_ptr']); c.emit(b'\x4c\x8b\x0a')
+ c.lea_rdx_data(L['ifr_next_remaining']); c.emit(b'\x44\x8b\x12')
+ c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x83','ifr_loop')
+ serial('string_fail')
  c.label('return_fail'); c.emit(b'\xb8\x01\x00\x00\x00')
  c.label('return')
  c.emit(b'\x48\x83\xc4\x68\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5f\x5e\x5d\x5b\xc3')
