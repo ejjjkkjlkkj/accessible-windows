@@ -72,6 +72,11 @@ jobs:
               bytes.fromhex('66bafc0ced'),
               bytes.fromhex('66bafc0cef'),
               bytes.fromhex('663d0304'),
+              bytes.fromhex('4181fc00000100'),
+              bytes.fromhex('48c1e020'),
+              bytes.fromhex('4909c6'),
+              bytes.fromhex('4c89f0'),
+              bytes.fromhex('4883e0f0'),
               bytes.fromhex('83c906'),
               bytes.fromhex('0fb703'),
               bytes.fromhex('0fb64303'),
@@ -114,6 +119,9 @@ jobs:
               'pci-discovery = direct PCI configuration mechanism 1',
               'pci-class = 0x04',
               'pci-subclass = 0x03',
+              'pci-scan-scope = segment 0 all buses devices functions',
+              'bar0-32-bit-mmio = supported',
+              'bar0-64-bit-mmio = supported',
               'pci-memory-space-enable = true',
               'pci-bus-master-enable = true',
               'controller-register-access = direct BAR0 MMIO',
@@ -226,7 +234,9 @@ jobs:
           machine = q35
           HDA-controller = ich9-intel-hda
           HDA-codec = hda-duplex
-          direct-PCI-discovery = PASS
+          direct-PCI-discovery-segment0 = PASS
+          BAR0-32-bit-MMIO = supported
+          BAR0-64-bit-MMIO = supported
           PCI-memory-space = PASS
           PCI-bus-master = PASS
           BAR0-MMIO = PASS
@@ -255,6 +265,7 @@ jobs:
         run: |
           set -euo pipefail
           root=boot/uefi-hda-probe-v1
+          builder="$root/build_uefi_hda_probe.py"
 
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -262,6 +273,13 @@ jobs:
           # Rebase first so concurrent project commits do not make the evidence push stale.
           git fetch origin os
           git rebase origin/os
+
+          tested_blob="$(git rev-parse \"${GITHUB_SHA}:${builder}\")"
+          current_blob="$(git rev-parse \"HEAD:${builder}\")"
+          if [[ "$tested_blob" != "$current_blob" ]]; then
+            echo "HDA_PROOF_STALE_RUN=SKIP"
+            exit 0
+          fi
 
           python - <<'PY'
           from pathlib import Path
