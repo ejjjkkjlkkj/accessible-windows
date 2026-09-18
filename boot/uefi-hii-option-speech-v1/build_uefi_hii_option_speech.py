@@ -48,6 +48,8 @@ MARKS={
  'stream': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nOUTPUT_STREAM_DESCRIPTOR=PASS\r\nFORMAT_48K_S16_STEREO=PASS\r\nBDL_ENTRIES=RUNTIME\r\nEND\r\n',
  'progress': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nLPIB_PROGRESS=PASS\r\nHII_OPTION_SPEECH_HDA=PASS\r\nEND\r\n',
  'done': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nSTATUS=PASS\r\nEND\r\n',
+ 'controller_preferred': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nHDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3\r\nEND\r\n',
+ 'controller_generic': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nHDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403\r\nEND\r\n',
  'no_hda': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_PCI_NOT_FOUND\r\nEND\r\n',
  'bad_hda': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_CONTROLLER_OR_CODEC_FAILED\r\nEND\r\n',
  'alloc': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=DMA_ALLOC_FAILED\r\nEND\r\n',
@@ -459,17 +461,36 @@ def build():
  serial('hii')
  serial('spoken_prefix'); c.rel32(b'\xe8','serial_textbuf'); serial('spoken_prefix_done')
 
- # Scan full PCI config mechanism-1 segment for class 04/subclass 03.
+ # Two-pass HDA selection: ASUS M1603QA internal analog audio is
+ # AMD 1022:15E3 -> Realtek 10EC:0256; AMD 1002:1637 is HDMI.
+ # Prefer the internal analog controller, then fall back to any 04/03 HDA.
+ c.emit(b'\x45\x31\xe4')
+ c.label('scan_preferred')
+ c.emit(b'\x44\x89\xe0\xc1\xe0\x08\x0d\x00\x00\x00\x80\x41\x89\xc5')
+ c.rel32(b'\xe8','pci_read32')
+ c.emit(b'\x66\x3d\xff\xff'); c.rel32(b'\x0f\x84','scan_preferred_next')
+ c.emit(b'\x3d'+struct.pack('<I',0x15E31022)); c.rel32(b'\x0f\x85','scan_preferred_next')
+ c.emit(b'\x44\x89\xe8\x83\xc8\x08'); c.rel32(b'\xe8','pci_read32')
+ c.emit(b'\xc1\xe8\x10\x66\x3d\x03\x04'); c.rel32(b'\x0f\x85','scan_preferred_next')
+ serial('controller_preferred')
+ c.rel32(b'\xe9','found')
+ c.label('scan_preferred_next')
+ c.emit(b'\x41\xff\xc4\x41\x81\xfc\x00\x00\x01\x00'); c.rel32(b'\x0f\x82','scan_preferred')
+
  c.emit(b'\x45\x31\xe4')
  c.label('scan')
  c.emit(b'\x44\x89\xe0\xc1\xe0\x08\x0d\x00\x00\x00\x80\x41\x89\xc5')
  c.rel32(b'\xe8','pci_read32')
  c.emit(b'\x66\x3d\xff\xff'); c.rel32(b'\x0f\x84','scan_next')
  c.emit(b'\x44\x89\xe8\x83\xc8\x08'); c.rel32(b'\xe8','pci_read32')
- c.emit(b'\xc1\xe8\x10\x66\x3d\x03\x04'); c.rel32(b'\x0f\x84','found')
+ c.emit(b'\xc1\xe8\x10\x66\x3d\x03\x04'); c.rel32(b'\x0f\x84','found_generic')
  c.label('scan_next')
  c.emit(b'\x41\xff\xc4\x41\x81\xfc\x00\x00\x01\x00'); c.rel32(b'\x0f\x82','scan')
  c.rel32(b'\xe9','fail_no_hda')
+
+ c.label('found_generic')
+ serial('controller_generic')
+ c.rel32(b'\xe9','found')
 
  c.label('found')
  # Enable PCI memory space and bus mastering.
