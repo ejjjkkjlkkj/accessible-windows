@@ -1,0 +1,27 @@
+NATIVE-LOCATION-V1
+role = system-owned-native-relational-location-foundation-v1
+system-foundation = true
+depends-on = LAB21 native relational core v1
+location-key = fixed-width tuple of native LAB21 relation elements
+location-width-relations = 8
+required-distinct-locations = 256
+location-equality = elementwise native relation equality
+location-ordering-semantics = none
+location-arithmetic-semantics = none
+pointer-semantics = none
+integer-address-semantics = none
+external-enumeration = witness-only
+external-enumeration-semantics = none
+global-label-exchange = must preserve every location role pattern
+pairwise-uniqueness = exhaustive across all generated location keys
+target-real-runner = AMD-5800H-REAL
+independent-observer = GitHub-hosted Linux exhaustive structural replay
+external-infrastructure = AMD x86-64 Windows Linux GitHub Actions PowerShell CSharp Python filesystem
+external-infrastructure-semantics = carrier-and-witness-only
+human-facing = false
+accessibility-behavior = not-applicable
+accessibility-gate = any future human-facing memory map storage browser allocator inspector debugger or recovery surface must expose native location identity nonvisually and remain fully operable without sight or pointer dependence
+proof = PENDING
+claim = success will establish system-owned location identity from relational patterns without importing integer addresses pointer arithmetic or numeric ordering as system semantics
+claim = success will establish 256 exhaustively distinct width-8 relational location keys and invariance of their structural roles under global external carrier relabeling
+claim = success will not establish allocation protection virtual memory physical addressing paging or persistence
