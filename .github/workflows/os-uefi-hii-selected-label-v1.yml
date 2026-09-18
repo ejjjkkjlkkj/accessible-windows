@@ -4,8 +4,8 @@ on:
   push:
     branches: [os]
     paths:
-      - 'boot/uefi-hii-selected-option-v1/build_uefi_hii_selected_label.py'
-      - 'boot/uefi-hii-selected-option-v1/os-uefi-hii-selected-label-v1.labproof'
+      - 'boot/uefi-hii-selected-label-v1/build_uefi_hii_selected_label.py'
+      - 'boot/uefi-hii-selected-label-v1/os-uefi-hii-selected-label-v1.labproof'
       - 'boot/uefi-hii-selected-option-v1/os-uefi-hii-selected-option-v1.labproof'
       - 'boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof'
       - '.github/workflows/os-uefi-hii-selected-label-v1.yml'
@@ -72,7 +72,7 @@ jobs:
         run: |
           from pathlib import Path
           import ast
-          root=Path('boot/uefi-hii-selected-option-v1')
+          root=Path('boot/uefi-hii-selected-label-v1')
           src=(root/'build_uefi_hii_selected_label.py').read_text()
           ast.parse(src)
           for token in [
@@ -123,7 +123,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          root=boot/uefi-hii-selected-option-v1
+          root=boot/uefi-hii-selected-label-v1
           python "$root/build_uefi_hii_selected_label.py" "$root/BOOTX64.EFI" | tee "$root/build.log"
           python "$root/build_uefi_hii_selected_label.py" "$root/BOOTX64-2.EFI" > "$root/build2.log"
           cmp "$root/BOOTX64.EFI" "$root/BOOTX64-2.EFI"
@@ -135,7 +135,7 @@ jobs:
         run: |
           from pathlib import Path
           import struct
-          image=Path('boot/uefi-hii-selected-option-v1/BOOTX64.EFI').read_bytes()
+          image=Path('boot/uefi-hii-selected-label-v1/BOOTX64.EFI').read_bytes()
           assert image[:2]==b'MZ'
           pe=struct.unpack_from('<I',image,0x3c)[0]
           assert image[pe:pe+4]==b'PE\0\0'
@@ -184,14 +184,14 @@ jobs:
             if [[ -f "$code" && -f "$vars" ]]; then CODE="$code"; VARS="$vars"; break; fi
           done
           test -n "$CODE" -a -n "$VARS"
-          printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-hii-selected-option-v1/ovmf.env
+          printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-hii-selected-label-v1/ovmf.env
 
       - name: Resolve live current ONE_OF_OPTION label
         shell: bash
         run: |
           set -euo pipefail
-          source boot/uefi-hii-selected-option-v1/ovmf.env
-          root=boot/uefi-hii-selected-option-v1
+          source boot/uefi-hii-selected-label-v1/ovmf.env
+          root=boot/uefi-hii-selected-label-v1
           cp "$VARS" "$root/vars.fd"
           rm -rf "$root/esp"
           mkdir -p "$root/esp/EFI/BOOT"
@@ -212,7 +212,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re,time
-          root=Path('boot/uefi-hii-selected-option-v1')
+          root=Path('boot/uefi-hii-selected-label-v1')
           p=root/'selected.serial'
           required=[
               b'HII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\n',
@@ -315,7 +315,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          root=boot/uefi-hii-selected-option-v1
+          root=boot/uefi-hii-selected-label-v1
           sha256sum "$root/BOOTX64.EFI" "$root/selected.serial" "$root/selected.txt" > "$root/evidence.sha256"
           {
             echo 'OS-UEFI-HII-SELECTED-LABEL-V1'
@@ -336,19 +336,19 @@ jobs:
         with:
           name: os-uefi-hii-selected-label-v1-linux
           path: |
-            boot/uefi-hii-selected-option-v1/BOOTX64.EFI
-            boot/uefi-hii-selected-option-v1/selected.serial
-            boot/uefi-hii-selected-option-v1/selected.txt
-            boot/uefi-hii-selected-option-v1/build.log
-            boot/uefi-hii-selected-option-v1/evidence.sha256
-            boot/uefi-hii-selected-option-v1/linux-evidence.txt
+            boot/uefi-hii-selected-label-v1/BOOTX64.EFI
+            boot/uefi-hii-selected-label-v1/selected.serial
+            boot/uefi-hii-selected-label-v1/selected.txt
+            boot/uefi-hii-selected-label-v1/build.log
+            boot/uefi-hii-selected-label-v1/evidence.sha256
+            boot/uefi-hii-selected-label-v1/linux-evidence.txt
           if-no-files-found: error
 
       - name: Persist revision-bound selected-label proof
         shell: bash
         run: |
           set -euo pipefail
-          root=boot/uefi-hii-selected-option-v1
+          root=boot/uefi-hii-selected-label-v1
           proof="$root/os-uefi-hii-selected-label-v1.labproof"
           builder="$root/build_uefi_hii_selected_label.py"
           workflow=".github/workflows/os-uefi-hii-selected-label-v1.yml"
@@ -366,7 +366,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import hashlib,os
-          root=Path('boot/uefi-hii-selected-option-v1')
+          root=Path('boot/uefi-hii-selected-label-v1')
           p=root/'os-uefi-hii-selected-label-v1.labproof'
           lines=p.read_text().splitlines()
           states=[x for x in lines if x.startswith('proof = ')]
