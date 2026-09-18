@@ -313,6 +313,7 @@ def build_parent(child:bytes, speech:bytes):
     # play_clip(RDX source, ECX len, R8D duration)
     c.label("play_clip")
     c.emit(b"\x53\x56\x57\x41\x54\x48\x83\xec\x28")
+    c.emit(b"\x44\x89\x44\x24\x20")      # preserve R8D duration across DSP helpers
     c.emit(b"\x48\x89\xd6\x41\x89\xcc\x41\x89\xcb")
     c.mov_rax_data(L["dma"])
     c.emit(b"\x48\x89\xc3\x48\x89\xc7\xf3\xa4")
