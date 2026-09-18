@@ -372,8 +372,12 @@ def build():
  c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x82','prompt_package_done')
  c.emit(b'\x41\x0f\xb6\x01')       # eax=OpCode
  c.emit(b'\x41\x0f\xb6\x49\x01\x83\xe1\x7f') # ecx=Length
- c.emit(b'\x83\xf9\x02'); c.rel32(b'\x0f\x82','fail_ifr')
- c.emit(b'\x44\x39\xd1'); c.rel32(b'\x0f\x87','fail_ifr')
+ # A malformed/truncated IFR tail in one firmware Forms package must not
+ # abort discovery of the remaining independent HII package lists. r10d is
+ # already bounded by the enclosing package length, so abandoning this Forms
+ # package preserves memory safety while avoiding a false global failure.
+ c.emit(b'\x83\xf9\x02'); c.rel32(b'\x0f\x82','prompt_package_done')
+ c.emit(b'\x44\x39\xd1'); c.rel32(b'\x0f\x87','prompt_package_done')
  c.emit(b'\x3c\x05'); c.rel32(b'\x0f\x84','ifr_question')
  c.label('ifr_next')
  c.emit(b'\x49\x01\xc9\x41\x29\xca')
