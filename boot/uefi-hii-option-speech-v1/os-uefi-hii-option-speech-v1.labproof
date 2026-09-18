@@ -34,8 +34,8 @@ claim = success establishes that a real EFI_IFR_ONE_OF_OPTION label resolved fro
 claim = success does not establish current selection VarStore state navigation mutation or physical ASUS firmware output
 proof = PASS
 revalidation-request = 2026-09-18T22:12+02:00
-proof-run = 35395406102
-proof-head-sha = 9efe5ef84d93469282b65c2dc155a720042fcb2f
+proof-run = 35399210052
+proof-head-sha = fa38505a457e76cfd86c7922de31014441484f9c
 proof-HII-option-source = PASS
 proof-HII-export-all-package-lists = PASS
 proof-HII-direct-string-decoder = PASS
@@ -49,7 +49,7 @@ proof-runtime-HDA-route = PASS
 proof-HDA-waveform = PASS
 proof-keyboard-input-required = false
 proof-setting-mutation = false
-proof-wave-metrics = frames=18785; peak=13665; active=32326; wav-sha256=c3d998a01c438a9c79d0bdfd9c8bc03a060e048fbe84cdde4f02a827adea0aae
-proof-efi-sha256 = 156754862625f5e7bf73817fe70cb5fcbe4b67870643c2e2ef154912ec472a1a
+proof-wave-metrics = frames=18793; peak=13665; active=32342; wav-sha256=35315bba399996daf24a1ad1d8b4a79d23c2e515cb43afe64c8b22966dc276f7
+proof-efi-sha256 = 8c240aaa282e16c54f8b53841105593a09f21f057afad7365c62069443287f05
 proof-serial-sha256 = f6edce52eb5777ed80608e4328e53b71a74dcf49ebae052eca8c33e319e0881a
-proof-wav-sha256 = c3d998a01c438a9c79d0bdfd9c8bc03a060e048fbe84cdde4f02a827adea0aae
+proof-wav-sha256 = 35315bba399996daf24a1ad1d8b4a79d23c2e515cb43afe64c8b22966dc276f7
