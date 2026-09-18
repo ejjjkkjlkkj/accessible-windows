@@ -23,6 +23,7 @@ MARKS={
  'direct_export': b'QEVARYNOX-UEFI-HII-QUESTION-SPEECH-V1\r\nHII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\nEND\r\n',
  'forms_package_seen': b'QEVARYNOX-UEFI-HII-QUESTION-SPEECH-V1\r\nHII_FORMS_PACKAGE=PASS\r\nEND\r\n',
  'strings_package': b'QEVARYNOX-UEFI-HII-QUESTION-SPEECH-V1\r\nHII_STRINGS_PACKAGE=PASS\r\nEND\r\n',
+ 'strings_retry': b'QEVARYNOX-UEFI-HII-QUESTION-SPEECH-V1\r\nHII_STRINGS_PACKAGE_RETRY=PASS\r\nEND\r\n',
  'forms_handle': b'QEVARYNOX-UEFI-HII-QUESTION-SPEECH-V1\r\nHII_FORMS_HANDLE=PASS\r\nEND\r\n',
  'ifr': b'QEVARYNOX-UEFI-HII-QUESTION-SPEECH-V1\r\nIFR_ONE_OF_PROMPT_STRING_ID=PASS\r\nEND\r\n',
  'language': b'QEVARYNOX-UEFI-HII-QUESTION-SPEECH-V1\r\nHII_LANGUAGE=PASS\r\nEND\r\n',
@@ -156,7 +157,7 @@ def make_pcm():
 def build():
  pcm=make_pcm()
  data=bytearray(0x101100)
- L={'maxaddr':0,'keybuf':8,'dac_nid':16,'pin_nid':20,'textbuf':32,'text_count':56,'db_guid':64,'str_guid':80,'dbptr':96,'strptr':104,'handles_size':112,'handles_ptr':120,'pkg_size':128,'pkg_ptr':136,'langs_size':144,'langs_ptr':152,'string_size':160,'string_ptr':168,'token':176,'temp_handle':184,'handle_cursor':192,'handles_remaining':200,'forms_ptr':208,'strings_ptr':216,'list_len':224,'question_id':232,'varstore_id':234,'varstore_info':236,'question_flags':238,'oneof_flags':239,'handles_static':0x100,'pkg_static':0x1100}
+ L={'maxaddr':0,'keybuf':8,'dac_nid':16,'pin_nid':20,'textbuf':32,'text_count':56,'db_guid':64,'str_guid':80,'dbptr':96,'strptr':104,'global_remaining':112,'list_start':120,'pkg_size':128,'pkg_ptr':136,'strings_first':144,'ifr_next_ptr':152,'ifr_next_remaining':160,'string_ptr':168,'token':176,'temp_handle':184,'handle_cursor':192,'handles_remaining':200,'forms_ptr':208,'strings_ptr':216,'list_len':224,'question_id':232,'varstore_id':234,'varstore_info':236,'question_flags':238,'oneof_flags':239,'handles_static':0x100,'pkg_static':0x1100}
  struct.pack_into('<Q',data,0,0xffffffff)
  struct.pack_into('<IHH8B',data,L['db_guid'],0xef9fc172,0xa1b2,0x4693,0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42)
  struct.pack_into('<IHH8B',data,L['str_guid'],0x0fd96974,0x23aa,0x4cdc,0xb9,0xcb,0x98,0xd1,0x77,0x50,0x32,0x2a)
@@ -235,6 +236,8 @@ def build():
  c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x8b\x1a')
  c.label('direct_list_loop')
  c.emit(b'\x48\x83\xfb\x14'); c.rel32(b'\x0f\x82','fail_hii_handle')
+ c.lea_rdx_data(L['global_remaining']); c.emit(b'\x48\x89\x1a')
+ c.lea_rdx_data(L['list_start']); c.emit(b'\x48\x89\x32')
  c.emit(b'\x8b\x46\x10\x83\xf8\x18'); c.rel32(b'\x0f\x82','fail_hii_ifr')
  c.emit(b'\x48\x39\xd8'); c.rel32(b'\x0f\x87','fail_hii_ifr')
  c.lea_rdx_data(L['list_len']); c.emit(b'\x89\x02')
@@ -260,12 +263,16 @@ def build():
  c.label('direct_list_done')
  c.lea_rdx_data(L['forms_ptr']); c.emit(b'\x48\x83\x3a\x00'); c.rel32(b'\x0f\x84','direct_list_next')
  c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x83\x3a\x00'); c.rel32(b'\x0f\x84','direct_list_next')
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x8b\x02')
+ c.lea_rdx_data(L['strings_first']); c.emit(b'\x48\x89\x02')
  serial('forms_package_seen'); serial('strings_package')
  c.lea_rdx_data(L['forms_ptr']); c.emit(b'\x48\x8b\x3a')
  c.emit(b'\x8b\x07\x89\xc2\x81\xe2\xff\xff\xff\x00')
  c.rel32(b'\xe9','forms_pkg')
 
  c.label('direct_list_next')
+ c.lea_rdx_data(L['list_start']); c.emit(b'\x48\x8b\x32')
+ c.lea_rdx_data(L['global_remaining']); c.emit(b'\x48\x8b\x1a')
  c.lea_rdx_data(L['list_len']); c.emit(b'\x8b\x02')
  c.emit(b'\x48\x01\xc6\x48\x29\xc3')
  c.emit(b'\x48\x85\xdb'); c.rel32(b'\x0f\x85','direct_list_loop')
@@ -275,7 +282,7 @@ def build():
  # r9=first IFR opcode, r10d=bytes available in verified Forms package.
  c.emit(b'\x4c\x8d\x4f\x04\x41\x89\xd2\x41\x83\xea\x04')
  c.label('ifr_loop')
- c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x82','fail_hii_ifr')
+ c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x82','prompt_package_done')
  c.emit(b'\x41\x0f\xb6\x01')       # eax=OpCode
  c.emit(b'\x41\x0f\xb6\x49\x01\x83\xe1\x7f') # ecx=Length
  c.emit(b'\x83\xf9\x02'); c.rel32(b'\x0f\x82','fail_hii_ifr')
@@ -300,8 +307,17 @@ def build():
  c.label('token_candidate')
  c.emit(b'\x66\x85\xc0'); c.rel32(b'\x0f\x84','ifr_next')
  c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
+ # Preserve the next IFR opcode so unresolved strings do not terminate
+ # accessible discovery of later storage-backed questions.
+ c.emit(b'\x4c\x89\xc8\x48\x01\xc8')
+ c.lea_rdx_data(L['ifr_next_ptr']); c.emit(b'\x48\x89\x02')
+ c.emit(b'\x44\x89\xd0\x29\xc8')
+ c.lea_rdx_data(L['ifr_next_remaining']); c.emit(b'\x89\x02')
+ c.lea_rdx_data(L['strings_first']); c.emit(b'\x48\x8b\x02')
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x02')
  serial('ifr')
 
+ c.label('resolve_string_package')
  # Resolve the IFR StringId directly inside the selected Strings package.
  # EFI_HII_SIBT_STRING_SCSU=0x10 / STRINGS_SCSU=0x12 and
  # EFI_HII_SIBT_STRING_UCS2=0x14 / STRINGS_UCS2=0x16 are decoded;
@@ -674,8 +690,37 @@ def build():
  c.label('fail_hii_alloc'); serial('hii_alloc_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_export'); serial('hii_export_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_ifr'); serial('hii_ifr_fail'); c.rel32(b'\xe9','return_fail')
- c.label('fail_hii_language'); serial('hii_language_fail'); c.rel32(b'\xe9','return_fail')
- c.label('fail_hii_string'); serial('hii_string_fail'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_hii_language'); c.rel32(b'\xe9','fail_hii_string')
+ c.label('fail_hii_string')
+ # Search every sibling Strings package before abandoning this prompt.
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x8b\x32')
+ c.emit(b'\x8b\x06\x25\xff\xff\xff\x00')
+ c.emit(b'\x83\xf8\x04'); c.rel32(b'\x0f\x82','prompt_next')
+ c.emit(b'\x48\x01\xc6')
+ c.lea_rdx_data(L['list_start']); c.emit(b'\x48\x8b\x3a')
+ c.lea_rdx_data(L['list_len']); c.emit(b'\x8b\x02\x48\x01\xc7')
+ c.label('next_strings_scan')
+ c.emit(b'\x48\x8d\x46\x04\x48\x39\xf8'); c.rel32(b'\x0f\x87','prompt_next')
+ c.emit(b'\x8b\x06\x89\xc1\x81\xe1\xff\xff\xff\x00')
+ c.emit(b'\x89\xc2\xc1\xea\x18')
+ c.emit(b'\x83\xf9\x04'); c.rel32(b'\x0f\x82','prompt_next')
+ c.emit(b'\x48\x8d\x04\x0e\x48\x39\xf8'); c.rel32(b'\x0f\x87','prompt_next')
+ c.emit(b'\x83\xfa\x04'); c.rel32(b'\x0f\x84','use_next_strings')
+ c.emit(b'\x81\xfa\xdf\x00\x00\x00'); c.rel32(b'\x0f\x84','prompt_next')
+ c.emit(b'\x48\x89\xc6'); c.rel32(b'\xe9','next_strings_scan')
+ c.label('use_next_strings')
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x32')
+ serial('strings_retry')
+ c.rel32(b'\xe9','resolve_string_package')
+
+ c.label('prompt_next')
+ c.lea_rdx_data(L['ifr_next_ptr']); c.emit(b'\x4c\x8b\x0a')
+ c.lea_rdx_data(L['ifr_next_remaining']); c.emit(b'\x44\x8b\x12')
+ c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x83','ifr_loop')
+
+ c.label('prompt_package_done')
+ c.rel32(b'\xe9','direct_list_next')
+
  c.label('fail_no_hda'); serial('no_hda'); c.rel32(b'\xe9','return_fail')
  c.label('fail_bad_hda'); serial('bad_hda'); c.rel32(b'\xe9','return_fail')
  c.label('fail_alloc'); serial('alloc'); c.rel32(b'\xe9','return_fail')
