@@ -364,6 +364,127 @@ impl ObjectDescriptorV1 {
     }
 }
 
+/// Native typed relation between persistent objects.
+///
+/// Relations form the storage graph itself. They are not reconstructed by a
+/// later accessibility or cognition framework.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RelationKind {
+    /// Source structurally contains target.
+    Contains = 1,
+    /// Source provides a name or namespace binding for target.
+    Names = 2,
+    /// Source references target without ownership.
+    References = 3,
+    /// Source semantically describes target.
+    Describes = 4,
+    /// Source depends on target.
+    DependsOn = 5,
+    /// Source was derived from target.
+    DerivedFrom = 6,
+}
+
+/// Endpoints of a native relation.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RelationEndpointsV1 {
+    /// Relation source.
+    pub source: ObjectId,
+    /// Relation target.
+    pub target: ObjectId,
+}
+
+impl RelationEndpointsV1 {
+    /// Creates relation endpoints.
+    #[must_use]
+    pub const fn new(source: ObjectId, target: ObjectId) -> Self {
+        Self { source, target }
+    }
+}
+
+/// Structural validation errors for a native relation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RelationRecordError {
+    /// Every relation must have its own nonzero identity.
+    MissingRelationId,
+    /// Source and target identities must both be present.
+    MissingEndpoint,
+    /// Generation zero is reserved.
+    InvalidGeneration,
+    /// Reserved flags must remain zero in version 1.
+    ReservedFlagsSet,
+    /// Every relation must carry native semantic meaning.
+    MissingSemanticDescriptor,
+}
+
+/// Version-1 immutable relation record.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RelationRecordV1 {
+    /// Identity of this immutable relation version.
+    pub relation_id: ObjectId,
+    /// Previous relation version, or `ObjectId::ZERO` for the first version.
+    pub previous_version: ObjectId,
+    /// Generation in which this relation version was created.
+    pub generation: u64,
+    /// Relation endpoints.
+    pub endpoints: RelationEndpointsV1,
+    /// Native relation kind.
+    pub kind: RelationKind,
+    /// Reserved version-1 flags. Must be zero.
+    pub flags: u32,
+    /// Native semantic descriptor identity.
+    pub semantic_descriptor: ObjectId,
+    /// Stable ordering key for ordered relation sets.
+    pub order_key: u64,
+}
+
+impl RelationRecordV1 {
+    /// Creates a version-1 native relation.
+    #[must_use]
+    pub const fn new(
+        relation_id: ObjectId,
+        previous_version: ObjectId,
+        generation: u64,
+        endpoints: RelationEndpointsV1,
+        kind: RelationKind,
+        semantic_descriptor: ObjectId,
+        order_key: u64,
+    ) -> Self {
+        Self {
+            relation_id,
+            previous_version,
+            generation,
+            endpoints,
+            kind,
+            flags: 0,
+            semantic_descriptor,
+            order_key,
+        }
+    }
+
+    /// Validates version-1 relation invariants.
+    pub fn validate_structure(&self) -> Result<(), RelationRecordError> {
+        if self.relation_id.is_zero() {
+            return Err(RelationRecordError::MissingRelationId);
+        }
+        if self.endpoints.source.is_zero() || self.endpoints.target.is_zero() {
+            return Err(RelationRecordError::MissingEndpoint);
+        }
+        if self.generation == 0 {
+            return Err(RelationRecordError::InvalidGeneration);
+        }
+        if self.flags != 0 {
+            return Err(RelationRecordError::ReservedFlagsSet);
+        }
+        if self.semantic_descriptor.is_zero() {
+            return Err(RelationRecordError::MissingSemanticDescriptor);
+        }
+        Ok(())
+    }
+}
+
 /// Error returned while deriving an anchor that could publish a prepared transaction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PublicationError {
@@ -596,6 +717,70 @@ mod tests {
         assert_eq!(second.validate_structure(), Ok(()));
         assert_eq!(second.previous_version, first.object_id);
         assert_ne!(second.object_id, first.object_id);
+    }
+
+    #[test]
+    fn relation_record_requires_endpoints() {
+        let relation = RelationRecordV1::new(
+            TX_ID,
+            ObjectId::ZERO,
+            42,
+            RelationEndpointsV1::new(ID_A, ObjectId::ZERO),
+            RelationKind::References,
+            ID_B,
+            0,
+        );
+
+        assert_eq!(
+            relation.validate_structure(),
+            Err(RelationRecordError::MissingEndpoint)
+        );
+    }
+
+    #[test]
+    fn relation_record_requires_native_semantic_identity() {
+        let relation = RelationRecordV1::new(
+            TX_ID,
+            ObjectId::ZERO,
+            42,
+            RelationEndpointsV1::new(ID_A, ID_B),
+            RelationKind::Describes,
+            ObjectId::ZERO,
+            0,
+        );
+
+        assert_eq!(
+            relation.validate_structure(),
+            Err(RelationRecordError::MissingSemanticDescriptor)
+        );
+    }
+
+    #[test]
+    fn relation_record_supports_immutable_version_chain() {
+        let first = RelationRecordV1::new(
+            TX_ID,
+            ObjectId::ZERO,
+            41,
+            RelationEndpointsV1::new(ID_A, ID_B),
+            RelationKind::Contains,
+            ID_A,
+            10,
+        );
+        let second = RelationRecordV1::new(
+            ObjectId::new([0xD4; OBJECT_ID_BYTES]),
+            first.relation_id,
+            42,
+            RelationEndpointsV1::new(ID_A, ID_B),
+            RelationKind::Contains,
+            ID_A,
+            20,
+        );
+
+        assert_eq!(first.validate_structure(), Ok(()));
+        assert_eq!(second.validate_structure(), Ok(()));
+        assert_eq!(second.previous_version, first.relation_id);
+        assert_eq!(second.endpoints, first.endpoints);
+        assert_ne!(second.relation_id, first.relation_id);
     }
 
     #[derive(Clone, Copy)]
