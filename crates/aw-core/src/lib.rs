@@ -686,7 +686,6 @@ impl CapabilityGrantV1 {
     }
 }
 
-
 /// Native identity for a cognitive intent.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -850,11 +849,7 @@ pub const fn authorize_intent(
     if !matches!(grant.subject, AuthorityDomain::AgentExecutor) {
         return Err(ExecutionAuthorizationError::GrantNotForAgentExecutor);
     }
-    if !grant.authorizes(
-        intent.target,
-        intent.requested_rights,
-        intent.generation,
-    ) {
+    if !grant.authorizes(intent.target, intent.requested_rights, intent.generation) {
         return Err(ExecutionAuthorizationError::GrantDoesNotAuthorizeIntent);
     }
 
@@ -947,7 +942,10 @@ mod tests {
             15,
             AuthorityDomain::AgentPlanner,
         );
-        assert_eq!(intent.validate(), Err(CognitiveIntentError::MissingEvidence));
+        assert_eq!(
+            intent.validate(),
+            Err(CognitiveIntentError::MissingEvidence)
+        );
     }
 
     #[test]
