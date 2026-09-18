@@ -5,6 +5,7 @@ on:
     branches: [os]
     paths:
       - 'boot/uefi-physical-audio-v1/os-uefi-physical-audio-probe-v1.labproof'
+      - 'boot/uefi-physical-audio-v1/asus-m1603qa-reference.profile'
       - '.github/workflows/os-uefi-physical-audio-probe-v1.yml'
   workflow_dispatch:
 
@@ -180,6 +181,27 @@ jobs:
             $ids=$_.Properties.DEVPKEY_Device_HardwareIds
             if($ids) { "  HWID: $($ids -join ' | ')" }
           }
+
+      - name: Assess ASUS M1603QA codec reference
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='boot/uefi-physical-audio-v1/evidence'
+          $summary=Get-Content "$root/derived-audio-summary.json" -Raw | ConvertFrom-Json
+          $codecs=@($summary.codec_facing)
+          $allText=($codecs | ConvertTo-Json -Depth 12)
+          $realtek=($allText -match '(?i)VEN_10EC|Realtek')
+          $alc256=($allText -match '(?i)DEV_0256|ALC256|ALC3251')
+          $result=[ordered]@{
+            vendor_reference='ALC3251'
+            secondary_reference='ALC256'
+            realtek_family_observed=$realtek
+            alc256_or_alc3251_observed=$alc256
+            note='reference match is engineering evidence only; physical UEFI speech remains separate'
+          }
+          $result | ConvertTo-Json -Depth 5 | Set-Content "$root/asus-m1603qa-reference-match.json" -Encoding utf8
+          "ASUS_M1603QA_REALTEK_REFERENCE=$realtek"
+          "ASUS_M1603QA_ALC256_3251_REFERENCE=$alc256"
 
       - name: Write probe evidence record
         shell: pwsh
