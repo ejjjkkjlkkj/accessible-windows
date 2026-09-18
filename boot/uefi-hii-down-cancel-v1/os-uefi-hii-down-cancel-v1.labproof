@@ -25,8 +25,8 @@ physical-host-uefi-variable-write = forbidden
 physical-ASUS-cancel-flow = not-established
 claim = success establishes that DOWN can move and speak accessibility focus, ESC can explicitly cancel, no HII write routing occurs, and the same isolated OVMF VARS remains Disabled 0 on a fresh boot
 proof = PASS
-proof-run = 35398944160
-proof-head-sha = 19b4246a8205631dee2e52811e4f962439e4f061
+proof-run = 35399054727
+proof-head-sha = 11454ccf0a889fb74e7185d6a60ba23f0c53d1d8
 proof-down-key-event = PASS
 proof-focus-option-label = Enabled
 proof-focus-option-value = 1
@@ -41,8 +41,8 @@ proof-fresh-boot-current-option = Disabled
 proof-setting-mutation = false
 proof-HDA-waveform = PASS
 proof-physical-ASUS-cancel-flow = false
-proof-wave-metrics = frames=18796; peak=13355; active=33920; wav-sha256=3566390ceed5155bf1f02dabe4b0aa12be4e4856403662c7a7f88291bf696e85
+proof-wave-metrics = frames=18810; peak=13355; active=33936; wav-sha256=f906abe13b776179883a6f27e21cea22d1013a2bc50c0975784ec915c5f62d03
 proof-efi-sha256 = 444519c75c7a8fca119eb298dc1da73524c80c3f7459b97d5b48ec0763ea95b6
 proof-serial-sha256 = fd170e3c7e65699c6908fcdebf0bc36f70dbbed59a1628b21795849c965b9177
-proof-wav-sha256 = 3566390ceed5155bf1f02dabe4b0aa12be4e4856403662c7a7f88291bf696e85
+proof-wav-sha256 = f906abe13b776179883a6f27e21cea22d1013a2bc50c0975784ec915c5f62d03
 proof-post-serial-sha256 = 5032a2b8bda5d36e00618d8521ba3a6204ec1d212f5a134f9728d2518d62af86
