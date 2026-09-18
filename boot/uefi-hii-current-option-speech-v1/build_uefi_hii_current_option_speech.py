@@ -13,6 +13,7 @@ WAIT_UP_SPEAK=False
 WAIT_DOWN_COMMIT=False
 WAIT_DOWN_CANCEL=False
 EFI_VARSTORE_ONLY=False
+# Writable HII commits are verified after reboot against the same isolated OVMF VARS image.
 PLATFORM_TARGET_ONLY=False
 
 ROOT=Path(__file__).resolve().parents[2]
