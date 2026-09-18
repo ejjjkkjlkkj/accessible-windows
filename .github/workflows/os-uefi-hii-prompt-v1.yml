@@ -36,8 +36,11 @@ jobs:
           lines=set(Path('boot/uefi-hii-title-v1/os-uefi-hii-title-v1.labproof').read_text().splitlines())
           for line in [
               'proof = PASS',
-              'proof-HII-string-protocol = PASS',
+              'proof-HII-export-all-package-lists = PASS',
+              'proof-Forms-package = PASS',
+              'proof-Strings-package = PASS',
               'proof-IFR-title-token = PASS',
+              'proof-direct-string-decoder = PASS',
               'proof-title-resolution = PASS',
           ]:
               assert line in lines,line
@@ -52,14 +55,15 @@ jobs:
           src=(root/'build_uefi_hii_prompt.py').read_text()
           ast.parse(src)
           required=[
-              '0x0fd96974,0x23aa,0x4cdc',
-              "HII_STRING_PROTOCOL=PASS",
-              "HII_FORMS_HANDLE=PASS",
+              "HII_DATABASE_PROTOCOL=PASS",
+              "HII_EXPORT_ALL_PACKAGE_LISTS=PASS",
+              "HII_FORMS_PACKAGE=PASS",
+              "HII_STRINGS_PACKAGE=PASS",
               "IFR_PROMPT_STRING_ID=PASS",
               "PROMPT_TEXT=",
               "for opcode in (0x02,0x03,0x05,0x06,0x07,0x08,0x0c,0x0d,0x0f,0x1a,0x1b,0x1c,0x23)",
-              "c.emit(b'\\x41\\xff\\x55\\x18')",
-              "c.emit(b'\\x41\\xff\\x55\\x08')",
+              "EFI_HII_SIBT_STRING_UCS2",
+              "EFI_HII_SIBT_STRING_SCSU",
           ]
           for token in required:
               assert token in src,token
@@ -105,23 +109,21 @@ jobs:
           assert not(tc&0x80000000)
           assert dc&0x80000000 and not(dc&0x20000000)
           assert bytes.fromhex('72c19fefb2a19346b3276d32fc416042') in image
-          assert bytes.fromhex('7469d90faa23dc4cb9cb98d17750322a') in image
           for token in [
               b'HII_DATABASE_PROTOCOL=PASS\r\n',
-              b'HII_STRING_PROTOCOL=PASS\r\n',
-              b'HII_FORMS_HANDLE=PASS\r\n',
+              b'HII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\n',
+              b'HII_FORMS_PACKAGE=PASS\r\n',
+              b'HII_STRINGS_PACKAGE=PASS\r\n',
               b'IFR_PROMPT_STRING_ID=PASS\r\n',
+              b'HII_LANGUAGE=PASS\r\n',
               b'PROMPT_TEXT=',
               b'HII_PROMPT_STRING=PASS\r\n',
           ]:
               assert token in image,token
           print('HII_PROMPT_STATIC=PASS')
           print('HII_DATABASE_GUID=BOUND')
-          print('HII_STRING_GUID=BOUND')
-          print('IFR_FORMSET_0E=BOUND')
-          print('IFR_FORM_01=BOUND')
-          print('GET_LANGUAGES=BOUND')
-          print('GET_STRING=BOUND')
+          print('IFR_PROMPT_STATEMENT_HEADER=BOUND')
+          print('DIRECT_HII_STRING_BLOCK_DECODER=BOUND')
           print('W_X=BLOCKED')
 
       - name: Resolve OVMF
@@ -137,7 +139,7 @@ jobs:
           test -n "$CODE" -a -n "$VARS"
           printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-hii-prompt-v1/ovmf.env
 
-      - name: Resolve real IFR title through HII String
+      - name: Resolve real IFR prompt from exported HII packages
         shell: bash
         run: |
           set -euo pipefail
@@ -159,8 +161,9 @@ jobs:
           p=Path('boot/uefi-hii-prompt-v1/prompt.serial')
           required=[
               b'HII_DATABASE_PROTOCOL=PASS\r\n',
-              b'HII_STRING_PROTOCOL=PASS\r\n',
-              b'HII_FORMS_HANDLE=PASS\r\n',
+              b'HII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\n',
+              b'HII_FORMS_PACKAGE=PASS\r\n',
+              b'HII_STRINGS_PACKAGE=PASS\r\n',
               b'IFR_PROMPT_STRING_ID=PASS\r\n',
               b'HII_LANGUAGE=PASS\r\n',
               b'HII_PROMPT_STRING=PASS\r\n',
@@ -201,7 +204,10 @@ jobs:
             echo 'firmware = OVMF'
             echo 'machine = q35'
             echo 'HII-Database = PASS'
-            echo 'HII-String = PASS'
+            echo 'HII-export-all-package-lists = PASS'
+            echo 'HII-Forms-package = PASS'
+            echo 'HII-Strings-package = PASS'
+            echo 'direct-string-decoder = PASS'
             echo 'IFR-prompt-token = PASS'
             echo "resolved-prompt = $(cat "$root/prompt.txt")"
             echo 'setting-mutation = false'
@@ -262,10 +268,12 @@ jobs:
               f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
               f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
               "proof-HII-database-protocol = PASS\n"
-              "proof-HII-string-protocol = PASS\n"
-              "proof-Forms-handle = PASS\n"
+              "proof-HII-export-all-package-lists = PASS\n"
+              "proof-Forms-package = PASS\n"
+              "proof-Strings-package = PASS\n"
               "proof-IFR-prompt-token = PASS\n"
-              "proof-language-resolution = PASS\n"
+              "proof-language-metadata = PASS\n"
+              "proof-direct-string-decoder = PASS\n"
               "proof-prompt-resolution = PASS\n"
               f"proof-resolved-prompt = {safe}\n"
               "proof-setting-mutation = false\n"
