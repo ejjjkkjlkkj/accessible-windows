@@ -704,9 +704,10 @@ def build():
  c.emit(b'\x89\xc1\xba\x01\x00\x00\x00\xd3\xe2') # edx = 1 << Type
  c.emit(b'\x8d\x42\x06\x41\x39\xc0'); c.rel32(b'\x0f\x82','selected_option_restore_advance')
  c.emit(b'\x44\x89\xc1') # restore ecx = opcode Length for scan advance
- c.emit(b'\x3c\x00'); c.rel32(b'\x0f\x84','selected_cmp8')
- c.emit(b'\x3c\x01'); c.rel32(b'\x0f\x84','selected_cmp16')
- c.emit(b'\x3c\x02'); c.rel32(b'\x0f\x84','selected_cmp32')
+ # EDX still holds the typed width after the bounds check.
+ c.emit(b'\x83\xfa\x01'); c.rel32(b'\x0f\x84','selected_cmp8')
+ c.emit(b'\x83\xfa\x02'); c.rel32(b'\x0f\x84','selected_cmp16')
+ c.emit(b'\x83\xfa\x04'); c.rel32(b'\x0f\x84','selected_cmp32')
  c.rel32(b'\xe9','selected_cmp64')
  c.label('selected_option_restore_advance'); c.emit(b'\x44\x89\xc1'); c.rel32(b'\xe9','selected_option_advance')
 
