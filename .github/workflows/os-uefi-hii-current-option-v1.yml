@@ -108,6 +108,7 @@ jobs:
               "c.lea_rax_data(L['option_token']); c.emit(b'\\x0f\\xb7\\x00')",
               "CURRENT_OPTION_VALUE_MATCH=PASS",
               "CURRENT_OPTION_LANGUAGE_BINDING=PASS",
+              "CURRENT_OPTION_STRING_ID_PRE_RESOLVE_LE_HEX=",
               "Once resolving the selected option",
               "c.lea_rax_data(L['resolve_mode']); c.emit(b'\\x80\\x38\\x01'); c.rel32(b'\\x0f\\x84','prompt_next')",
               "CURRENT_OPTION_TEXT=",
@@ -192,6 +193,7 @@ jobs:
               b'ONE_OF_SCOPE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_VALUE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_LANGUAGE_BINDING=PASS\r\n',
+              b'CURRENT_OPTION_STRING_ID_PRE_RESOLVE_LE_HEX=',
               b'CURRENT_OPTION_STRING_ID_LE_HEX=',
               b'CURRENT_OPTION_FLAGS_HEX=',
               b'CURRENT_OPTION_TYPE_HEX=',
@@ -268,6 +270,7 @@ jobs:
               b'ONE_OF_SCOPE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_VALUE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_LANGUAGE_BINDING=PASS\r\n',
+              b'CURRENT_OPTION_STRING_ID_PRE_RESOLVE_LE_HEX=',
               b'CURRENT_OPTION_STRING_ID_LE_HEX=',
               b'CURRENT_OPTION_METADATA=PASS\r\n',
               b'CURRENT_OPTION_STRING=PASS\r\n',
@@ -288,6 +291,7 @@ jobs:
               vsguid=re.search(br'VARSTORE_GUID_RAW_HEX=([0-9A-F]{32})',raw)
               cw=re.search(br'CURRENT_VALUE_BYTES_HEX=([0-9A-F]{2})',raw)
               cr=re.search(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
+              pretok=re.search(br'CURRENT_OPTION_STRING_ID_PRE_RESOLVE_LE_HEX=([0-9A-F]{4})',raw)
               tok=re.search(br'CURRENT_OPTION_STRING_ID_LE_HEX=([0-9A-F]{4})',raw)
               of=re.search(br'CURRENT_OPTION_FLAGS_HEX=([0-9A-F]{2})',raw)
               ot=re.search(br'CURRENT_OPTION_TYPE_HEX=([0-9A-F]{2})',raw)
@@ -295,9 +299,10 @@ jobs:
               ov=re.search(br'CURRENT_OPTION_RAW8_HEX=([0-9A-F]{16})',raw)
               text=re.search(br'CURRENT_OPTION_TEXT=([^\r\n]+)',raw)
 
-              if all([q,vsid,vinfo,vssize,vsguid,cw,cr,tok,of,ot,ow,ov,text]) and all(x in raw for x in required):
+              if all([q,vsid,vinfo,vssize,vsguid,cw,cr,pretok,tok,of,ot,ow,ov,text]) and all(x in raw for x in required):
                   question=q.group(1).decode('ascii','replace').strip()
                   option_text=text.group(1).decode('ascii','replace').strip()
+                  pre_option_token=int.from_bytes(bytes.fromhex(pretok.group(1).decode()),'little')
                   option_token=int.from_bytes(bytes.fromhex(tok.group(1).decode()),'little')
                   current_width=int(cw.group(1),16)
                   option_type=int(ot.group(1),16)
@@ -338,6 +343,7 @@ jobs:
                       if ' = ' in line:
                           k,v=line.split(' = ',1)
                           selected_proof[k]=v
+                  assert pre_option_token==option_token,(pre_option_token,option_token)
                   assert option_token==int(selected_proof['proof-selected-option-string-id']),(option_token,selected_proof['proof-selected-option-string-id'])
                   assert current in value_to_label,(current,value_to_label)
                   assert option_text==value_to_label[current],(option_text,value_to_label[current])
@@ -370,7 +376,9 @@ jobs:
               time.sleep(.1)
           else:
               raw=p.read_bytes() if p.exists() else b''
-              raise SystemExit('timeout waiting integrated current-option resolution: '+repr(raw[-16384:]))
+              pre=re.findall(br'CURRENT_OPTION_STRING_ID_PRE_RESOLVE_LE_HEX=([0-9A-F]{4})',raw)
+              lang=b'CURRENT_OPTION_LANGUAGE_BINDING=PASS\r\n' in raw
+              raise SystemExit('timeout waiting integrated current-option resolution; pre-token='+repr(pre[-3:])+' language-bound='+str(lang)+' tail='+repr(raw[-16384:]))
           PY
 
           kill "$qpid" 2>/dev/null || true
