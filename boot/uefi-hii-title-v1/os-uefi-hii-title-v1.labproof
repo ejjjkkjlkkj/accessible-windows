@@ -26,3 +26,4 @@ physical-ASUS-HII = not-established
 claim = success establishes that native pre-OS code selects a live Forms HII handle, extracts a real IFR title StringId, resolves it using the firmware HII String protocol and emits a non-empty human-readable title
 claim = success does not establish question navigation setting mutation option semantics speech or physical ASUS firmware compatibility
 proof = PENDING_CI
+revalidation-request = 2026-09-18T21:22+02:00
