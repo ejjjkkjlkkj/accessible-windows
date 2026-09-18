@@ -370,6 +370,11 @@ jobs:
                   break
               time.sleep(.1)
           else: raise SystemExit("timeout final speech")
+          proc.terminate()
+          try: proc.wait(timeout=5)
+          except subprocess.TimeoutExpired:
+              proc.kill()
+              proc.wait(timeout=5)
           wav=root/"qemu.wav"
           end=time.time()+10
           while time.time()<end and (not wav.exists() or wav.stat().st_size<10000): time.sleep(.1)
@@ -381,9 +386,6 @@ jobs:
           assert max(abs(v) for v in vals)>=5000
           assert sum(abs(v)>=500 for v in vals)>=3000
           print("QEMU_HDA_WAVEFORM=PASS")
-          proc.terminate()
-          try: proc.wait(timeout=5)
-          except subprocess.TimeoutExpired: proc.kill()
           '@ | Set-Content $script -Encoding utf8
           & $env:PYTHON_EXE $script $root | Tee-Object (Join-Path $root 'qemu-result.txt')
           if($LASTEXITCODE -ne 0){ throw 'QEMU UEFI screen reader runtime failed' }
