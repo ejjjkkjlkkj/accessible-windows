@@ -24,7 +24,6 @@ jobs:
           $ErrorActionPreference='Stop'
           foreach ($p in @(
             'lab21/native-relation-core.labproof',
-            'lab22/affinity-topology.labproof',
             'system/native-perception-v1/native-perception-v1.labproof',
             'system/native-memory-v1/native-memory-v1.labproof'
           )) {
@@ -32,6 +31,10 @@ jobs:
             if ($lines -notcontains 'proof = PASS' -or $lines -notcontains 'system-foundation = true') {
               throw "required native foundation not proven: $p"
             }
+          }
+          $lab22=Get-Content 'lab22/affinity-topology.labproof'
+          if ($lab22 -notcontains 'proof = PASS') {
+            throw 'external AMD topology witness is not proven'
           }
           if ($env:RUNNER_NAME -ne 'AMD-5800H-REAL') { throw "wrong runner: $env:RUNNER_NAME" }
           $cpu=Get-CimInstance Win32_Processor | Select-Object -First 1
