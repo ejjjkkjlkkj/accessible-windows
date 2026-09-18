@@ -25,6 +25,8 @@ MARKS={
  'language': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nHII_LANGUAGE=PASS\r\nEND\r\n',
  'hii': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nHII_TITLE_SOURCE=PASS\r\nEND\r\n',
  'hii_protocol_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_PROTOCOL_NOT_FOUND\r\nEND\r\n',
+ 'hii_list_size_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_SIZE_QUERY_FAILED\r\nEND\r\n',
+ 'hii_list_fetch_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_FAILED\r\nEND\r\n',
  'hii_handle_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_FORMS_HANDLE_NOT_FOUND\r\nEND\r\n',
  'hii_alloc_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_POOL_ALLOC_FAILED\r\nEND\r\n',
  'hii_export_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_EXPORT_FAILED\r\nEND\r\n',
@@ -209,7 +211,7 @@ def build():
  c.lea_rax_data(L['temp_handle']); c.emit(b'\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
  c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x08'); c.rel32(b'\x0f\x82','fail_hii_handle')
+ c.emit(b'\x48\x83\xfb\x08'); c.rel32(b'\x0f\x82','fail_hii_list_size')
 
  # Allocate handle array and list all active HII handles.
  alloc(True,L['handles_ptr'])
@@ -217,7 +219,7 @@ def build():
  c.lea_r9_data(L['handles_size'])
  c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_hii_handle')
+ c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_hii_list_fetch')
 
  # Persist cursor and byte count because protocol calls may clobber volatile regs.
  c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02')
@@ -607,6 +609,8 @@ def build():
  c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
 
  c.label('fail_hii_protocol'); serial('hii_protocol_fail'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_hii_list_size'); serial('hii_list_size_fail'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_hii_list_fetch'); serial('hii_list_fetch_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_handle'); serial('hii_handle_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_alloc'); serial('hii_alloc_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_export'); serial('hii_export_fail'); c.rel32(b'\xe9','return_fail')
