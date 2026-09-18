@@ -525,21 +525,40 @@ def build():
  c.emit(b'\x45\x85\xd2'); c.rel32(b'\x0f\x84','fail_topology')
  c.emit(b'\x45\x85\xdb'); c.rel32(b'\x0f\x84','fail_topology')
 
- # Direct route: selected pin must connect to selected DAC.
+ # Direct-route discovery must bind the selected output pin to the DAC
+ # actually named by that pin's live connection list.  Do not assume that
+ # the first AUDIO_OUTPUT widget and first output PIN widget form a pair:
+ # VMware exposes multiple widgets and that first/first heuristic is false.
+ # r13d = raw connection count, r9d = connection-list form, ebx = index.
  c.emit(b'\x44\x89\xe0\xc1\xe0\x1c\x44\x89\xd9\xc1\xe1\x14\x09\xc8\x0d\x0e\x00\x0f\x00')
  c.rel32(b'\xe8','immediate')
  c.emit(b'\x3d\xff\xff\xff\xff'); c.rel32(b'\x0f\x84','fail_topology')
- c.emit(b'\x89\xc1\x80\xe1\x7f'); c.rel32(b'\x0f\x84','fail_topology')
- c.emit(b'\xa8\x80'); c.rel32(b'\x0f\x85','route_long')
- c.label('route_short')
- c.emit(b'\x44\x89\xe0\xc1\xe0\x1c\x44\x89\xd9\xc1\xe1\x14\x09\xc8\x0d\x00\x02\x0f\x00')
+ c.emit(b'\x41\x89\xc1\x41\x89\xc5\x41\x81\xe5\x7f\x00\x00\x00')
+ c.emit(b'\x45\x85\xed'); c.rel32(b'\x0f\x84','fail_topology')
+ c.emit(b'\x31\xdb')
+ c.label('route_scan')
+ # GET_CONNECTION_LIST_ENTRY(pin, ebx); the requested entry is the low
+ # short/long element of the packed response.
+ c.emit(b'\x44\x89\xe0\xc1\xe0\x1c\x44\x89\xd9\xc1\xe1\x14\x09\xc8\x0d\x00\x02\x0f\x00\x09\xd8')
  c.rel32(b'\xe8','immediate')
- c.emit(b'\x25\x7f\x00\x00\x00\x44\x39\xd0'); c.rel32(b'\x0f\x85','fail_topology')
- c.rel32(b'\xe9','route_ok')
- c.label('route_long')
- c.emit(b'\x44\x89\xe0\xc1\xe0\x1c\x44\x89\xd9\xc1\xe1\x14\x09\xc8\x0d\x00\x02\x0f\x00')
+ c.emit(b'\x3d\xff\xff\xff\xff'); c.rel32(b'\x0f\x84','route_next')
+ c.emit(b'\x89\xc6\x41\xf6\xc1\x80'); c.rel32(b'\x0f\x85','route_entry_long')
+ c.emit(b'\x83\xe6\x7f'); c.rel32(b'\xe9','route_entry_ready')
+ c.label('route_entry_long')
+ c.emit(b'\x81\xe6\xff\x7f\x00\x00')
+ c.label('route_entry_ready')
+ c.emit(b'\x85\xf6'); c.rel32(b'\x0f\x84','route_next')
+ # The live target itself must be an AUDIO_OUTPUT widget.  This searches
+ # every connection entry and overwrites r10d with the matched DAC NID.
+ c.emit(b'\x44\x89\xe0\xc1\xe0\x1c\x89\xf1\xc1\xe1\x14\x09\xc8\x0d\x09\x00\x0f\x00')
  c.rel32(b'\xe8','immediate')
- c.emit(b'\x25\xff\x7f\x00\x00\x44\x39\xd0'); c.rel32(b'\x0f\x85','fail_topology')
+ c.emit(b'\x3d\xff\xff\xff\xff'); c.rel32(b'\x0f\x84','route_next')
+ c.emit(b'\xc1\xe8\x14\x83\xe0\x0f\x83\xf8\x00'); c.rel32(b'\x0f\x84','route_found')
+ c.label('route_next')
+ c.emit(b'\xff\xc3\x44\x39\xeb'); c.rel32(b'\x0f\x82','route_scan')
+ c.rel32(b'\xe9','fail_topology')
+ c.label('route_found')
+ c.emit(b'\x41\x89\xf2')
  c.label('route_ok')
 
  c.lea_rdx_data(L['dac_nid']); c.emit(b'\x44\x89\x12')
