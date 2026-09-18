@@ -67,7 +67,10 @@ jobs:
               bytes.fromhex('0d10062700'),
               bytes.fromhex('0d11002200'),
               bytes.fromhex('0d40073700'),
-              bytes.fromhex('c70302001000'),
+              bytes.fromhex('8a0324fd8803'),
+              bytes.fromhex('8a030c018803'),
+              bytes.fromhex('8a0324fe8803'),
+              bytes.fromhex('c6430210c60302'),
               bytes.fromhex('8b430485c0'),
               b'TRANSPORT=HDA_NATIVE_DMA\r\n',
               b'BDL=PASS\r\n',
@@ -81,6 +84,7 @@ jobs:
           print('BDL=BOUND')
           print('CODEC_VERBS=BOUND')
           print('STREAM_DESCRIPTOR=BOUND')
+          print('SDCTL_BYTE_SAFE=BOUND')
           print('LPIB_PROOF=BOUND')
           print('W_X=BLOCKED')
 
