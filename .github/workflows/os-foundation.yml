@@ -108,6 +108,21 @@ jobs:
       - name: Native relation graph
         run: cargo +1.98.1 test -p aw-storage relation_record -- --nocapture
 
+  storage-namespace-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native namespace projection
+        run: cargo +1.98.1 test -p aw-storage namespace_binding -- --nocapture
+
   bare-metal-contracts:
     runs-on: ubuntu-24.04
     steps:

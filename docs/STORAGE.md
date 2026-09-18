@@ -13,7 +13,7 @@ The initial durable model uses:
 - redundant durable anchors;
 - explicit previous-known-good roots;
 - transaction descriptors;
-- a future authenticated integrity graph;\n- immutable object-version descriptors with native semantic identity and relation roots;\n- immutable typed relation records with explicit endpoints, semantic identity and version lineage.
+- a future authenticated integrity graph;\n- immutable object-version descriptors with native semantic identity and relation roots;\n- immutable typed relation records with explicit endpoints, semantic identity and version lineage;\n- namespace bindings projected from `Names` relations and native name objects, without making path strings fundamental.
 
 ## Version-1 publication model
 
@@ -55,6 +55,6 @@ The Rust model now tests the state-transition rules above and includes an abstra
 - derivation of a next-generation anchor from a prepared transaction;
 - preservation of the previous known-good root;
 - rejection of stale and non-prepared transactions;
-- recovery staying on the old generation until a valid new anchor exists;\n- deterministic crash-cut simulation across candidate, transaction and anchor durability barriers;\n- versioned native object descriptors that require semantic identity and preserve explicit previous-version links;\n- typed native relation records that form the object graph and carry semantic identity directly.
+- recovery staying on the old generation until a valid new anchor exists;\n- deterministic crash-cut simulation across candidate, transaction and anchor durability barriers;\n- versioned native object descriptors that require semantic identity and preserve explicit previous-version links;\n- typed native relation records that form the object graph and carry semantic identity directly;\n- namespace projection bindings where namespace, target and name remain native versionable objects.
 
 Cryptographic integrity verification, physical block I/O, real hardware durability barriers, allocator, object graph, device-level crash-fault injection, encryption, repair, snapshots and filesystem projections are **NOT IMPLEMENTED** and must not be reported as PASS.

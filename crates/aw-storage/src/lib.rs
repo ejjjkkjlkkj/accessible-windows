@@ -485,6 +485,69 @@ impl RelationRecordV1 {
     }
 }
 
+/// Validation errors for a namespace projection binding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NamespaceBindingError {
+    /// The underlying native relation is invalid.
+    InvalidRelation(RelationRecordError),
+    /// A namespace binding must use a `Names` relation.
+    WrongRelationKind,
+    /// A native object containing the name is required.
+    MissingNameObject,
+}
+
+/// A file/directory-like name binding projected from the native object graph.
+///
+/// The namespace and target live in the underlying `Names` relation. The name
+/// itself is another native object, allowing text, locale and semantics to be
+/// versioned without making path strings the storage primitive.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NamespaceBindingV1 {
+    /// Native `Names` relation from namespace object to target object.
+    pub relation: RelationRecordV1,
+    /// Native object containing the binding's name representation.
+    pub name_object: ObjectId,
+}
+
+impl NamespaceBindingV1 {
+    /// Creates a namespace projection binding.
+    #[must_use]
+    pub const fn new(relation: RelationRecordV1, name_object: ObjectId) -> Self {
+        Self {
+            relation,
+            name_object,
+        }
+    }
+
+    /// Validates version-1 namespace projection invariants.
+    pub fn validate_structure(&self) -> Result<(), NamespaceBindingError> {
+        self.relation
+            .validate_structure()
+            .map_err(NamespaceBindingError::InvalidRelation)?;
+
+        if self.relation.kind != RelationKind::Names {
+            return Err(NamespaceBindingError::WrongRelationKind);
+        }
+        if self.name_object.is_zero() {
+            return Err(NamespaceBindingError::MissingNameObject);
+        }
+        Ok(())
+    }
+
+    /// Returns the namespace object.
+    #[must_use]
+    pub const fn namespace(self) -> ObjectId {
+        self.relation.endpoints.source
+    }
+
+    /// Returns the bound target object.
+    #[must_use]
+    pub const fn target(self) -> ObjectId {
+        self.relation.endpoints.target
+    }
+}
+
 /// Error returned while deriving an anchor that could publish a prepared transaction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PublicationError {
@@ -781,6 +844,71 @@ mod tests {
         assert_eq!(second.previous_version, first.relation_id);
         assert_eq!(second.endpoints, first.endpoints);
         assert_ne!(second.relation_id, first.relation_id);
+    }
+
+    fn namespace_relation(
+        relation_id: ObjectId,
+        namespace: ObjectId,
+        target: ObjectId,
+    ) -> RelationRecordV1 {
+        RelationRecordV1::new(
+            relation_id,
+            ObjectId::ZERO,
+            42,
+            RelationEndpointsV1::new(namespace, target),
+            RelationKind::Names,
+            ID_B,
+            0,
+        )
+    }
+
+    #[test]
+    fn namespace_binding_requires_native_name_object() {
+        let binding = NamespaceBindingV1::new(
+            namespace_relation(TX_ID, ID_A, ID_B),
+            ObjectId::ZERO,
+        );
+
+        assert_eq!(
+            binding.validate_structure(),
+            Err(NamespaceBindingError::MissingNameObject)
+        );
+    }
+
+    #[test]
+    fn namespace_binding_rejects_non_name_relation() {
+        let relation = RelationRecordV1::new(
+            TX_ID,
+            ObjectId::ZERO,
+            42,
+            RelationEndpointsV1::new(ID_A, ID_B),
+            RelationKind::References,
+            ID_B,
+            0,
+        );
+        let binding = NamespaceBindingV1::new(
+            relation,
+            ObjectId::new([0xE5; OBJECT_ID_BYTES]),
+        );
+
+        assert_eq!(
+            binding.validate_structure(),
+            Err(NamespaceBindingError::WrongRelationKind)
+        );
+    }
+
+    #[test]
+    fn namespace_binding_projects_graph_without_path_primitive() {
+        let name = ObjectId::new([0xE5; OBJECT_ID_BYTES]);
+        let binding = NamespaceBindingV1::new(
+            namespace_relation(TX_ID, ID_A, ID_B),
+            name,
+        );
+
+        assert_eq!(binding.validate_structure(), Ok(()));
+        assert_eq!(binding.namespace(), ID_A);
+        assert_eq!(binding.target(), ID_B);
+        assert_eq!(binding.name_object, name);
     }
 
     #[derive(Clone, Copy)]
