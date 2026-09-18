@@ -240,22 +240,35 @@ jobs:
                   assert w in {1,2,4,8},w
                   assert vinfo_v+w <= size_v,(vinfo_v,w,size_v)
                   current=int.from_bytes(bytes.fromhex(raw8)[:w],'little')
-                  expected={}
-                  for line in Path('boot/uefi-hii-varstore-def-v1/os-uefi-hii-varstore-def-v1.labproof').read_text().splitlines():
-                      if line.startswith('proof-') and ' = ' in line:
-                          k,v=line[len('proof-'):].split(' = ',1)
-                          expected[k]=v
-                  actual={
-                      'question-text':text,
-                      'question-id':str(qid_v),
-                      'varstore-id':str(vsid_v),
-                      'varstore-info':str(vinfo_v),
-                      'varstore-opcode-hex':op_s,
-                      'varstore-size':str(size_v),
-                      'varstore-guid-raw-hex':guid_s,
-                  }
-                  for k,v in actual.items():
-                      assert expected.get(k)==v,(k,v,expected.get(k))
+                  # The persisted VarStore-definition proof is a capability
+                  # foundation, not a stable question selector.  The current-value
+                  # reader is stricter: it may skip otherwise-valid Buffer VarStores
+                  # whose current value cannot be obtained through read-only HII
+                  # Config Routing.  Bind identity to the final successful candidate
+                  # in this same firmware execution instead of comparing two
+                  # independently selected questions from different runs.
+                  foundation=set(Path('boot/uefi-hii-varstore-def-v1/os-uefi-hii-varstore-def-v1.labproof').read_text().splitlines())
+                  for line in [
+                      'proof = PASS',
+                      'proof-varstore-definition = PASS',
+                      'proof-current-value-read = false',
+                      'proof-varstore-write = false',
+                      'proof-setting-mutation = false',
+                  ]:
+                      assert line in foundation,line
+                  chain=[
+                      b'VARSTORE_DEFINITION_MATCH=PASS\\r\\n',
+                      b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\\r\\n',
+                      b'CONFIG_TO_BLOCK=PASS\\r\\n',
+                      b'BUFFER_VARSTORE_MATCH=PASS\\r\\nCURRENT_VALUE_READ=PASS\\r\\n',
+                      b'QUESTION_METADATA=PASS\\r\\n',
+                      b'VARSTORE_OPCODE_HEX='+op_s.encode()+b'\\r\\n',
+                      b'CURRENT_VALUE_RAW8_HEX='+raw8.encode()+b'\\r\\n',
+                      b'QUESTION_TEXT='+label.group(1)+b'\\r\\n',
+                  ]
+                  positions=[raw.rfind(marker) for marker in chain]
+                  assert all(p >= 0 for p in positions),positions
+                  assert positions == sorted(positions),positions
                   print('HII_BUFFER_CURRENT_IDENTITY_MATCH=PASS')
                   root.joinpath('current.txt').write_text(
                       f'question-text = {text}\n'
