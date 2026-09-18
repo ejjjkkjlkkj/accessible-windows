@@ -38,6 +38,7 @@ MARKS={
  'vs_attrs': b'\r\nVARSTORE_ATTRIBUTES_LE_HEX=',
  'vs_guid': b'\r\nVARSTORE_GUID_RAW_HEX=',
  'vs_match': b'\r\nVARSTORE_DEFINITION_MATCH=PASS\r\nEND\r\n',
+ 'vs_name_match': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nVARSTORE_NAME_CONFIG_MATCH=PASS\r\nEND\r\n',
  'routing': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nHII_CONFIG_ROUTING_PROTOCOL=PASS\r\nEND\r\n',
  'handle_list': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nHII_HANDLE_LIST=PASS\r\nEND\r\n',
  'cfg_access': b'QEVARYNOX-UEFI-HII-BUFFER-CURRENT-V1\r\nHII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS\r\nEND\r\n',
@@ -105,6 +106,7 @@ def build():
   'cfgacc_guid':240,'routing_guid':256,'routing_ptr':272,'config_ptr':280,
   'driver_handle':288,'progress':296,'results':304,'match_pkg_size':312,
   'matched_hii_handle':320,'block_size':328,'current_width':336,'current_raw':344,'config_boundary':352,
+  'varstore_name_ptr':360,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -495,7 +497,7 @@ def build():
  c.emit(b'\x49\x01\xc9\x41\x29\xca'); c.rel32(b'\xe9','varstore_scan')
 
  c.label('varstore_buffer')
- c.emit(b'\x83\xf9\x16'); c.rel32(b'\x0f\x82','varstore_next')
+ c.emit(b'\x83\xf9\x17'); c.rel32(b'\x0f\x82','varstore_next')
  c.emit(b'\x41\x0f\xb7\x41\x12')
  c.lea_rdx_data(L['varstore_id']); c.emit(b'\x66\x3b\x02'); c.rel32(b'\x0f\x85','varstore_next')
  c.lea_rdx_data(L['varstore_opcode']); c.emit(b'\xc6\x02\x24')
@@ -503,6 +505,9 @@ def build():
  c.lea_rdx_data(L['varstore_attrs']); c.emit(b'\xc7\x02\x00\x00\x00\x00')
  c.emit(b'\x49\x8b\x41\x02'); c.lea_rdx_data(L['varstore_guid']); c.emit(b'\x48\x89\x02')
  c.emit(b'\x49\x8b\x41\x0a'); c.lea_rdx_data(L['varstore_guid']+8); c.emit(b'\x48\x89\x02')
+ # EFI_IFR_VARSTORE.Name is the NUL-terminated ASCII name starting at +0x16.
+ # Preserve its live pointer so ConfigResp routing is bound to GUID + NAME.
+ c.emit(b'\x49\x8d\x41\x16'); c.lea_rdx_data(L['varstore_name_ptr']); c.emit(b'\x48\x89\x02')
  c.rel32(b'\xe9','varstore_found')
 
  c.label('varstore_name_value')
@@ -572,6 +577,33 @@ def build():
  c.emit(b'\x3c\xff'); c.rel32(b'\x0f\x84','config_guid_mismatch')
  c.emit(b'\x44\x08\xc8\x44\x38\xd0'); c.rel32(b'\x0f\x85','config_guid_mismatch')
  c.emit(b'\x48\xff\xc3\x48\x83\xc7\x04\xff\xc9'); c.rel32(b'\x0f\x85','config_guid_loop')
+
+ # Bind this ConfigHdr to the exact Buffer Storage NAME as well as GUID.
+ # HiiConstructConfigHdr encodes each CHAR16 name code unit as four hex digits;
+ # EFI_IFR_VARSTORE.Name is CHAR8, therefore every byte must encode as 00xx.
+ for disp,ch in ((0,0x26),(2,0x4e),(4,0x41),(6,0x4d),(8,0x45),(10,0x3d)):
+  if disp==0: c.emit(b'\x66\x81\x3f'+struct.pack('<H',ch))
+  else: c.emit(b'\x66\x81\x7f'+bytes((disp,))+struct.pack('<H',ch))
+  c.rel32(b'\x0f\x85','config_guid_mismatch')
+ c.emit(b'\x48\x83\xc7\x0c')
+ c.lea_rax_data(L['varstore_name_ptr']); c.emit(b'\x48\x8b\x18')
+ c.label('config_name_loop')
+ c.emit(b'\x44\x8a\x13\x45\x84\xd2'); c.rel32(b'\x0f\x84','config_name_done')
+ c.emit(b'\x66\x81\x3f\x30\x00'); c.rel32(b'\x0f\x85','config_guid_mismatch')
+ c.emit(b'\x66\x81\x7f\x02\x30\x00'); c.rel32(b'\x0f\x85','config_guid_mismatch')
+ c.emit(b'\x0f\xb7\x47\x04'); c.rel32(b'\xe8','hex_utf16_nibble')
+ c.emit(b'\x3c\xff'); c.rel32(b'\x0f\x84','config_guid_mismatch')
+ c.emit(b'\xc0\xe0\x04\x41\x88\xc1')
+ c.emit(b'\x0f\xb7\x47\x06'); c.rel32(b'\xe8','hex_utf16_nibble')
+ c.emit(b'\x3c\xff'); c.rel32(b'\x0f\x84','config_guid_mismatch')
+ c.emit(b'\x44\x08\xc8\x44\x38\xd0'); c.rel32(b'\x0f\x85','config_guid_mismatch')
+ c.emit(b'\x48\xff\xc3\x48\x83\xc7\x08'); c.rel32(b'\xe9','config_name_loop')
+ c.label('config_name_done')
+ for disp,ch in ((0,0x26),(2,0x50),(4,0x41),(6,0x54),(8,0x48),(10,0x3d)):
+  if disp==0: c.emit(b'\x66\x81\x3f'+struct.pack('<H',ch))
+  else: c.emit(b'\x66\x81\x7f'+bytes((disp,))+struct.pack('<H',ch))
+  c.rel32(b'\x0f\x85','config_guid_mismatch')
+ serial('vs_name_match')
 
  # Save the selected current ConfigResp start and temporarily terminate it at
  # the next &GUID= boundary so ConfigToBlock sees exactly one ConfigResp.
@@ -733,6 +765,7 @@ def validate(image):
   b'HII_QUESTION_STRING=PASS',
   b'QUESTION_METADATA=PASS',
   b'VARSTORE_DEFINITION_MATCH=PASS',
+  b'VARSTORE_NAME_CONFIG_MATCH=PASS',
   b'HII_CONFIG_ROUTING_PROTOCOL=PASS',
   b'HII_HANDLE_LIST=PASS',
   b'HII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS',
