@@ -262,14 +262,17 @@ jobs:
           set -euo pipefail
           root=boot/uefi-hda-playback-v1
           builder="$root/build_uefi_hda_playback.py"
-          tested="$(git rev-parse "$GITHUB_SHA:$builder")"
+          workflow=".github/workflows/os-uefi-hda-playback-v1.yml"
+          tested_builder="$(git rev-parse "$GITHUB_SHA:$builder")"
+          tested_workflow="$(git rev-parse "$GITHUB_SHA:$workflow")"
           cp "$root/hda.wav" /tmp/hda.wav
           cp "$root/hda.serial" /tmp/hda.serial
           cp "$root/BOOTX64.EFI" /tmp/hda.efi
           git fetch origin os
           git checkout -B os origin/os
-          current="$(git rev-parse "os:$builder")"
-          if [[ "$tested" != "$current" ]]; then
+          current_builder="$(git rev-parse "os:$builder")"
+          current_workflow="$(git rev-parse "os:$workflow")"
+          if [[ "$tested_builder" != "$current_builder" || "$tested_workflow" != "$current_workflow" ]]; then
             echo "HDA_PLAYBACK_PROOF_STALE_RUN=SKIP"
             exit 0
           fi
@@ -279,9 +282,8 @@ jobs:
           root=Path('boot/uefi-hda-playback-v1')
           p=root/'os-uefi-hda-playback-v1.labproof'
           text=p.read_text()
-          if 'proof = PASS' in text:
-              raise SystemExit(0)
-          if 'proof = PENDING_CI' not in text:
+          states=[line for line in text.splitlines() if line.startswith('proof = ')]
+          if len(states) != 1 or states[0] not in {'proof = PENDING_CI','proof = PASS'}:
               raise SystemExit('unexpected proof state')
           efi=Path('/tmp/hda.efi').read_bytes()
           wav=Path('/tmp/hda.wav').read_bytes()
@@ -289,7 +291,17 @@ jobs:
           with wave.open('/tmp/hda.wav','rb') as w:
               frames=w.getnframes(); rate=w.getframerate(); raw=w.readframes(frames)
           vals=struct.unpack('<'+'h'*(len(raw)//2),raw)
-          text=text.replace('proof = PENDING_CI','proof = PASS')
+          kept=[]
+          for line in text.splitlines():
+              if line.startswith('proof-'):
+                  continue
+              if line.startswith('revalidation-reason ='):
+                  continue
+              if line.startswith('proof = '):
+                  kept.append('proof = PASS')
+              else:
+                  kept.append(line)
+          text='\n'.join(kept).rstrip()+'\n'
           text += (
               f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
               f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
