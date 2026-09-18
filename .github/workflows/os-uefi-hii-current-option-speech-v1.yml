@@ -10,6 +10,7 @@ on:
       - 'boot/uefi-hii-option-speech-v1/build_uefi_hii_option_speech.py'
       - 'boot/uefi-hii-option-speech-v1/os-uefi-hii-option-speech-v1.labproof'
       - 'boot/uefi-hda-text26-v1/os-uefi-hda-text26-v1.labproof'
+      - 'boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof'
       - '.github/workflows/os-uefi-hii-current-option-speech-v1.yml'
   workflow_dispatch:
 
@@ -65,6 +66,16 @@ jobs:
               have=set(Path(path).read_text().splitlines())
               for line in lines:
                   assert line in have,(path,line)
+          fixture=set(Path('boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof').read_text().splitlines())
+          for line in [
+              'proof = PASS',
+              'question-text = iSCSI Mode',
+              'varstore-id = 26214',
+              'varstore-offset = 472',
+              'varstore-size = 17724',
+              'varstore-guid-raw-hex = 16D6474BD6A852459D44CCAD2E0F4CF9',
+          ]:
+              assert line in fixture,('fixture',line)
           selected=Path('boot/uefi-hii-selected-label-v1/os-uefi-hii-selected-label-v1.labproof').read_text().splitlines()
           labels=[x.split(' = ',1)[1] for x in selected if x.startswith('proof-selected-option-text = ')]
           assert len(labels)==1 and labels[0],labels
@@ -118,6 +129,7 @@ jobs:
               'set-variable-call = forbidden',
               'varstore-write = forbidden',
               'firmware-setting-mutation = forbidden',
+              'runtime-varstore-identity = same-execution VarStore id offset size and raw GUID must equal the independent EDK II iSCSI fixture oracle',
               'physical-ASUS-current-option-speech = not-established',
           ]:
               assert line in proof,line
@@ -160,6 +172,12 @@ jobs:
               b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\r\n',
               b'CONFIG_TO_BLOCK=PASS\r\n',
               b'CURRENT_VALUE_READ=PASS\r\n',
+              b'VARSTORE_DEFINITION_MATCH=PASS\r\n',
+              b'VARSTORE_NAME_CONFIG_MATCH=PASS\r\n',
+              b'VARSTORE_ID_LE_HEX=',
+              b'VARSTORE_INFO_LE_HEX=',
+              b'VARSTORE_SIZE_LE_HEX=',
+              b'VARSTORE_GUID_RAW_HEX=',
               b'SELECTED_OPTION_CURRENT_MATCH=PASS\r\n',
               b'SELECTED_OPTION_TEXT=',
               b'SELECTED_OPTION_LABEL_BINDING=PASS\r\n',
@@ -240,6 +258,10 @@ jobs:
           expected_value=int(one('proof-selected-option-value-unsigned'))
           expected_prefix=''.join(ch.lower() for ch in expected_label if 'a' <= ch.lower() <= 'z')[:8]
           assert expected_prefix,(expected_label,expected_prefix)
+          fixture={}
+          for line in Path('boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof').read_text().splitlines():
+              if ' = ' in line:
+                  k,v=line.split(' = ',1); fixture[k]=v
           required=[
               b'HII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\n',
               b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\r\n',
@@ -268,22 +290,36 @@ jobs:
                   raise SystemExit('current option speech blocked: '+repr(raw[-20000:]))
               if all(x in raw for x in required):
                   qm=re.search(br'QUESTION_TEXT=([^\r\n]+)',raw)
+                  vsid=re.search(br'VARSTORE_ID_LE_HEX=([0-9A-F]{4})',raw)
+                  vinfo=re.search(br'VARSTORE_INFO_LE_HEX=([0-9A-F]{4})',raw)
+                  vssize=re.search(br'VARSTORE_SIZE_LE_HEX=([0-9A-F]{4})',raw)
+                  vsguid=re.search(br'VARSTORE_GUID_RAW_HEX=([0-9A-F]{32})',raw)
                   lm=re.search(br'SELECTED_OPTION_TEXT=([^\r\n]+)',raw)
                   sm=re.search(br'SELECTED_OPTION_STRING_ID_LE_HEX=([0-9A-F]{4})',raw)
                   cm=re.search(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
                   om=re.search(br'SELECTED_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
                   pm=re.search(br'CURRENT_OPTION_SPOKEN_PREFIX=([a-z]{1,8})\r\nCURRENT_OPTION_SPOKEN_PREFIX=PASS\r\n',raw)
-                  assert all([qm,lm,sm,cm,om,pm]),raw[-20000:]
+                  assert all([qm,vsid,vinfo,vssize,vsguid,lm,sm,cm,om,pm]),raw[-20000:]
                   question=qm.group(1).decode('ascii','replace').strip()
                   label=lm.group(1).decode('ascii','replace').strip()
                   string_id=int.from_bytes(bytes.fromhex(sm.group(1).decode()),'little')
                   current_raw=cm.group(1).decode()
                   option_raw=om.group(1).decode()
                   spoken=pm.group(1).decode()
+                  def le16(match):
+                      return int.from_bytes(bytes.fromhex(match.group(1).decode()),'little')
+                  varstore_id=le16(vsid)
+                  varstore_offset=le16(vinfo)
+                  varstore_size=le16(vssize)
+                  varstore_guid=vsguid.group(1).decode()
                   current_value=bytes.fromhex(current_raw)[0]
                   option_value=bytes.fromhex(option_raw)[0]
                   count=raw.count(b'EVENT=CURRENT_OPTION_GRAPHEME_ACCEPTED\r\n')
                   assert question==expected_question,(question,expected_question)
+                  assert varstore_id==int(fixture['varstore-id']),(varstore_id,fixture['varstore-id'])
+                  assert varstore_offset==int(fixture['varstore-offset']),(varstore_offset,fixture['varstore-offset'])
+                  assert varstore_size==int(fixture['varstore-size']),(varstore_size,fixture['varstore-size'])
+                  assert varstore_guid==fixture['varstore-guid-raw-hex'],(varstore_guid,fixture['varstore-guid-raw-hex'])
                   assert label==expected_label,(label,expected_label)
                   assert string_id==expected_string_id,(string_id,expected_string_id)
                   assert current_value==option_value==expected_value,(current_value,option_value,expected_value)
@@ -291,6 +327,10 @@ jobs:
                   assert count==len(expected_prefix),(count,len(expected_prefix))
                   root.joinpath('runtime.txt').write_text(
                       f'question = {question}\n'
+                      f'varstore-id = {varstore_id}\n'
+                      f'varstore-offset = {varstore_offset}\n'
+                      f'varstore-size = {varstore_size}\n'
+                      f'varstore-guid-raw-hex = {varstore_guid}\n'
                       f'current-option-label = {label}\n'
                       f'current-option-string-id = {string_id}\n'
                       f'current-value = {current_value}\n'
@@ -299,6 +339,7 @@ jobs:
                       f'spoken-graphemes = {count}\n'
                   )
                   print('CURRENT_OPTION_IDENTITY_MATCH=PASS')
+                  print('CURRENT_OPTION_VARSTORE_IDENTITY=PASS')
                   print('CURRENT_OPTION_LABEL='+label)
                   print('CURRENT_OPTION_SPOKEN_PREFIX='+spoken)
                   print('CURRENT_OPTION_SPEECH_RUNTIME=PASS')
@@ -353,6 +394,7 @@ jobs:
             echo 'machine = q35'
             cat "$root/runtime.txt"
             echo 'live-current-option-identity = PASS'
+            echo 'live-current-option-varstore-identity = PASS'
             echo 'live-current-option-label = PASS'
             echo 'first-party-letter-allophones = PASS'
             echo 'native-HDA-runtime-route = PASS'
@@ -432,8 +474,13 @@ jobs:
               f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
               f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
               "proof-live-current-option-identity = PASS\n"
+              "proof-live-current-option-varstore-identity = PASS\n"
               "proof-live-current-option-label = PASS\n"
               f"proof-question = {vals['question']}\n"
+              f"proof-varstore-id = {vals['varstore-id']}\n"
+              f"proof-varstore-offset = {vals['varstore-offset']}\n"
+              f"proof-varstore-size = {vals['varstore-size']}\n"
+              f"proof-varstore-guid-raw-hex = {vals['varstore-guid-raw-hex']}\n"
               f"proof-current-option-label = {vals['current-option-label']}\n"
               f"proof-current-option-string-id = {vals['current-option-string-id']}\n"
               f"proof-current-value = {vals['current-value']}\n"
