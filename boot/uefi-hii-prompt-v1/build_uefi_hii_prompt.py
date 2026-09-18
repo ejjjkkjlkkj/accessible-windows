@@ -58,7 +58,7 @@ def build():
   'db_guid':0,'str_guid':16,'dbptr':32,'strptr':40,
   'handles_size':48,'handles_ptr':56,'pkg_size':64,'pkg_ptr':72,
   'langs_size':80,'langs_ptr':88,'string_size':96,'string_ptr':104,
-  'token':112,
+  'token':112,'temp_handle':120,
  }
  struct.pack_into('<IHH8B',data,L['db_guid'],
   0xef9fc172,0xa1b2,0x4693,0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42)
@@ -107,9 +107,10 @@ def build():
 
  # ListPackageLists(FORMS=0x02), first size query.
  zero_qword(L['handles_size'])
+ zero_qword(L['temp_handle'])
  c.emit(b'\x4c\x89\xe1\xba\x02\x00\x00\x00\x45\x31\xc0')
  c.lea_r9_data(L['handles_size'])
- c.emit(b'\x48\xc7\x44\x24\x20\x00\x00\x00\x00')
+ c.lea_rax_data(L['temp_handle']); c.emit(b'\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
  c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x1a')
  c.emit(b'\x48\x83\xfb\x08'); c.rel32(b'\x0f\x82','fail_no_handle')
