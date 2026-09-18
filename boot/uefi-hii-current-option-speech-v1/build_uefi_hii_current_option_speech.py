@@ -204,7 +204,7 @@ def build():
   'selected_option_ptr':464,'nav_option_token':472,'nav_option_type':474,'nav_option_raw':480,
   'prev_option_ptr':488,'prev_wrap_flag':496,'conin_ptr':504,
   'commit_config':512,'commit_progress':520,'commit_done':528,
-  'commit_request':0x212000,
+  'commit_request_buf':0x212000,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -1247,7 +1247,7 @@ def build():
 
  c.label('build_commit_request')
  c.lea_rax_data(L['config_ptr']); c.emit(b'\x48\x8b\x30\x48\x85\xf6'); c.rel32(b'\x0f\x84','commit_request_bad')
- c.lea_rdi_data(L['commit_request']); c.emit(b'\xb9\x00\x18\x00\x00')
+ c.lea_rdi_data(L['commit_request_buf']); c.emit(b'\xb9\x00\x18\x00\x00')
  c.label('commit_hdr_scan')
  c.emit(b'\x66\x83\x3e\x00'); c.rel32(b'\x0f\x84','commit_request_bad')
  c.emit(b'\x66\x83\x3e\x26'); c.rel32(b'\x0f\x85','commit_hdr_copy')
@@ -1270,7 +1270,7 @@ def build():
  c.label('commit_stage_done'); serial('commit_stage')
  c.rel32(b'\xe8','build_commit_request'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','commit_return_fail')
  zero_qword(L['commit_config']); zero_qword(L['commit_progress'])
- c.lea_rax_data(L['routing_ptr']); c.emit(b'\x48\x8b\x08'); c.lea_rdx_data(L['commit_request']); c.lea_r8_data(L['current_data'])
+ c.lea_rax_data(L['routing_ptr']); c.emit(b'\x48\x8b\x08'); c.lea_rdx_data(L['commit_request_buf']); c.lea_r8_data(L['current_data'])
  c.lea_rax_data(L['varstore_size']); c.emit(b'\x44\x0f\xb7\x08')
  c.lea_rax_data(L['commit_config']); c.emit(b'\x48\x89\x44\x24\x20'); c.lea_rax_data(L['commit_progress']); c.emit(b'\x48\x89\x44\x24\x28')
  c.emit(b'\x48\x8b\x41\x18\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','commit_block_bad'); serial('commit_block')
@@ -1282,11 +1282,13 @@ def build():
  c.emit(b'\x41\xff\x57\x48'); zero_qword(L['results'])
  c.label('commit_reread'); c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','commit_verify_bad')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','commit_verify_bad')
+ # Emit the live re-read before the equality gate so a failed commit remains diagnosable.
+ c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
  c.lea_rsi_data(L['current_raw']); c.lea_rdi_data(L['nav_option_raw']); c.lea_rdx_data(L['current_width']); c.emit(b'\x0f\xb6\x0a')
  c.label('commit_verify_loop'); c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','commit_verify_token')
  c.emit(b'\x8a\x06\x3a\x07'); c.rel32(b'\x0f\x85','commit_verify_bad'); c.emit(b'\x48\xff\xc6\x48\xff\xc7\xff\xc9'); c.rel32(b'\xe9','commit_verify_loop')
  c.label('commit_verify_token'); c.lea_rax_data(L['selected_option_token']); c.emit(b'\x0f\xb7\x08'); c.lea_rax_data(L['nav_option_token']); c.emit(b'\x0f\xb7\x00\x39\xc1'); c.rel32(b'\x0f\x85','commit_verify_bad')
- c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta'); serial('commit_verify')
+ serial('commit_verify')
  c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','commit_verified')
  c.emit(b'\x41\xff\x57\x48'); zero_qword(L['results'])
  c.label('commit_verified'); c.emit(b'\x31\xc0\xc3')
