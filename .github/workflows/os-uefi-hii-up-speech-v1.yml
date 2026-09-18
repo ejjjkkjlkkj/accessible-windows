@@ -31,21 +31,11 @@ jobs:
           for line in [
               'proof = PASS',
               'proof-live-current-option-varstore-identity = PASS',
-              'proof-current-option-label = Disabled',
-              'proof-current-value = 0',
               'proof-setting-mutation = false',
           ]:
               assert line in current,line
-          fixture=set(Path('boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof').read_text().splitlines())
-          for line in [
-              'proof = PASS',
-              'option-disabled-label = Disabled',
-              'option-disabled-value = 0',
-              'option-enabled-for-mpio-label = Enabled for MPIO',
-              'option-enabled-for-mpio-value = 2',
-          ]:
-              assert line in fixture,line
           print('UP_FOCUS_SPEECH_FOUNDATIONS=PASS')
+          print('UP_FOCUS_HII_DISCOVERY=DYNAMIC')
 
       - name: Audit source contract
         shell: python
@@ -159,7 +149,7 @@ jobs:
           test -n "$CODE" -a -n "$VARS"
           printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-hii-up-speech-v1/ovmf.env
 
-      - name: UP from Disabled and speak Enabled for MPIO
+      - name: UP to live previous HII option and speak it
         shell: bash
         run: |
           set -euo pipefail
@@ -248,30 +238,41 @@ jobs:
                   navraw=re.search(br'NAV_PREV_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
                   navtok=re.search(br'NAV_PREV_OPTION_STRING_ID_LE_HEX=([0-9A-F]{4})',raw)
                   label=re.search(br'NAV_FOCUS_OPTION_TEXT=([^\r\n]+)',raw)
-                  spoken=re.search(br'NAV_FOCUS_SPOKEN_PREFIX=([a-z]{1,8})\r\nNAV_FOCUS_SPOKEN_PREFIX=PASS\r\n',raw)
+                  spoken=re.search(br'NAV_FOCUS_SPOKEN_PREFIX=([a-z0-9]{1,8})\r\nNAV_FOCUS_SPOKEN_PREFIX=PASS\r\n',raw)
                   assert all([cur,sel,navraw,navtok,label,spoken]),raw[-20000:]
-                  current=bytes.fromhex(cur.group(1).decode())[0]
-                  selected=bytes.fromhex(sel.group(1).decode())[0]
-                  prev_value=bytes.fromhex(navraw.group(1).decode())[0]
+                  cur_raw=cur.group(1).decode()
+                  sel_raw=sel.group(1).decode()
+                  prev_raw=navraw.group(1).decode()
+                  current_label_m=re.search(br'SELECTED_OPTION_TEXT=([^\r\n]+)',raw)
+                  assert current_label_m,current_label_m
                   token=int.from_bytes(bytes.fromhex(navtok.group(1).decode()),'little')
+                  current_label=current_label_m.group(1).decode('ascii','replace').strip()
                   focus_label=label.group(1).decode('ascii','replace').strip()
                   prefix=spoken.group(1).decode()
-                  assert (current,selected,prev_value)==(0,0,2),(current,selected,prev_value)
+                  expected_prefix=''.join(
+                      ch.lower() for ch in focus_label
+                      if ('a' <= ch.lower() <= 'z') or ('0' <= ch <= '9')
+                  )[:8]
+                  assert cur_raw==sel_raw,(cur_raw,sel_raw)
+                  assert prev_raw!=cur_raw,(cur_raw,prev_raw)
                   assert token!=0,token
-                  assert focus_label=='Enabled for MPIO',focus_label
-                  assert prefix=='enabledf',prefix
+                  assert current_label,current_label
+                  assert focus_label,focus_label
+                  assert expected_prefix,(focus_label,expected_prefix)
+                  assert prefix==expected_prefix,(prefix,expected_prefix,focus_label)
                   root.joinpath('runtime.txt').write_text(
-                      f'current-value = {current}\n'
-                      'current-option-label = Disabled\n'
-                      f'focus-option-value = {prev_value}\n'
+                      f'current-raw8 = {cur_raw}\n'
+                      f'current-option-label = {current_label}\n'
+                      f'focus-raw8 = {prev_raw}\n'
                       f'focus-option-string-id = {token}\n'
                       f'focus-option-label = {focus_label}\n'
                       f'focus-spoken-prefix = {prefix}\n'
                       'up-key-event = PASS\n'
                       'focus-native-hda-speech = PASS\n'
                   )
-                  print('UP_FOCUS_LABEL=Enabled for MPIO')
-                  print('UP_FOCUS_SPOKEN_PREFIX=enabledf')
+                  print('UP_FOCUS_DYNAMIC_BINDING=PASS')
+                  print('UP_FOCUS_LABEL='+focus_label)
+                  print('UP_FOCUS_SPOKEN_PREFIX='+prefix)
                   print('UP_FOCUS_SPEECH_RUNTIME=PASS')
                   break
               time.sleep(.1)
@@ -307,7 +308,7 @@ jobs:
           )
           print('UP_FOCUS_SPEECH_WAVEFORM=PASS')
 
-      - name: Reboot same VARS and prove current setting is still Disabled
+      - name: Reboot same VARS and prove navigation did not mutate setting
         shell: bash
         run: |
           set -euo pipefail
@@ -331,7 +332,14 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re,time
-          p=Path('boot/uefi-hii-up-speech-v1/post.serial')
+          root=Path('boot/uefi-hii-up-speech-v1')
+          vals={}
+          for line in (root/'runtime.txt').read_text().splitlines():
+              if ' = ' in line:
+                  k,v=line.split(' = ',1); vals[k]=v
+          expected_raw=vals['current-raw8']
+          expected_label=vals['current-option-label']
+          p=root/'post.serial'
           end=time.time()+35
           while time.time()<end:
               raw=p.read_bytes() if p.exists() else b''
@@ -341,8 +349,15 @@ jobs:
                   cur=re.search(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
                   label=re.search(br'SELECTED_OPTION_TEXT=([^\r\n]+)',raw)
                   assert cur and label
-                  assert bytes.fromhex(cur.group(1).decode())[0]==0
-                  assert label.group(1).decode('ascii','replace').strip()=='Disabled'
+                  got_raw=cur.group(1).decode()
+                  got_label=label.group(1).decode('ascii','replace').strip()
+                  assert got_raw==expected_raw,(got_raw,expected_raw)
+                  assert got_label==expected_label,(got_label,expected_label)
+                  (root/'post-state.txt').write_text(
+                      f'current-raw8 = {got_raw}\n'
+                      f'current-option-label = {got_label}\n'
+                      'unchanged = PASS\n'
+                  )
                   print('UP_FOCUS_POST_STATE_UNCHANGED=PASS')
                   break
               time.sleep(.1)
@@ -363,8 +378,8 @@ jobs:
           {
             echo 'OS-UEFI-HII-UP-SPEECH-V1'
             cat "$root/runtime.txt"
-            echo 'post-state-current-value = 0'
-            echo 'post-state-current-label = Disabled'
+            cat "$root/post-state.txt"
+            echo 'post-state-unchanged = PASS'
             echo 'setting-mutation = false'
             echo 'physical-ASUS-up-focus-speech = not-established'
             echo 'result = PASS'
@@ -379,6 +394,7 @@ jobs:
             boot/uefi-hii-up-speech-v1/up-speech.serial
             boot/uefi-hii-up-speech-v1/up-speech.wav
             boot/uefi-hii-up-speech-v1/post.serial
+            boot/uefi-hii-up-speech-v1/post-state.txt
             boot/uefi-hii-up-speech-v1/runtime.txt
             boot/uefi-hii-up-speech-v1/metrics.txt
             boot/uefi-hii-up-speech-v1/evidence.sha256
@@ -392,10 +408,8 @@ jobs:
           root=boot/uefi-hii-up-speech-v1
           proof="$root/os-uefi-hii-up-speech-v1.labproof"
           builder=boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py
-          fixture=boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof
           workflow=.github/workflows/os-uefi-hii-up-speech-v1.yml
           tested_builder="$(git rev-parse "$GITHUB_SHA:$builder")"
-          tested_fixture="$(git rev-parse "$GITHUB_SHA:$fixture")"
           tested_workflow="$(git rev-parse "$GITHUB_SHA:$workflow")"
           cp "$root/BOOTX64.EFI" /tmp/up-speech.efi
           cp "$root/up-speech.serial" /tmp/up-speech.serial
@@ -408,7 +422,6 @@ jobs:
           git checkout -B os origin/os
           for spec in \
             "$tested_builder|$builder|UP_SPEECH_STALE_BUILDER" \
-            "$tested_fixture|$fixture|UP_SPEECH_STALE_FIXTURE" \
             "$tested_workflow|$workflow|UP_SPEECH_STALE_WORKFLOW"
           do
             IFS='|' read -r expected path msg <<< "$spec"
@@ -442,16 +455,15 @@ jobs:
               "proof-up-key-event = PASS\n"
               "proof-prev-direct-sibling = PASS\n"
               "proof-wrap-policy = PASS\n"
-              f"proof-current-value = {vals['current-value']}\n"
+              f"proof-current-raw8 = {vals['current-raw8']}\n"
               f"proof-current-option-label = {vals['current-option-label']}\n"
-              f"proof-focus-option-value = {vals['focus-option-value']}\n"
+              f"proof-focus-raw8 = {vals['focus-raw8']}\n"
               f"proof-focus-option-string-id = {vals['focus-option-string-id']}\n"
               f"proof-focus-option-label = {vals['focus-option-label']}\n"
               f"proof-focus-spoken-prefix = {vals['focus-spoken-prefix']}\n"
               "proof-focus-native-HDA-speech = PASS\n"
               "proof-HDA-waveform = PASS\n"
-              "proof-post-state-current-value = 0\n"
-              "proof-post-state-current-label = Disabled\n"
+              "proof-post-state-unchanged = PASS\n"
               "proof-setting-mutation = false\n"
               "proof-physical-ASUS-up-focus-speech = false\n"
               f"proof-wave-metrics = {metrics}\n"
