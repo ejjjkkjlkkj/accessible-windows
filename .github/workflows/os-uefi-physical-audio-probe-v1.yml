@@ -1,0 +1,210 @@
+name: os-uefi-physical-audio-probe-v1
+
+on:
+  push:
+    branches: [os]
+    paths:
+      - 'boot/uefi-physical-audio-v1/os-uefi-physical-audio-probe-v1.labproof'
+      - '.github/workflows/os-uefi-physical-audio-probe-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  amd5800h-audio-inventory:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify real AMD runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if ($env:RUNNER_NAME -ne 'AMD-5800H-REAL') {
+            throw "wrong runner: $env:RUNNER_NAME"
+          }
+          "RUNNER=$env:RUNNER_NAME"
+          Get-CimInstance Win32_ComputerSystem |
+            Select-Object Manufacturer,Model,Name |
+            Format-List
+
+      - name: Capture physical audio inventory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='boot/uefi-physical-audio-v1/evidence'
+          New-Item -ItemType Directory -Force $root | Out-Null
+
+          Get-CimInstance Win32_SoundDevice |
+            Select-Object Name,Manufacturer,Status,PNPDeviceID,DeviceID |
+            ConvertTo-Json -Depth 5 |
+            Set-Content "$root/win32-sound-device.json" -Encoding utf8
+
+          Get-CimInstance Win32_PnPSignedDriver |
+            Where-Object {
+              $_.DeviceClass -match 'MEDIA|AudioEndpoint' -or
+              $_.DeviceName -match '(?i)audio|sound|codec|speaker|microphone'
+            } |
+            Select-Object DeviceName,DeviceClass,DeviceID,Manufacturer,
+              DriverProviderName,DriverVersion,DriverDate,InfName,IsSigned |
+            Sort-Object DeviceName |
+            ConvertTo-Json -Depth 5 |
+            Set-Content "$root/signed-audio-drivers.json" -Encoding utf8
+
+          $classes=@('MEDIA','AudioEndpoint')
+          $devices=@()
+          foreach($class in $classes) {
+            $items=Get-PnpDevice -Class $class -PresentOnly -ErrorAction SilentlyContinue
+            foreach($d in $items) {
+              $entry=[ordered]@{
+                Class=$class
+                FriendlyName=$d.FriendlyName
+                InstanceId=$d.InstanceId
+                Status=$d.Status
+                Problem=$d.Problem
+                Properties=[ordered]@{}
+              }
+              foreach($key in @(
+                'DEVPKEY_Device_HardwareIds',
+                'DEVPKEY_Device_CompatibleIds',
+                'DEVPKEY_Device_LocationInfo',
+                'DEVPKEY_Device_LocationPaths',
+                'DEVPKEY_Device_BusReportedDeviceDesc',
+                'DEVPKEY_Device_Manufacturer',
+                'DEVPKEY_Device_DriverVersion',
+                'DEVPKEY_Device_DriverDate',
+                'DEVPKEY_Device_DriverInfPath',
+                'DEVPKEY_Device_Parent'
+              )) {
+                try {
+                  $p=Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName $key -ErrorAction Stop
+                  $entry.Properties[$key]=$p.Data
+                } catch {
+                  $entry.Properties[$key]=$null
+                }
+              }
+              $devices += [pscustomobject]$entry
+            }
+          }
+          $devices |
+            ConvertTo-Json -Depth 10 |
+            Set-Content "$root/pnp-audio-devices.json" -Encoding utf8
+
+          Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.InstanceId -like 'PCI\*' -and
+              ($_.FriendlyName -match '(?i)audio|multimedia|sound' -or $_.Class -eq 'MEDIA')
+            } |
+            ForEach-Object {
+              $d=$_
+              $props=[ordered]@{}
+              foreach($key in @(
+                'DEVPKEY_Device_HardwareIds',
+                'DEVPKEY_Device_CompatibleIds',
+                'DEVPKEY_Device_LocationPaths',
+                'DEVPKEY_Device_BusReportedDeviceDesc',
+                'DEVPKEY_Device_Parent'
+              )) {
+                try {
+                  $props[$key]=(Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName $key -ErrorAction Stop).Data
+                } catch {
+                  $props[$key]=$null
+                }
+              }
+              [pscustomobject]@{
+                FriendlyName=$d.FriendlyName
+                Class=$d.Class
+                InstanceId=$d.InstanceId
+                Status=$d.Status
+                Properties=$props
+              }
+            } |
+            ConvertTo-Json -Depth 10 |
+            Set-Content "$root/pci-audio-candidates.json" -Encoding utf8
+
+          pnputil /enum-devices /class MEDIA /connected /properties /drivers |
+            Out-File "$root/pnputil-media.txt" -Encoding utf8
+          pnputil /enum-devices /class AudioEndpoint /connected /properties /drivers |
+            Out-File "$root/pnputil-audioendpoint.txt" -Encoding utf8
+
+      - name: Derive controller and codec candidates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='boot/uefi-physical-audio-v1/evidence'
+          $pnp=Get-Content "$root/pnp-audio-devices.json" -Raw | ConvertFrom-Json
+          $all=@($pnp)
+
+          $controllers=@($all | Where-Object {
+            $_.InstanceId -like 'PCI\*' -or
+            $_.FriendlyName -match '(?i)high definition audio|hd audio|audio controller'
+          })
+          $codecFacing=@($all | Where-Object {
+            $_.InstanceId -like 'HDAUDIO\*' -or
+            $_.FriendlyName -match '(?i)realtek|codec|speaker|microphone'
+          })
+
+          $summary=[ordered]@{
+            runner=$env:RUNNER_NAME
+            controller_count=$controllers.Count
+            codec_facing_count=$codecFacing.Count
+            controllers=$controllers
+            codec_facing=$codecFacing
+          }
+          $summary |
+            ConvertTo-Json -Depth 12 |
+            Set-Content "$root/derived-audio-summary.json" -Encoding utf8
+
+          "AUDIO_CONTROLLER_CANDIDATES=$($controllers.Count)"
+          "AUDIO_CODEC_FACING_CANDIDATES=$($codecFacing.Count)"
+          if($controllers.Count -lt 1) {
+            throw 'No physical audio controller candidate found'
+          }
+          if($codecFacing.Count -lt 1) {
+            throw 'No codec-facing audio candidate found'
+          }
+
+          $controllers | ForEach-Object {
+            "CONTROLLER: $($_.FriendlyName) :: $($_.InstanceId)"
+            $ids=$_.Properties.DEVPKEY_Device_HardwareIds
+            if($ids) { "  HWID: $($ids -join ' | ')" }
+            $loc=$_.Properties.DEVPKEY_Device_LocationPaths
+            if($loc) { "  LOCATION: $($loc -join ' | ')" }
+          }
+          $codecFacing | ForEach-Object {
+            "CODEC: $($_.FriendlyName) :: $($_.InstanceId)"
+            $ids=$_.Properties.DEVPKEY_Device_HardwareIds
+            if($ids) { "  HWID: $($ids -join ' | ')" }
+          }
+
+      - name: Write probe evidence record
+        shell: pwsh
+        run: |
+          $root='boot/uefi-physical-audio-v1/evidence'
+          @(
+            'OS-UEFI-PHYSICAL-AUDIO-PROBE-V1'
+            "runner = $env:RUNNER_NAME"
+            'physical-machine = true'
+            'windows-role = hardware-inventory-witness-only'
+            'sound-device-inventory = PASS'
+            'pnp-hardware-ids = PASS'
+            'pci-audio-candidates = PASS'
+            'codec-facing-candidates = PASS'
+            'physical-UEFI-audio-driver = not-established'
+            'physical-UEFI-speech = not-established'
+            'result = PASS'
+          ) | Set-Content "$root/probe-result.txt" -Encoding utf8
+
+          Get-ChildItem $root -File |
+            Get-FileHash -Algorithm SHA256 |
+            Select-Object Path,Hash |
+            ConvertTo-Json -Depth 4 |
+            Set-Content "$root/hashes.json" -Encoding utf8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: os-uefi-physical-audio-probe-amd5800h
+          path: boot/uefi-physical-audio-v1/evidence
+          if-no-files-found: error
