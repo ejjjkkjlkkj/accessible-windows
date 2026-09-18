@@ -13,6 +13,11 @@ question-opcode = 0x05 EFI_IFR_ONE_OF
 option-opcode = 0x09 EFI_IFR_ONE_OF_OPTION
 end-opcode = 0x29 EFI_IFR_END
 scope-policy = selected option must be a direct child of the live scoped ONE_OF; nested scopes are tracked and excluded
+storage-opcode = 0x24 EFI_IFR_VARSTORE
+storage-kind = Buffer Storage
+storage-read-service = EFI_HII_CONFIG_ROUTING_PROTOCOL.ExportConfig
+external-caller-routing = required by UEFI; direct EFI_HII_CONFIG_ACCESS_PROTOCOL invocation is not used
+config-response-selection = UTF-16 GUID= and NAME= fields matched against the live EFI_IFR_VARSTORE GUID and Name
 current-value-source = live read-only HII Config Routing ExportConfig plus ConfigToBlock
 option-value-source = EFI_IFR_ONE_OF_OPTION typed Value field in the same exported Forms package
 numeric-types = EFI_IFR_TYPE_NUM_SIZE_8 16 32 64
