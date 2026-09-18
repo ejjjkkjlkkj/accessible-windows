@@ -20,6 +20,9 @@ MARKS={
  'text_ready': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nEVENT=HII_TEXT_COMMIT\r\nTEXT_BUFFER=PASS\r\nBDL_RUNTIME_TEXT_SCHEDULE=PASS\r\nEND\r\n',
  'database': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nHII_DATABASE_PROTOCOL=PASS\r\nEND\r\n',
  'string_protocol': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nHII_STRING_PROTOCOL=PASS\r\nEND\r\n',
+ 'direct_export': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nHII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\nEND\r\n',
+ 'forms_package_seen': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nHII_FORMS_PACKAGE=PASS\r\nEND\r\n',
+ 'strings_package': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nHII_STRINGS_PACKAGE=PASS\r\nEND\r\n',
  'forms_handle': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nHII_FORMS_HANDLE=PASS\r\nEND\r\n',
  'ifr': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nIFR_TITLE_STRING_ID=PASS\r\nEND\r\n',
  'language': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nHII_LANGUAGE=PASS\r\nEND\r\n',
@@ -146,8 +149,8 @@ def make_pcm():
  return bytes(bank)
 def build():
  pcm=make_pcm()
- data=bytearray(0x1100)
- L={'maxaddr':0,'keybuf':8,'dac_nid':16,'pin_nid':20,'textbuf':32,'db_guid':64,'str_guid':80,'dbptr':96,'strptr':104,'handles_size':112,'handles_ptr':120,'pkg_size':128,'pkg_ptr':136,'langs_size':144,'langs_ptr':152,'string_size':160,'string_ptr':168,'token':176,'temp_handle':184,'handle_cursor':192,'handles_remaining':200,'handles_static':0x100}
+ data=bytearray(0x101100)
+ L={'maxaddr':0,'keybuf':8,'dac_nid':16,'pin_nid':20,'textbuf':32,'text_count':56,'db_guid':64,'str_guid':80,'dbptr':96,'strptr':104,'handles_size':112,'handles_ptr':120,'pkg_size':128,'pkg_ptr':136,'langs_size':144,'langs_ptr':152,'string_size':160,'string_ptr':168,'token':176,'temp_handle':184,'handle_cursor':192,'handles_remaining':200,'forms_ptr':208,'strings_ptr':216,'list_len':224,'handles_static':0x100,'pkg_static':0x1100}
  struct.pack_into('<Q',data,0,0xffffffff)
  struct.pack_into('<IHH8B',data,L['db_guid'],0xef9fc172,0xa1b2,0x4693,0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42)
  struct.pack_into('<IHH8B',data,L['str_guid'],0x0fd96974,0x23aa,0x4cdc,0xb9,0xcb,0x98,0xd1,0x77,0x50,0x32,0x2a)
@@ -187,6 +190,7 @@ def build():
   c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_hii_alloc')
 
  serial('start')
+
  # Locate HII Database protocol -> r12.
  c.lea_rcx_data(L['db_guid']); c.emit(b'\x31\xd2'); c.lea_r8_data(L['dbptr'])
  c.emit(b'\x41\xff\x97\x40\x01\x00\x00')
@@ -203,68 +207,67 @@ def build():
  c.emit(b'\x4d\x85\xed'); c.rel32(b'\x0f\x84','fail_hii_protocol')
  serial('string_protocol')
 
- # Take one atomic snapshot of every active HII handle into bridge-owned
- # storage. Avoid the observed sizing/fetch race before native HDA work.
- c.lea_rdx_data(L['handles_size'])
- c.emit(b'\x48\xc7\x02'+struct.pack('<I',0x1000))
- c.emit(b'\x4c\x89\xe1\xba\x02\x00\x00\x00\x45\x31\xc0')
- c.lea_r9_data(L['handles_size'])
- c.lea_rax_data(L['handles_static']); c.emit(b'\x48\x89\x44\x24\x20')
- c.emit(b'\x41\xff\x54\x24\x18')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x84','list_fetch_ready')
- c.emit(b'\x83\xf8\x02'); c.rel32(b'\x0f\x84','fail_hii_list_fetch_invalid')
- c.emit(b'\x83\xf8\x0e'); c.rel32(b'\x0f\x84','fail_hii_list_fetch_not_found')
- c.emit(b'\x83\xf8\x05'); c.rel32(b'\x0f\x84','fail_hii_list_static_small')
- c.rel32(b'\xe9','fail_hii_list_fetch')
- c.label('list_fetch_ready')
- c.lea_rax_data(L['handles_static'])
- c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x89\x02')
- c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x02')
- c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x89\x02')
-
- c.label('handle_loop')
- c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x8b\x2a')
- c.emit(b'\x48\x83\xfd\x08'); c.rel32(b'\x0f\x82','fail_hii_handle')
- c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x8b\x32')
- c.emit(b'\x4c\x8b\x36')                    # r14 = current HII handle
- c.emit(b'\x48\x83\xc6\x08\x48\x83\xed\x08')
- c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x89\x32')
- c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x89\x2a')
- c.emit(b'\x4d\x85\xf6'); c.rel32(b'\x0f\x84','handle_loop')
-
- # Export this handle's package list, first obtaining the required byte count.
- zero_qword(L['pkg_size'])
- c.emit(b'\x4c\x89\xe1\x4c\x89\xf2')
- c.lea_r8_data(L['pkg_size']); c.emit(b'\x45\x31\xc9')
- c.emit(b'\x41\xff\x54\x24\x20')
- c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x18'); c.rel32(b'\x0f\x82','handle_loop')
- alloc(True,L['pkg_ptr'])
-
- c.emit(b'\x4c\x89\xe1\x4c\x89\xf2')
+ # Export the whole live HII database read-only in one atomic protocol call.
+ # A bridge-owned 1 MiB buffer avoids the observed OVMF sizing/fetch race.
+ c.lea_rdx_data(L['pkg_size'])
+ c.emit(b'\x48\xc7\x02'+struct.pack('<I',0x100000))
+ c.lea_rax_data(L['pkg_static'])
+ c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x48\x89\x02')
+ c.emit(b'\x4c\x89\xe1\x31\xd2')
  c.lea_r8_data(L['pkg_size'])
- c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x4c\x8b\x0a')
+ c.lea_r9_data(L['pkg_static'])
  c.emit(b'\x41\xff\x54\x24\x20')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','handle_loop')
+ c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_hii_export')
+ c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x83\x3a\x18')
+ c.rel32(b'\x0f\x82','fail_hii_export')
+ serial('direct_export')
 
- # Verify that this exact HII handle owns a Forms package.
- c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x48\x8b\x32') # rsi=list
- c.emit(b'\x8b\x5e\x10\x83\xfb\x18'); c.rel32(b'\x0f\x82','fail_hii_ifr')
- c.emit(b'\x48\x8d\x7e\x14\x83\xeb\x14') # rdi=package, ebx=remaining
- c.label('pkg_loop')
- c.emit(b'\x83\xfb\x04'); c.rel32(b'\x0f\x82','fail_hii_ifr')
+ # Parse concatenated EFI_HII_PACKAGE_LIST_HEADER records.  Select one package
+ # list containing both Forms and Strings so the IFR StringId and text share
+ # the same package-list namespace.
+ c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x48\x8b\x32')
+ c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x8b\x1a')
+ c.label('direct_list_loop')
+ c.emit(b'\x48\x83\xfb\x14'); c.rel32(b'\x0f\x82','fail_hii_handle')
+ c.emit(b'\x8b\x46\x10\x83\xf8\x18'); c.rel32(b'\x0f\x82','fail_hii_ifr')
+ c.emit(b'\x48\x39\xd8'); c.rel32(b'\x0f\x87','fail_hii_ifr')
+ c.lea_rdx_data(L['list_len']); c.emit(b'\x89\x02')
+ zero_qword(L['forms_ptr']); zero_qword(L['strings_ptr'])
+ c.emit(b'\x48\x8d\x7e\x14\x89\xc1\x83\xe9\x14')
+ c.label('direct_pkg_loop')
+ c.emit(b'\x83\xf9\x04'); c.rel32(b'\x0f\x82','fail_hii_ifr')
  c.emit(b'\x8b\x07\x89\xc2\x81\xe2\xff\xff\xff\x00')
  c.emit(b'\x89\xc5\xc1\xed\x18')
  c.emit(b'\x83\xfa\x04'); c.rel32(b'\x0f\x82','fail_hii_ifr')
- c.emit(b'\x39\xda'); c.rel32(b'\x0f\x87','fail_hii_ifr')
- c.emit(b'\x83\xfd\x02'); c.rel32(b'\x0f\x84','forms_pkg')
- c.emit(b'\x81\xfd\xdf\x00\x00\x00'); c.rel32(b'\x0f\x84','handle_loop')
- c.emit(b'\x48\x01\xd7\x29\xd3'); c.rel32(b'\xe9','pkg_loop')
+ c.emit(b'\x39\xca'); c.rel32(b'\x0f\x87','fail_hii_ifr')
+ c.emit(b'\x81\xfd\xdf\x00\x00\x00'); c.rel32(b'\x0f\x84','direct_list_done')
+ c.emit(b'\x83\xfd\x02'); c.rel32(b'\x0f\x85','direct_not_forms')
+ c.lea_rax_data(L['forms_ptr']); c.emit(b'\x48\x83\x38\x00'); c.rel32(b'\x0f\x85','direct_not_forms')
+ c.emit(b'\x48\x89\x38')
+ c.label('direct_not_forms')
+ c.emit(b'\x83\xfd\x04'); c.rel32(b'\x0f\x85','direct_not_strings')
+ c.lea_rax_data(L['strings_ptr']); c.emit(b'\x48\x83\x38\x00'); c.rel32(b'\x0f\x85','direct_not_strings')
+ c.emit(b'\x48\x89\x38')
+ c.label('direct_not_strings')
+ c.emit(b'\x48\x01\xd7\x29\xd1'); c.rel32(b'\xe9','direct_pkg_loop')
+
+ c.label('direct_list_done')
+ c.lea_rdx_data(L['forms_ptr']); c.emit(b'\x48\x83\x3a\x00'); c.rel32(b'\x0f\x84','direct_list_next')
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x83\x3a\x00'); c.rel32(b'\x0f\x84','direct_list_next')
+ serial('forms_package_seen'); serial('strings_package')
+ c.lea_rdx_data(L['forms_ptr']); c.emit(b'\x48\x8b\x3a')
+ c.emit(b'\x8b\x07\x89\xc2\x81\xe2\xff\xff\xff\x00')
+ c.rel32(b'\xe9','forms_pkg')
+
+ c.label('direct_list_next')
+ c.lea_rdx_data(L['list_len']); c.emit(b'\x8b\x02')
+ c.emit(b'\x48\x01\xc6\x48\x29\xc3')
+ c.emit(b'\x48\x85\xdb'); c.rel32(b'\x0f\x85','direct_list_loop')
+ c.rel32(b'\xe9','fail_hii_handle')
 
  c.label('forms_pkg')
  # r9=first IFR opcode, r10d=bytes available in verified Forms package.
  c.emit(b'\x4c\x8d\x4f\x04\x41\x89\xd2\x41\x83\xea\x04')
- serial('forms_handle')
  c.label('ifr_loop')
  c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x82','fail_hii_ifr')
  c.emit(b'\x41\x0f\xb6\x01')       # eax=OpCode
@@ -288,60 +291,130 @@ def build():
  c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  serial('ifr')
 
- # GetLanguages selected handle: size query.
- zero_qword(L['langs_size'])
- c.emit(b'\x4c\x89\xe9\x4c\x89\xf2\x45\x31\xc0')
- c.lea_r9_data(L['langs_size'])
- c.emit(b'\x41\xff\x55\x18')
- c.lea_rdx_data(L['langs_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x02'); c.rel32(b'\x0f\x82','fail_hii_language')
- alloc(True,L['langs_ptr'])
-
- # GetLanguages into buffer.
- c.emit(b'\x4c\x89\xe9\x4c\x89\xf2')
- c.lea_rdx_data(L['langs_ptr']); c.emit(b'\x4c\x8b\x02') # r8=buffer
- c.lea_r9_data(L['langs_size'])
- c.emit(b'\x41\xff\x55\x18')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_hii_language')
-
- # Keep first RFC language tag: replace first ';' by NUL.
- c.lea_rdx_data(L['langs_ptr']); c.emit(b'\x48\x8b\x32')
- c.emit(b'\x80\x3e\x00'); c.rel32(b'\x0f\x84','fail_hii_language')
- c.label('lang_scan')
- c.emit(b'\x8a\x06\x84\xc0'); c.rel32(b'\x0f\x84','lang_ready')
- c.emit(b'\x3c\x3b'); c.rel32(b'\x0f\x84','lang_cut')
- c.emit(b'\x48\xff\xc6'); c.rel32(b'\xe9','lang_scan')
- c.label('lang_cut'); c.emit(b'\xc6\x06\x00')
- c.label('lang_ready')
+ # Resolve the IFR StringId directly inside the selected Strings package.
+ # EFI_HII_SIBT_STRING_SCSU=0x10 / STRINGS_SCSU=0x12 and
+ # EFI_HII_SIBT_STRING_UCS2=0x14 / STRINGS_UCS2=0x16 are decoded;
+ # FONT variants, DUPLICATE, SKIP1/SKIP2 and EXT1/EXT2/EXT4 are traversed.
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x8b\x32')
+ c.emit(b'\x48\x85\xf6'); c.rel32(b'\x0f\x84','fail_hii_string')
+ c.emit(b'\x8b\x06\x25\xff\xff\xff\x00\x89\xc3')
+ c.emit(b'\x83\xfb\x2f'); c.rel32(b'\x0f\x82','fail_hii_string')
+ c.emit(b'\x8b\x4e\x04\x83\xf9\x2f'); c.rel32(b'\x0f\x82','fail_hii_language')
+ c.emit(b'\x39\xd9'); c.rel32(b'\x0f\x87','fail_hii_language')
+ c.emit(b'\x80\x7e\x2e\x00'); c.rel32(b'\x0f\x84','fail_hii_language')
  serial('language')
+ c.emit(b'\x8b\x46\x08\x39\xc8'); c.rel32(b'\x0f\x82','fail_hii_string')
+ c.emit(b'\x39\xd8'); c.rel32(b'\x0f\x83','fail_hii_string')
+ c.emit(b'\x48\x8d\x3c\x1e\x48\x01\xc6')
+ c.emit(b'\x41\xbc\x01\x00\x00\x00')
+ c.lea_rdx_data(L['token']); c.emit(b'\x44\x0f\xb7\x2a')
 
- # GetString token: query UTF-16 byte size.
- zero_qword(L['string_size'])
- c.emit(b'\x4c\x89\xe9')
- c.lea_rdx_data(L['langs_ptr']); c.emit(b'\x48\x8b\x12')
- c.emit(b'\x4d\x89\xf0')
- c.lea_r9_data(L['token']); c.emit(b'\x45\x0f\xb7\x09')
- c.emit(b'\x48\xc7\x44\x24\x20\x00\x00\x00\x00')
- c.lea_rax_data(L['string_size']); c.emit(b'\x48\x89\x44\x24\x28')
- c.emit(b'\x48\xc7\x44\x24\x30\x00\x00\x00\x00')
- c.emit(b'\x41\xff\x55\x08')
- c.lea_rdx_data(L['string_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x04'); c.rel32(b'\x0f\x82','fail_hii_string')
- alloc(True,L['string_ptr'])
+ c.label('string_block_loop')
+ c.emit(b'\x48\x39\xfe'); c.rel32(b'\x0f\x83','fail_hii_string')
+ c.emit(b'\x0f\xb6\x06\x84\xc0'); c.rel32(b'\x0f\x84','fail_hii_string')
+ for typ,label in ((0x10,'str_scsu1'),(0x11,'str_scsu1_font'),(0x12,'str_scsun'),(0x13,'str_scsun_font'),
+                   (0x14,'str_ucs1'),(0x15,'str_ucs1_font'),(0x16,'str_ucsn'),(0x17,'str_ucsn_font'),
+                   (0x20,'str_duplicate'),(0x21,'str_skip2'),(0x22,'str_skip1'),
+                   (0x30,'str_ext1'),(0x31,'str_ext2'),(0x32,'str_ext4')):
+  c.emit(b'\x3c'+bytes((typ,))); c.rel32(b'\x0f\x84',label)
+ c.rel32(b'\xe9','fail_hii_string')
 
- # GetString into UTF-16 buffer.
- c.emit(b'\x4c\x89\xe9')
- c.lea_rdx_data(L['langs_ptr']); c.emit(b'\x48\x8b\x12')
- c.emit(b'\x4d\x89\xf0')
- c.lea_r9_data(L['token']); c.emit(b'\x45\x0f\xb7\x09')
- c.lea_rax_data(L['string_ptr']); c.emit(b'\x48\x8b\x00\x48\x89\x44\x24\x20')
- c.lea_rax_data(L['string_size']); c.emit(b'\x48\x89\x44\x24\x28')
- c.emit(b'\x48\xc7\x44\x24\x30\x00\x00\x00\x00')
- c.emit(b'\x41\xff\x55\x08')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_hii_string')
- c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x8b\x32')
+ c.label('str_scsu1')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','str_scsu1_found')
+ c.emit(b'\x41\xff\xc4\x48\x8d\x56\x01'); c.rel32(b'\xe9','scan_scsu_single')
+ c.label('str_scsu1_found'); c.emit(b'\x48\x83\xc6\x01'); c.rel32(b'\xe9','direct_scsu_found')
+ c.label('str_scsu1_font')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','str_scsu1_font_found')
+ c.emit(b'\x41\xff\xc4\x48\x8d\x56\x02'); c.rel32(b'\xe9','scan_scsu_single')
+ c.label('str_scsu1_font_found'); c.emit(b'\x48\x83\xc6\x02'); c.rel32(b'\xe9','direct_scsu_found')
+ c.label('scan_scsu_single')
+ c.emit(b'\x48\x39\xfa'); c.rel32(b'\x0f\x83','fail_hii_string')
+ c.emit(b'\x80\x3a\x00'); c.rel32(b'\x0f\x84','scan_scsu_single_done')
+ c.emit(b'\x48\xff\xc2'); c.rel32(b'\xe9','scan_scsu_single')
+ c.label('scan_scsu_single_done'); c.emit(b'\x48\x8d\x72\x01'); c.rel32(b'\xe9','string_block_loop')
+
+ c.label('str_scsun'); c.emit(b'\x44\x0f\xb7\x76\x01\x48\x8d\x56\x03'); c.rel32(b'\xe9','multi_scsu_loop')
+ c.label('str_scsun_font'); c.emit(b'\x44\x0f\xb7\x76\x02\x48\x8d\x56\x04')
+ c.label('multi_scsu_loop')
+ c.emit(b'\x45\x85\xf6'); c.rel32(b'\x0f\x84','multi_scsu_done')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','multi_scsu_found')
+ c.label('multi_scsu_scan')
+ c.emit(b'\x48\x39\xfa'); c.rel32(b'\x0f\x83','fail_hii_string')
+ c.emit(b'\x80\x3a\x00'); c.rel32(b'\x0f\x84','multi_scsu_next')
+ c.emit(b'\x48\xff\xc2'); c.rel32(b'\xe9','multi_scsu_scan')
+ c.label('multi_scsu_next'); c.emit(b'\x48\xff\xc2\x41\xff\xc4\x41\xff\xce'); c.rel32(b'\xe9','multi_scsu_loop')
+ c.label('multi_scsu_found'); c.emit(b'\x48\x89\xd6'); c.rel32(b'\xe9','direct_scsu_found')
+ c.label('multi_scsu_done'); c.emit(b'\x48\x89\xd6'); c.rel32(b'\xe9','string_block_loop')
+
+ c.label('str_ucs1')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','str_ucs1_found')
+ c.emit(b'\x41\xff\xc4\x48\x8d\x56\x01'); c.rel32(b'\xe9','scan_ucs_single')
+ c.label('str_ucs1_found'); c.emit(b'\x48\x83\xc6\x01'); c.rel32(b'\xe9','direct_ucs_found')
+ c.label('str_ucs1_font')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','str_ucs1_font_found')
+ c.emit(b'\x41\xff\xc4\x48\x8d\x56\x02'); c.rel32(b'\xe9','scan_ucs_single')
+ c.label('str_ucs1_font_found'); c.emit(b'\x48\x83\xc6\x02'); c.rel32(b'\xe9','direct_ucs_found')
+ c.label('scan_ucs_single')
+ c.emit(b'\x48\x39\xfa'); c.rel32(b'\x0f\x83','fail_hii_string')
+ c.emit(b'\x66\x83\x3a\x00'); c.rel32(b'\x0f\x84','scan_ucs_single_done')
+ c.emit(b'\x48\x83\xc2\x02'); c.rel32(b'\xe9','scan_ucs_single')
+ c.label('scan_ucs_single_done'); c.emit(b'\x48\x8d\x72\x02'); c.rel32(b'\xe9','string_block_loop')
+
+ c.label('str_ucsn'); c.emit(b'\x44\x0f\xb7\x76\x01\x48\x8d\x56\x03'); c.rel32(b'\xe9','multi_ucs_loop')
+ c.label('str_ucsn_font'); c.emit(b'\x44\x0f\xb7\x76\x02\x48\x8d\x56\x04')
+ c.label('multi_ucs_loop')
+ c.emit(b'\x45\x85\xf6'); c.rel32(b'\x0f\x84','multi_ucs_done')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','multi_ucs_found')
+ c.label('multi_ucs_scan')
+ c.emit(b'\x48\x39\xfa'); c.rel32(b'\x0f\x83','fail_hii_string')
+ c.emit(b'\x66\x83\x3a\x00'); c.rel32(b'\x0f\x84','multi_ucs_next')
+ c.emit(b'\x48\x83\xc2\x02'); c.rel32(b'\xe9','multi_ucs_scan')
+ c.label('multi_ucs_next'); c.emit(b'\x48\x83\xc2\x02\x41\xff\xc4\x41\xff\xce'); c.rel32(b'\xe9','multi_ucs_loop')
+ c.label('multi_ucs_found'); c.emit(b'\x48\x89\xd6'); c.rel32(b'\xe9','direct_ucs_found')
+ c.label('multi_ucs_done'); c.emit(b'\x48\x89\xd6'); c.rel32(b'\xe9','string_block_loop')
+
+ c.label('str_duplicate')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x85','str_duplicate_skip')
+ c.emit(b'\x44\x0f\xb7\x6e\x01\x45\x85\xed'); c.rel32(b'\x0f\x84','fail_hii_string')
+ c.emit(b'\x41\xbc\x01\x00\x00\x00')
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x8b\x32\x8b\x46\x08\x48\x01\xc6'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_duplicate_skip'); c.emit(b'\x41\xff\xc4\x48\x83\xc6\x03'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_skip1'); c.emit(b'\x0f\xb6\x46\x01\x41\x01\xc4\x48\x83\xc6\x02'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_skip2'); c.emit(b'\x0f\xb7\x46\x01\x41\x01\xc4\x48\x83\xc6\x03'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_ext1'); c.emit(b'\x0f\xb6\x46\x02\x83\xf8\x03'); c.rel32(b'\x0f\x82','fail_hii_string'); c.emit(b'\x48\x01\xc6'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_ext2'); c.emit(b'\x0f\xb7\x46\x02\x83\xf8\x04'); c.rel32(b'\x0f\x82','fail_hii_string'); c.emit(b'\x48\x01\xc6'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_ext4'); c.emit(b'\x8b\x46\x02\x83\xf8\x06'); c.rel32(b'\x0f\x82','fail_hii_string'); c.emit(b'\x48\x01\xc6'); c.rel32(b'\xe9','string_block_loop')
+
+ c.label('direct_scsu_found')
+ c.emit(b'\x80\x3e\x00'); c.rel32(b'\x0f\x84','fail_hii_string')
+ c.emit(b'\x31\xff')
+ c.label('capture_scsu_loop')
+ c.emit(b'\x8a\x06\x84\xc0'); c.rel32(b'\x0f\x84','capture_done')
+ c.emit(b'\x48\xff\xc6\x0c\x20')
+ c.emit(b'\x3c\x61'); c.rel32(b'\x0f\x82','capture_scsu_loop')
+ c.emit(b'\x3c\x7a'); c.rel32(b'\x0f\x87','capture_scsu_loop')
+ c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','capture_done')
+ c.emit(b'\x41\x89\xc3'); serial('char')
+ c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\x44\x89\x18\xff\xc7')
+ c.rel32(b'\xe9','capture_scsu_loop')
+
+ c.label('direct_ucs_found')
  c.emit(b'\x66\x83\x3e\x00'); c.rel32(b'\x0f\x84','fail_hii_string')
+ c.emit(b'\x31\xff')
+ c.label('capture_ucs_loop')
+ c.emit(b'\x0f\xb7\x06\x85\xc0'); c.rel32(b'\x0f\x84','capture_done')
+ c.emit(b'\x48\x83\xc6\x02\x83\xc8\x20')
+ c.emit(b'\x83\xf8\x61'); c.rel32(b'\x0f\x82','capture_ucs_loop')
+ c.emit(b'\x83\xf8\x7a'); c.rel32(b'\x0f\x87','capture_ucs_loop')
+ c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','capture_done')
+ c.emit(b'\x41\x89\xc3'); serial('char')
+ c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\x44\x89\x18\xff\xc7')
+ c.rel32(b'\xe9','capture_ucs_loop')
 
+ c.label('capture_done')
+ c.emit(b'\x85\xff'); c.rel32(b'\x0f\x84','fail_hii_string')
+ c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\xc7\x00\x00\x00')
+ c.lea_rdx_data(L['text_count']); c.emit(b'\x89\x3a')
  serial('hii')
 
  # Scan full PCI config mechanism-1 segment for class 04/subclass 03.
@@ -489,33 +562,9 @@ def build():
  c.lea_rsi_data(L['pcm'])
  c.emit(b'\x49\x8d\xbd'+struct.pack('<i',PCM_OFF))
  c.emit(b'\xb9'+struct.pack('<I',len(pcm))+b'\xf3\xa4')
- # Native HII title input: take the first eight Latin letters from the
- # resolved UTF-16 firmware title and feed the validated TEXT26 expansion.
- c.emit(bytes.fromhex('31ff'))  # edi=accepted Latin character count
- c.lea_rdx_data(L['string_ptr']); c.emit(bytes.fromhex('488b32'))
- c.label('hii_text_scan')
- c.emit(bytes.fromhex('0fb706'))
- c.emit(bytes.fromhex('6685c0')); c.rel32(bytes.fromhex('0f84'),'text_commit')
- c.emit(bytes.fromhex('4883c602'))
- c.emit(bytes.fromhex('6683c820'))
- for ch in LETTER_UNITS:
-  c.emit(bytes.fromhex('663d')+struct.pack('<H',ord(ch)))
-  c.rel32(bytes.fromhex('0f84'),'hii_append_'+ch)
- c.rel32(bytes.fromhex('e9'),'hii_text_scan')
-
- def emit_hii_append(ch):
-  c.label('hii_append_'+ch)
-  c.emit(bytes.fromhex('83ff08')); c.rel32(bytes.fromhex('0f83'),'text_commit')
-  serial('char')
-  c.lea_rdx_data(L['textbuf'])
-  c.emit(bytes.fromhex('89f8488d0442'))
-  c.emit(bytes.fromhex('66c700')+struct.pack('<H',ord(ch)))
-  c.emit(bytes.fromhex('ffc7'))
-  c.rel32(bytes.fromhex('e9'),'hii_text_scan')
-
- for ch in LETTER_UNITS:
-  emit_hii_append(ch)
-
+ # Native HII title input was decoded into textbuf before HDA setup.
+ c.lea_rdx_data(L['text_count']); c.emit(bytes.fromhex('8b3a'))
+ c.emit(bytes.fromhex('85ff')); c.rel32(bytes.fromhex('0f84'),'fail_key')
  c.label('text_commit')
  c.emit(bytes.fromhex('85ff')); c.rel32(bytes.fromhex('0f84'),'fail_key')
  c.lea_rdx_data(L['textbuf'])
