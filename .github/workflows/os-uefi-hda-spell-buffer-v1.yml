@@ -425,9 +425,10 @@ jobs:
           cp "$root/code.serial" /tmp/spell-buffer-code.serial
           cp "$root/spell-buffer-metrics.txt" /tmp/spell-buffer-metrics.txt
 
-          git fetch origin os
-          git checkout -B os origin/os
-          [[ "$tested_builder" == "$(git rev-parse "os:$builder")" ]] || { echo SPELL_BUFFER_STALE_BUILDER=SKIP; exit 0; }
+          for attempt in 1 2 3 4 5; do
+            git fetch origin os
+            git checkout -B os origin/os
+            [[ "$tested_builder" == "$(git rev-parse "os:$builder")" ]] || { echo SPELL_BUFFER_STALE_BUILDER=SKIP; exit 0; }
           [[ "$tested_workflow" == "$(git rev-parse "os:$workflow")" ]] || { echo SPELL_BUFFER_STALE_WORKFLOW=SKIP; exit 0; }
           [[ "$tested_text" == "$(git rev-parse "os:$text_builder")" ]] || { echo SPELL_BUFFER_STALE_TEXT=SKIP; exit 0; }
           [[ "$tested_alphabet" == "$(git rev-parse "os:$alphabet_builder")" ]] || { echo SPELL_BUFFER_STALE_ALPHABET=SKIP; exit 0; }
@@ -480,9 +481,19 @@ jobs:
           p.write_text(text)
           PY
 
-          if git diff --quiet -- "$proof"; then exit 0; fi
-          git config user.name github-actions
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add "$proof"
-          git commit -m "Record buffered A-Z native HDA spelling proof [skip ci]"
-          git push origin os
+            if git diff --quiet -- "$proof"; then
+              echo SPELL_BUFFER_PROOF_ALREADY_CURRENT=PASS
+              exit 0
+            fi
+            git config user.name github-actions
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add "$proof"
+            git commit -m "Record buffered A-Z native HDA spelling proof [skip ci]"
+            if git push origin os; then
+              echo "SPELL_BUFFER_PROOF_PUSH=PASS attempt=$attempt"
+              exit 0
+            fi
+            echo "SPELL_BUFFER_PROOF_PUSH_RACE=RETRY attempt=$attempt"
+          done
+          echo SPELL_BUFFER_PROOF_PUSH=FAIL >&2
+          exit 1
