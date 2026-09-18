@@ -3,12 +3,14 @@ members = [
     "crates/aw-abi",
     "crates/aw-core",
     "crates/aw-kernel",
+    "crates/aw-storage",
     "boot/aw-uefi",
 ]
 default-members = [
     "crates/aw-abi",
     "crates/aw-core",
     "crates/aw-kernel",
+    "crates/aw-storage",
 ]
 resolver = "3"
 

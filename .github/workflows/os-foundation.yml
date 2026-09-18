@@ -22,12 +22,21 @@ jobs:
             echo "External accessibility/UI framework dependency detected."
             exit 1
           fi
+      - name: Keep native storage from-zero
+        shell: bash
+        run: |
+          if grep -nEi 'ntfs|refs|ext4|xfs|btrfs|zfs|apfs|f2fs' crates/aw-storage/Cargo.toml; then
+            echo "Foreign filesystem dependency detected in native storage."
+            exit 1
+          fi
       - name: Require architectural constitution
         shell: bash
         run: |
           test -s docs/CONSTITUTION.md
+          test -s docs/STORAGE.md
           grep -q "Accessibility is intrinsic" docs/CONSTITUTION.md
           grep -q "GitHub Actions is authoritative" docs/CONSTITUTION.md
+          grep -q "NOT IMPLEMENTED" docs/STORAGE.md
 
   host-validation:
     strategy:
@@ -60,5 +69,7 @@ jobs:
           rustup target add --toolchain 1.98.1 x86_64-unknown-none x86_64-unknown-uefi
       - name: Bare-metal kernel check
         run: cargo +1.98.1 check -p aw-kernel --target x86_64-unknown-none
+      - name: Native storage bare-metal check
+        run: cargo +1.98.1 check -p aw-storage --target x86_64-unknown-none
       - name: UEFI check
         run: cargo +1.98.1 check -p aw-uefi --target x86_64-unknown-uefi
