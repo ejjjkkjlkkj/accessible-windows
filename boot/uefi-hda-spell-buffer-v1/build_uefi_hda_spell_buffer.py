@@ -49,7 +49,7 @@ MARKS={
  'dma': b'QEVARYNOX-UEFI-HDA-SPELL-BUFFER-V1\r\nUNIT_BANK_COPY=PASS\r\nBDL_RUNTIME_SPELL_SCHEDULE=PASS\r\nEND\r\n',
  'codec': b'QEVARYNOX-UEFI-HDA-SPELL-BUFFER-V1\r\nCODEC_DAC_STREAM=PASS\r\nCODEC_PIN_OUTPUT=PASS\r\nEND\r\n',
  'stream': b'QEVARYNOX-UEFI-HDA-SPELL-BUFFER-V1\r\nOUTPUT_STREAM_DESCRIPTOR=PASS\r\nFORMAT_48K_S16_STEREO=PASS\r\nBDL_ENTRIES=RUNTIME\r\nEND\r\n',
- 'progress': b'QEVARYNOX-UEFI-HDA-SPELL-BUFFER-V1\r\nLPIB_PROGRESS=PASS\r\nRUNTIME_SPELL_HDA=PASS\r\nEND\r\n',
+ 'progress': b'QEVARYNOX-UEFI-HDA-SPELL-BUFFER-V1\r\nLPIB_PROGRESS=PASS\r\nFINAL_BDL_IOC=PASS\r\nRUNTIME_SPELL_HDA=PASS\r\nEND\r\n',
  'done': b'QEVARYNOX-UEFI-HDA-SPELL-BUFFER-V1\r\nSTATUS=PASS\r\nEND\r\n',
  'no_hda': b'QEVARYNOX-UEFI-HDA-SPELL-BUFFER-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_PCI_NOT_FOUND\r\nEND\r\n',
  'bad_hda': b'QEVARYNOX-UEFI-HDA-SPELL-BUFFER-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_CONTROLLER_OR_CODEC_FAILED\r\nEND\r\n',
@@ -415,12 +415,15 @@ def build():
  verb_data(L['pin_nid'],0x00070740)
  serial('codec')
 
- # Program stream number 1 in SDCTL byte 2, then RUN in SDCTL byte 0.
- c.emit(b'\xc6\x43\x02\x10\xc6\x03\x02')
- # Give HDA backend time to consume DMA, then prove LPIB moved.
- c.emit(b'\xb9\x80\x1a\x06\x00\x49\x8b\x87\xf8\x00\x00\x00\xff\xd0')
+ # Clear stale SDSTS, program stream number 1, enable IOC status and RUN.
+ c.emit(b'\xc6\x43\x03\x1c\xc6\x43\x02\x10\xc6\x03\x06')
+ # Allow even the longest 8-grapheme spelling proof window to reach final IOC.
+ c.emit(b'\xb9\x00\x12\x7a\x00\x49\x8b\x87\xf8\x00\x00\x00\xff\xd0')
+ # LPIB must move and BCIS must prove the final IOC descriptor completed.
  c.emit(b'\x8b\x43\x04\x85\xc0'); c.rel32(b'\x0f\x84','fail_stream')
+ c.emit(b'\xf6\x43\x03\x04'); c.rel32(b'\x0f\x84','fail_stream')
  serial('progress')
+ c.emit(b'\xc6\x43\x03\x04')
  # Stop stream.
  c.emit(b'\x8a\x03\x24\xfd\x88\x03')
  serial('done')
