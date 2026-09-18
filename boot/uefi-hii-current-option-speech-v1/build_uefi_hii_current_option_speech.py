@@ -1028,11 +1028,22 @@ def build():
  c.lea_rdx_data(L['varstore_info']); c.emit(b'\x0f\xb7\x12\x01\xc2')
  c.lea_rax_data(L['varstore_size']); c.emit(b'\x0f\xb7\x00\x39\xc2'); c.rel32(b'\x0f\x87','buffer_current_not_found')
 
- # ExportConfig(This,&Results), routing method +0x08, returns the current
- # configuration for the entirety of the HII database.
+ # Initial discovery needs ExportConfig for the full HII database. After an
+ # explicit RouteConfig commit, re-read only the exact committed request with
+ # ExtractConfig so the selected driver's ConfigAccess path is queried directly.
  c.lea_rdx_data(L['results']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00')
+ if WAIT_DOWN_COMMIT:
+  c.lea_rax_data(L['commit_done']); c.emit(b'\x80\x38\x01'); c.rel32(b'\x0f\x85','buffer_export_current')
+  zero_qword(L['commit_progress'])
+  c.lea_rax_data(L['routing_ptr']); c.emit(b'\x48\x8b\x08')
+  c.lea_rdx_data(L['commit_request_buf']); c.lea_r8_data(L['commit_progress']); c.lea_r9_data(L['results'])
+  c.emit(b'\x48\x8b\x01\xff\xd0')
+  c.rel32(b'\xe9','buffer_current_call_done')
+  c.label('buffer_export_current')
  c.lea_rax_data(L['routing_ptr']); c.emit(b'\x48\x8b\x08')
  c.lea_rdx_data(L['results']); c.emit(b'\xff\x51\x08')
+ if WAIT_DOWN_COMMIT:
+  c.label('buffer_current_call_done')
  c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','buffer_current_not_found')
  c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x30\x48\x85\xf6'); c.rel32(b'\x0f\x84','buffer_current_not_found')
  serial('cfg_access'); serial('extract')
@@ -1297,7 +1308,9 @@ def build():
  c.emit(b'\x41\xff\x57\x48'); zero_qword(L['commit_config'])
  c.label('commit_free_results'); c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','commit_reread')
  c.emit(b'\x41\xff\x57\x48'); zero_qword(L['results'])
- c.label('commit_reread'); c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','commit_verify_bad')
+ c.label('commit_reread')
+ c.lea_rax_data(L['commit_done']); c.emit(b'\xc6\x00\x01')
+ c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','commit_verify_bad')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','commit_verify_bad')
  # Emit the live re-read before the equality gate so a failed commit remains diagnosable.
  c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
