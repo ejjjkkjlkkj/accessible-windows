@@ -5,6 +5,7 @@ from pathlib import Path
 
 TEXT_RVA=0x1000
 DATA_RVA=0x8000
+WAIT_REPEAT_KEY=False
 
 ROOT=Path(__file__).resolve().parents[2]
 SPEECH_BUILDER=ROOT/'boot'/'uefi-hii-option-speech-v1'/'build_uefi_hii_option_speech.py'
@@ -96,6 +97,8 @@ MARKS={
  'stream': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nOUTPUT_STREAM_DESCRIPTOR=PASS\r\nFORMAT_48K_S16_STEREO=PASS\r\nBDL_ENTRIES=RUNTIME\r\nEND\r\n',
  'text_ready': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nEVENT=CURRENT_OPTION_TEXT_COMMIT\r\nTEXT_BUFFER=PASS\r\nBDL_RUNTIME_TEXT_SCHEDULE=PASS\r\nEND\r\n',
  'progress': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nLPIB_PROGRESS=PASS\r\nCURRENT_OPTION_SPEECH_HDA=PASS\r\nEND\r\n',
+ 'repeat_wait': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nACCESSIBILITY_REPEAT_KEY=WAIT_R\r\nEND\r\n',
+ 'repeat_accept': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nACCESSIBILITY_REPEAT_KEY=R\r\nACCESSIBILITY_REPEAT_KEY=PASS\r\nEND\r\n',
  'done': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=PASS\r\nEND\r\n',
  'no_hda': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_PCI_NOT_FOUND\r\nEND\r\n',
  'bad_hda': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_CONTROLLER_OR_CODEC_FAILED\r\nEND\r\n',
@@ -158,7 +161,7 @@ def build():
   'question_ptr':376,'selected_option_token':384,'selected_option_type':386,'selected_option_raw':392,
   'string_mode':400,
   'maxaddr':408,'dac_nid':416,'pin_nid':420,'speech_text_source':424,
-  'textbuf':432,'text_count':452,
+  'textbuf':432,'text_count':452,'keybuf':456,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -177,6 +180,8 @@ def build():
 
  c=Code()
  c.emit(b'\x53\x55\x56\x57\x41\x54\x41\x55\x41\x56\x41\x57')
+ if WAIT_REPEAT_KEY:
+  c.emit(b'\x48\x8b\x6a\x30')  # rbp=ConIn for accessibility repeat command
  c.emit(b'\x4c\x8b\x7a\x60')  # r15=BootServices
  c.emit(b'\x48\x83\xec\x68\xfc')
 
@@ -519,6 +524,18 @@ def build():
  c.lea_rdx_data(L['text_count']); c.emit(b'\x89\x3a')
  serial('speech_hii')
  serial('spoken_prefix'); c.rel32(b'\xe8','serial_textbuf'); serial('spoken_prefix_done')
+ if WAIT_REPEAT_KEY:
+  # ReadKeyStroke is read-only. Ignore EFI_NOT_READY and unrelated keys; only
+  # Latin R/r authorizes the already-resolved current label to reach HDA.
+  serial('repeat_wait')
+  c.label('repeat_read_key')
+  c.emit(b'\x48\x89\xe9')
+  c.lea_rdx_data(L['keybuf'])
+  c.emit(b'\x48\x8b\x45\x08\xff\xd0\x48\x85\xc0')
+  c.rel32(b'\x0f\x85','repeat_read_key')
+  c.lea_rdx_data(L['keybuf']); c.emit(b'\x0f\xb7\x42\x02\x66\x83\xc8\x20\x66\x3d\x72\x00')
+  c.rel32(b'\x0f\x85','repeat_read_key')
+  serial('repeat_accept')
 
  # Scan full PCI config mechanism-1 segment for class 04/subclass 03.
  c.emit(b'\x45\x31\xe4')
@@ -1283,13 +1300,18 @@ def validate(image,pcm):
   assert token in image,token
 
 def main():
- if len(sys.argv)!=2: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI')
+ global WAIT_REPEAT_KEY
+ if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat]')
+ if len(sys.argv)==3:
+  if sys.argv[2] != '--wait-repeat': raise SystemExit('unknown mode: '+sys.argv[2])
+  WAIT_REPEAT_KEY=True
  image,pcm=build(); validate(image,pcm)
  p=Path(sys.argv[1]); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(image)
  print('OS_UEFI_HII_CURRENT_OPTION_SPEECH_BUILD=PASS')
  print('bytes='+str(len(image)))
  print('current-option-graphemes=a-z')
  print('current-option-max-spoken-graphemes=8')
+ print('accessibility-repeat-key=' + ('enabled' if WAIT_REPEAT_KEY else 'disabled'))
  print('pcm-bytes='+str(len(pcm)))
  print('pcm-sha256='+hashlib.sha256(pcm).hexdigest())
  print('sha256='+hashlib.sha256(image).hexdigest())
