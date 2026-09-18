@@ -1,0 +1,413 @@
+name: os-uefi-hii-current-option-speech-bridge-v1
+
+on:
+  push:
+    branches: [os]
+    paths:
+      - 'boot/uefi-hii-current-option-v1/os-uefi-hii-current-option-v1.labproof'
+      - 'boot/uefi-hii-option-speech-v1/build_uefi_hii_option_speech.py'
+      - 'boot/uefi-hii-current-option-speech-bridge-v1/os-uefi-hii-current-option-speech-bridge-v1.labproof'
+      - 'boot/uefi-hda-text26-v1/os-uefi-hda-text26-v1.labproof'
+      - '.github/workflows/os-uefi-hii-current-option-speech-bridge-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  q35-current-option-speech-bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve dependency readiness
+        id: dependencies
+        shell: python
+        run: |
+          from pathlib import Path
+          import os
+
+          out=Path(os.environ['GITHUB_OUTPUT'])
+          current=Path('boot/uefi-hii-current-option-v1/os-uefi-hii-current-option-v1.labproof').read_text().splitlines()
+          if 'proof = PASS' not in current:
+              with out.open('a') as f:
+                  f.write('ready=false\n')
+              print('CURRENT_OPTION_DEPENDENCY=PENDING')
+              raise SystemExit(0)
+
+          required=[
+              'proof-integrated-current-option-resolution = PASS',
+              'proof-direct-child-scope = PASS',
+              'proof-runtime-varstore-identity = PASS',
+              'proof-live-current-value-match = PASS',
+              'proof-same-package-option-string-resolution = PASS',
+              'proof-same-language-option-string-resolution = PASS',
+              'proof-setting-mutation = false',
+          ]
+          for line in required:
+              assert line in current,line
+          labels=[x.split(' = ',1)[1] for x in current if x.startswith('proof-current-option-text = ')]
+          assert len(labels)==1 and labels[0],labels
+
+          hda=set(Path('boot/uefi-hda-text26-v1/os-uefi-hda-text26-v1.labproof').read_text().splitlines())
+          for line in [
+              'proof = PASS',
+              'proof-runtime-text-zebra = PASS',
+              'proof-dynamic-BDL-per-expanded-allophone = PASS',
+              'proof-dynamic-HDA-route = PASS',
+          ]:
+              assert line in hda,line
+
+          with out.open('a') as f:
+              f.write('ready=true\n')
+          print('CURRENT_OPTION_SPEECH_BRIDGE_DEPENDENCIES=PASS')
+
+      - name: Install QEMU and OVMF
+        if: steps.dependencies.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+
+      - name: Derive strict current-option speech target
+        if: steps.dependencies.outputs.ready == 'true'
+        shell: python
+        run: |
+          from pathlib import Path
+          import os
+          lines=Path('boot/uefi-hii-current-option-v1/os-uefi-hii-current-option-v1.labproof').read_text().splitlines()
+          labels=[x.split(' = ',1)[1] for x in lines if x.startswith('proof-current-option-text = ')]
+          assert len(labels)==1,labels
+          label=labels[0]
+          target=''.join(ch.lower() for ch in label if 'a' <= ch.lower() <= 'z')[:8]
+          assert 1 <= len(target) <= 8,target
+          root=Path('boot/uefi-hii-current-option-speech-bridge-v1')
+          root.mkdir(parents=True,exist_ok=True)
+          (root/'target.txt').write_text(f'current-option-text = {label}\ntarget-prefix = {target}\n')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write(f'TARGET_PREFIX={target}\n')
+          print('CURRENT_OPTION_TEXT='+label)
+          print('CURRENT_OPTION_TARGET_PREFIX='+target)
+
+      - name: Audit target-gated option speech source
+        if: steps.dependencies.outputs.ready == 'true'
+        shell: python
+        run: |
+          from pathlib import Path
+          import ast
+          src=Path('boot/uefi-hii-option-speech-v1/build_uefi_hii_option_speech.py').read_text()
+          ast.parse(src)
+          for token in [
+              'TARGET_PREFIX: str | None = None',
+              'OPTION_TARGET_PREFIX_MATCH=PASS',
+              "L['target_prefix']",
+              "c.label('target_prefix_loop')",
+              "c.rel32(b'\\x0f\\x85','option_next')",
+              'TARGET_PREFIX must be 1..8 lowercase ASCII letters',
+              'HII_OPTION_SPEECH_HDA=PASS',
+              'BDL_RUNTIME_TEXT_SCHEDULE=PASS',
+          ]:
+              assert token in src,token
+
+          proof=set(Path('boot/uefi-hii-current-option-speech-bridge-v1/os-uefi-hii-current-option-speech-bridge-v1.labproof').read_text().splitlines())
+          for line in [
+              'speech-gate = HDA setup and DMA speech are unreachable until live option text prefix exactly matches target-prefix',
+              'same-firmware-execution-current-read-and-speech = false',
+              'same-one-of-structural-identity-at-speech = not-established-in-this-stage',
+              'firmware-setting-mutation = forbidden',
+          ]:
+              assert line in proof,line
+          print('CURRENT_OPTION_SPEECH_BRIDGE_SOURCE_CONTRACT=PASS')
+
+      - name: Build deterministic target-gated EFI twice
+        if: steps.dependencies.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          src=boot/uefi-hii-option-speech-v1/build_uefi_hii_option_speech.py
+          root=boot/uefi-hii-current-option-speech-bridge-v1
+          python "$src" "$root/BOOTX64.EFI" "$TARGET_PREFIX" | tee "$root/build.log"
+          python "$src" "$root/BOOTX64-2.EFI" "$TARGET_PREFIX" > "$root/build2.log"
+          cmp "$root/BOOTX64.EFI" "$root/BOOTX64-2.EFI"
+          grep -F 'OS_UEFI_HII_OPTION_SPEECH_BUILD=PASS' "$root/build.log"
+          grep -F "target-prefix=$TARGET_PREFIX" "$root/build.log"
+          sha256sum "$root/BOOTX64.EFI"
+
+      - name: Audit target-gated PE
+        if: steps.dependencies.outputs.ready == 'true'
+        shell: python
+        run: |
+          from pathlib import Path
+          import struct
+          image=Path('boot/uefi-hii-current-option-speech-bridge-v1/BOOTX64.EFI').read_bytes()
+          assert image[:2]==b'MZ'
+          pe=struct.unpack_from('<I',image,0x3c)[0]
+          assert image[pe:pe+4]==b'PE\0\0'
+          coff=pe+4
+          assert struct.unpack_from('<HH',image,coff)==(0x8664,3)
+          opt=coff+20
+          assert struct.unpack_from('<H',image,opt)[0]==0x20b
+          assert struct.unpack_from('<H',image,opt+0x44)[0]==10
+          sec=opt+0xf0; ds=sec+40
+          tc=struct.unpack_from('<I',image,sec+0x24)[0]
+          dc=struct.unpack_from('<I',image,ds+0x24)[0]
+          assert not(tc&0x80000000)
+          assert dc&0x80000000 and not(dc&0x20000000)
+          for token in [
+              b'HII_OPTION_SOURCE=PASS\r\n',
+              b'OPTION_TARGET_PREFIX_MATCH=PASS\r\n',
+              b'OPTION_SPOKEN_PREFIX=',
+              b'BDL_RUNTIME_TEXT_SCHEDULE=PASS\r\n',
+              b'HII_OPTION_SPEECH_HDA=PASS\r\n',
+          ]:
+              assert token in image,token
+          print('CURRENT_OPTION_SPEECH_BRIDGE_STATIC=PASS')
+          print('TARGET_GATE=BOUND')
+          print('DYNAMIC_HDA_ROUTE=BOUND')
+          print('W_X=BLOCKED')
+
+      - name: Resolve OVMF
+        if: steps.dependencies.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE=''; VARS=''
+          for pair in \
+            '/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd' \
+            '/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd' \
+            '/usr/share/edk2/ovmf/OVMF_CODE.fd|/usr/share/edk2/ovmf/OVMF_VARS.fd'
+          do
+            IFS='|' read -r code vars <<< "$pair"
+            if [[ -f "$code" && -f "$vars" ]]; then CODE="$code"; VARS="$vars"; break; fi
+          done
+          test -n "$CODE" -a -n "$VARS"
+          printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-hii-current-option-speech-bridge-v1/ovmf.env
+
+      - name: Speak only the current-option target prefix
+        if: steps.dependencies.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-current-option-speech-bridge-v1
+          source "$root/ovmf.env"
+          cp "$VARS" "$root/vars.fd"
+          rm -rf "$root/esp"
+          mkdir -p "$root/esp/EFI/BOOT"
+          cp "$root/BOOTX64.EFI" "$root/esp/EFI/BOOT/BOOTX64.EFI"
+          rm -f "$root/current-option-speech.serial" "$root/current-option-speech.wav"
+
+          qemu-system-x86_64 \
+            -machine q35,accel=tcg -m 192M \
+            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,file="$root/vars.fd" \
+            -drive format=raw,file=fat:rw:"$root/esp" \
+            -audiodev wav,id=aud,path="$root/current-option-speech.wav",out.frequency=48000,out.channels=2 \
+            -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0 \
+            -device hda-micro,bus=hda0.0,cad=0,audiodev=aud,mixer=on \
+            -display none -monitor none \
+            -serial file:"$root/current-option-speech.serial" \
+            -parallel none -net none -no-reboot -no-shutdown &
+          qpid=$!
+          trap 'kill "$qpid" 2>/dev/null || true' EXIT
+
+          python - <<'PY'
+          from pathlib import Path
+          import re,time
+          root=Path('boot/uefi-hii-current-option-speech-bridge-v1')
+          target={}
+          for line in (root/'target.txt').read_text().splitlines():
+              if ' = ' in line:
+                  k,v=line.split(' = ',1); target[k]=v
+          expected=target['target-prefix']
+          p=root/'current-option-speech.serial'
+          required=[
+              b'HII_DATABASE_PROTOCOL=PASS\r\n',
+              b'HII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\n',
+              b'HII_FORMS_PACKAGE=PASS\r\n',
+              b'HII_STRINGS_PACKAGE=PASS\r\n',
+              b'IFR_OPTION_STRING_ID=PASS\r\n',
+              b'HII_OPTION_SOURCE=PASS\r\n',
+              b'OPTION_TARGET_PREFIX_MATCH=PASS\r\n',
+              b'OPTION_SPOKEN_PREFIX=PASS\r\n',
+              b'AFG_RUNTIME_DISCOVERY=PASS\r\n',
+              b'AUTO_DAC_WIDGET=PASS\r\n',
+              b'AUTO_OUTPUT_PIN_WIDGET=PASS\r\n',
+              b'BDL_RUNTIME_TEXT_SCHEDULE=PASS\r\n',
+              b'LPIB_PROGRESS=PASS\r\n',
+              b'HII_OPTION_SPEECH_HDA=PASS\r\n',
+              b'STATUS=PASS\r\n',
+          ]
+          end=time.time()+35
+          while time.time()<end:
+              raw=p.read_bytes() if p.exists() else b''
+              if b'STATUS=BLOCKED\r\n' in raw:
+                  raise SystemExit('current-option speech bridge blocked: '+repr(raw[-8192:]))
+              if all(x in raw for x in required):
+                  m=re.search(br'OPTION_SPOKEN_PREFIX=([a-z]{1,8})\r\nOPTION_SPOKEN_PREFIX=PASS\r\n',raw)
+                  assert m,raw[-8192:]
+                  spoken=m.group(1).decode()
+                  assert spoken==expected,(spoken,expected)
+                  accepted=raw.count(b'EVENT=HII_GRAPHEME_ACCEPTED\r\n')
+                  assert accepted>=len(expected),accepted
+                  print('CURRENT_OPTION_TARGET_GATE=PASS')
+                  print('CURRENT_OPTION_SPOKEN_PREFIX='+spoken)
+                  print('CURRENT_OPTION_SPEECH_RUNTIME=PASS')
+                  break
+              time.sleep(.1)
+          else:
+              raw=p.read_bytes() if p.exists() else b''
+              raise SystemExit('timeout waiting current-option speech bridge: '+repr(raw[-8192:]))
+          PY
+
+          sleep 1
+          kill "$qpid" 2>/dev/null || true
+          wait "$qpid" 2>/dev/null || true
+          trap - EXIT
+
+      - name: Validate current-option speech waveform
+        if: steps.dependencies.outputs.ready == 'true'
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib,struct,wave
+          root=Path('boot/uefi-hii-current-option-speech-bridge-v1')
+          p=root/'current-option-speech.wav'
+          assert p.exists() and p.stat().st_size>10000,p
+          with wave.open(str(p),'rb') as w:
+              channels=w.getnchannels(); rate=w.getframerate()
+              width=w.getsampwidth(); frames=w.getnframes()
+              raw=w.readframes(frames)
+          assert channels==2 and rate==48000 and width==2,(channels,rate,width)
+          vals=struct.unpack('<'+'h'*(len(raw)//2),raw)
+          peak=max(abs(v) for v in vals)
+          active=sum(abs(v)>=500 for v in vals)
+          assert peak>=5000,peak
+          assert active>=3000,active
+          metrics=(
+              f'frames={frames}\n'
+              f'peak={peak}\n'
+              f'active={active}\n'
+              f'wav-sha256={hashlib.sha256(p.read_bytes()).hexdigest()}\n'
+          )
+          (root/'metrics.txt').write_text(metrics)
+          print(metrics,end='')
+          print('CURRENT_OPTION_SPEECH_WAVEFORM=PASS')
+
+      - name: Record bridge evidence
+        if: steps.dependencies.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-current-option-speech-bridge-v1
+          sha256sum "$root/BOOTX64.EFI" "$root/current-option-speech.serial" "$root/current-option-speech.wav" "$root/target.txt" "$root/metrics.txt" > "$root/evidence.sha256"
+          {
+            echo 'OS-UEFI-HII-CURRENT-OPTION-SPEECH-BRIDGE-V1'
+            cat "$root/target.txt"
+            echo 'target-gate = PASS'
+            echo 'live-HII-option-source = PASS'
+            echo 'native-HDA-speech = PASS'
+            echo 'same-firmware-execution-current-read-and-speech = false'
+            echo 'same-one-of-structural-identity-at-speech = not-established'
+            echo 'setting-mutation = false'
+            echo 'result = PASS'
+          } > "$root/linux-evidence.txt"
+
+      - uses: actions/upload-artifact@v4
+        if: steps.dependencies.outputs.ready == 'true'
+        with:
+          name: os-uefi-hii-current-option-speech-bridge-v1-linux
+          path: |
+            boot/uefi-hii-current-option-speech-bridge-v1/BOOTX64.EFI
+            boot/uefi-hii-current-option-speech-bridge-v1/current-option-speech.serial
+            boot/uefi-hii-current-option-speech-bridge-v1/current-option-speech.wav
+            boot/uefi-hii-current-option-speech-bridge-v1/target.txt
+            boot/uefi-hii-current-option-speech-bridge-v1/metrics.txt
+            boot/uefi-hii-current-option-speech-bridge-v1/evidence.sha256
+            boot/uefi-hii-current-option-speech-bridge-v1/linux-evidence.txt
+          if-no-files-found: error
+
+      - name: Persist revision-bound bridge proof
+        if: steps.dependencies.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-current-option-speech-bridge-v1
+          proof="$root/os-uefi-hii-current-option-speech-bridge-v1.labproof"
+          builder=boot/uefi-hii-option-speech-v1/build_uefi_hii_option_speech.py
+          dependency=boot/uefi-hii-current-option-v1/os-uefi-hii-current-option-v1.labproof
+          workflow=.github/workflows/os-uefi-hii-current-option-speech-bridge-v1.yml
+          tested_builder="$(git rev-parse "$GITHUB_SHA:$builder")"
+          tested_dependency="$(git rev-parse "$GITHUB_SHA:$dependency")"
+          tested_workflow="$(git rev-parse "$GITHUB_SHA:$workflow")"
+          cp "$root/BOOTX64.EFI" /tmp/current-option-speech.efi
+          cp "$root/current-option-speech.serial" /tmp/current-option-speech.serial
+          cp "$root/current-option-speech.wav" /tmp/current-option-speech.wav
+          cp "$root/target.txt" /tmp/current-option-target.txt
+          cp "$root/metrics.txt" /tmp/current-option-speech-metrics.txt
+
+          git fetch origin os
+          git checkout -B os origin/os
+          [[ "$tested_builder" == "$(git rev-parse "os:$builder")" ]] || { echo CURRENT_OPTION_SPEECH_STALE_BUILDER=SKIP; exit 0; }
+          [[ "$tested_dependency" == "$(git rev-parse "os:$dependency")" ]] || { echo CURRENT_OPTION_SPEECH_STALE_DEPENDENCY=SKIP; exit 0; }
+          [[ "$tested_workflow" == "$(git rev-parse "os:$workflow")" ]] || { echo CURRENT_OPTION_SPEECH_STALE_WORKFLOW=SKIP; exit 0; }
+
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,os,re
+          root=Path('boot/uefi-hii-current-option-speech-bridge-v1')
+          p=root/'os-uefi-hii-current-option-speech-bridge-v1.labproof'
+          lines=p.read_text().splitlines()
+          states=[x for x in lines if x.startswith('proof = ')]
+          if len(states)!=1 or states[0] not in {'proof = PENDING_DEPENDENCY','proof = PENDING_CI','proof = PASS'}:
+              raise SystemExit('unexpected proof state: '+repr(states))
+
+          target={}
+          for line in Path('/tmp/current-option-target.txt').read_text().splitlines():
+              if ' = ' in line:
+                  k,v=line.split(' = ',1); target[k]=v
+          serial=Path('/tmp/current-option-speech.serial').read_bytes()
+          m=re.search(br'OPTION_SPOKEN_PREFIX=([a-z]{1,8})\r\nOPTION_SPOKEN_PREFIX=PASS\r\n',serial)
+          if not m: raise SystemExit('missing spoken prefix witness')
+          spoken=m.group(1).decode()
+          if spoken!=target['target-prefix']:
+              raise SystemExit(f'target mismatch: {spoken!r} != {target["target-prefix"]!r}')
+
+          kept=[x for x in lines if not x.startswith('proof-') and not x.startswith('proof = ')]
+          efi=Path('/tmp/current-option-speech.efi').read_bytes()
+          wav=Path('/tmp/current-option-speech.wav').read_bytes()
+          metrics=Path('/tmp/current-option-speech-metrics.txt').read_text().strip().replace('\n','; ')
+          text='\n'.join(kept).rstrip()+'\n'
+          text += (
+              "proof = PASS\n"
+              f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
+              f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
+              "proof-current-option-source = PASS\n"
+              "proof-target-prefix-gate = PASS\n"
+              f"proof-current-option-text = {target['current-option-text']}\n"
+              f"proof-target-prefix = {target['target-prefix']}\n"
+              f"proof-spoken-prefix = {spoken}\n"
+              "proof-live-HII-option-source = PASS\n"
+              "proof-first-party-allophones = PASS\n"
+              "proof-runtime-HDA-route = PASS\n"
+              "proof-HDA-waveform = PASS\n"
+              "proof-setting-mutation = false\n"
+              "proof-same-firmware-execution-current-read-and-speech = false\n"
+              "proof-same-one-of-structural-identity-at-speech = not-established\n"
+              f"proof-wave-metrics = {metrics}\n"
+              f"proof-efi-sha256 = {hashlib.sha256(efi).hexdigest()}\n"
+              f"proof-serial-sha256 = {hashlib.sha256(serial).hexdigest()}\n"
+              f"proof-wav-sha256 = {hashlib.sha256(wav).hexdigest()}\n"
+          )
+          p.write_text(text)
+          PY
+
+          if git diff --quiet -- "$proof"; then exit 0; fi
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$proof"
+          git commit -m "Record current HII option speech bridge proof [skip ci]"
+          git push origin os
