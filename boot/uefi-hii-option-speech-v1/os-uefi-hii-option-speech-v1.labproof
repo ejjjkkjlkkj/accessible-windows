@@ -14,6 +14,7 @@ option-source = live read-only HII package export, EFI_IFR_ONE_OF_OPTION StringI
 option-source-hardcoded = false
 option-package-search = all exported Forms-plus-Strings package lists
 option-language-search = sibling EFI_HII_PACKAGE_STRINGS packages
+option-identity-binding = emitted spoken prefix must equal the normalized first eight Latin letters of OS-UEFI-HII-OPTION-V1 proof-resolved-option
 spoken-character-filter = Latin a-z case-insensitive
 maximum-spoken-option-graphemes = 8
 speech-model = first-party deterministic letter-name allophone table
