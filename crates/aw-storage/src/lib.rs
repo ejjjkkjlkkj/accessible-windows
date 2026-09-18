@@ -241,6 +241,112 @@ impl TransactionRecordV1 {
     }
 }
 
+/// Native persistent object class.
+///
+/// These are storage-native classes, not foreign filesystem inode types.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObjectKind {
+    /// Immutable byte/content payload.
+    Payload = 1,
+    /// Namespace that relates human or machine names to objects.
+    Namespace = 2,
+    /// Search or traversal index.
+    Index = 3,
+    /// Durable snapshot/root description.
+    Snapshot = 4,
+    /// Native semantic/schema information.
+    Semantic = 5,
+    /// Privileged system-state object.
+    System = 6,
+}
+
+/// Structural validation errors for a native object descriptor.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObjectDescriptorError {
+    /// Every persistent object must have a nonzero identity.
+    MissingObjectId,
+    /// Generation zero is reserved.
+    InvalidGeneration,
+    /// Every persistent object must identify native semantic meaning.
+    MissingSemanticDescriptor,
+    /// Non-empty logical content must have a payload root.
+    MissingPayloadRoot,
+}
+
+/// Version-1 descriptor for a persistent native object.
+///
+/// A file or directory is not the primitive represented here. Higher-level
+/// namespace and compatibility views can project familiar file semantics from
+/// these versioned objects.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObjectDescriptorV1 {
+    /// Identity of this immutable version.
+    pub object_id: ObjectId,
+    /// Previous version identity, or `ObjectId::ZERO` for the first version.
+    pub previous_version: ObjectId,
+    /// Storage generation in which this version was created.
+    pub generation: u64,
+    /// Native object class.
+    pub kind: ObjectKind,
+    /// Reserved version-1 flags. Must be zero.
+    pub flags: u32,
+    /// Logical content length.
+    pub logical_bytes: u64,
+    /// Root block of payload/extents; may be zero only for empty content.
+    pub payload_root: BlockAddress,
+    /// Root block for native relations/edges; zero means no relations.
+    pub relation_root: BlockAddress,
+    /// Native semantic descriptor identity. This is fundamental metadata, not an
+    /// accessibility side table.
+    pub semantic_descriptor: ObjectId,
+}
+
+impl ObjectDescriptorV1 {
+    /// Creates a version-1 object descriptor.
+    #[must_use]
+    pub const fn new(
+        object_id: ObjectId,
+        previous_version: ObjectId,
+        generation: u64,
+        kind: ObjectKind,
+        logical_bytes: u64,
+        payload_root: BlockAddress,
+        relation_root: BlockAddress,
+        semantic_descriptor: ObjectId,
+    ) -> Self {
+        Self {
+            object_id,
+            previous_version,
+            generation,
+            kind,
+            flags: 0,
+            logical_bytes,
+            payload_root,
+            relation_root,
+            semantic_descriptor,
+        }
+    }
+
+    /// Validates version-1 structural invariants.
+    pub fn validate_structure(&self) -> Result<(), ObjectDescriptorError> {
+        if self.object_id.is_zero() {
+            return Err(ObjectDescriptorError::MissingObjectId);
+        }
+        if self.generation == 0 || self.flags != 0 {
+            return Err(ObjectDescriptorError::InvalidGeneration);
+        }
+        if self.semantic_descriptor.is_zero() {
+            return Err(ObjectDescriptorError::MissingSemanticDescriptor);
+        }
+        if self.logical_bytes != 0 && self.payload_root.index() == 0 {
+            return Err(ObjectDescriptorError::MissingPayloadRoot);
+        }
+        Ok(())
+    }
+}
+
 /// Error returned while deriving an anchor that could publish a prepared transaction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PublicationError {
@@ -410,6 +516,73 @@ mod tests {
             newest_structurally_valid(&stable, &published),
             Some(&published)
         );
+    }
+
+    #[test]
+    fn object_descriptor_requires_native_semantic_identity() {
+        let descriptor = ObjectDescriptorV1::new(
+            ID_A,
+            ObjectId::ZERO,
+            41,
+            ObjectKind::Payload,
+            4096,
+            BlockAddress::new(300),
+            BlockAddress::ZERO,
+            ObjectId::ZERO,
+        );
+
+        assert_eq!(
+            descriptor.validate_structure(),
+            Err(ObjectDescriptorError::MissingSemanticDescriptor)
+        );
+    }
+
+    #[test]
+    fn object_descriptor_requires_payload_for_nonempty_content() {
+        let descriptor = ObjectDescriptorV1::new(
+            ID_A,
+            ObjectId::ZERO,
+            41,
+            ObjectKind::Payload,
+            1,
+            BlockAddress::ZERO,
+            BlockAddress::ZERO,
+            ID_B,
+        );
+
+        assert_eq!(
+            descriptor.validate_structure(),
+            Err(ObjectDescriptorError::MissingPayloadRoot)
+        );
+    }
+
+    #[test]
+    fn object_descriptor_supports_immutable_version_chain() {
+        let first = ObjectDescriptorV1::new(
+            ID_A,
+            ObjectId::ZERO,
+            41,
+            ObjectKind::Payload,
+            4096,
+            BlockAddress::new(300),
+            BlockAddress::ZERO,
+            ID_B,
+        );
+        let second = ObjectDescriptorV1::new(
+            TX_ID,
+            first.object_id,
+            42,
+            ObjectKind::Payload,
+            8192,
+            BlockAddress::new(320),
+            BlockAddress::new(330),
+            ID_B,
+        );
+
+        assert_eq!(first.validate_structure(), Ok(()));
+        assert_eq!(second.validate_structure(), Ok(()));
+        assert_eq!(second.previous_version, first.object_id);
+        assert_ne!(second.object_id, first.object_id);
     }
 
     #[derive(Clone, Copy)]

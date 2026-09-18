@@ -4,7 +4,7 @@ The native storage system starts from zero. NTFS, ReFS, ext4, XFS, Btrfs, ZFS, A
 
 ## Design direction
 
-The native primitive is not required to be a traditional file. The first design target is a persistent, versioned object graph from which file/directory views can later be projected for human use and compatibility.
+The native primitive is not a traditional file. The design target is a persistent, versioned object graph from which file/directory views can later be projected for human use and compatibility. Each object version carries native semantic identity as fundamental metadata; semantics are not reconstructed later by a separate accessibility layer.
 
 The initial durable model uses:
 - logical 4 KiB blocks;
@@ -13,7 +13,7 @@ The initial durable model uses:
 - redundant durable anchors;
 - explicit previous-known-good roots;
 - transaction descriptors;
-- a future authenticated integrity graph.
+- a future authenticated integrity graph;\n- immutable object-version descriptors with native semantic identity and relation roots.
 
 ## Version-1 publication model
 
@@ -55,6 +55,6 @@ The Rust model now tests the state-transition rules above and includes an abstra
 - derivation of a next-generation anchor from a prepared transaction;
 - preservation of the previous known-good root;
 - rejection of stale and non-prepared transactions;
-- recovery staying on the old generation until a valid new anchor exists;\n- deterministic crash-cut simulation across candidate, transaction and anchor durability barriers.
+- recovery staying on the old generation until a valid new anchor exists;\n- deterministic crash-cut simulation across candidate, transaction and anchor durability barriers;\n- versioned native object descriptors that require semantic identity and preserve explicit previous-version links.
 
 Cryptographic integrity verification, physical block I/O, real hardware durability barriers, allocator, object graph, device-level crash-fault injection, encryption, repair, snapshots and filesystem projections are **NOT IMPLEMENTED** and must not be reported as PASS.
