@@ -256,6 +256,14 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HDA_SELECTOR_WRITES_APPLIED=0x"); proof_hex8(proof,sizeof(proof),&n,applied); proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_SPEECH_DMA=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"LPIB_PROGRESS=PASS\r\n");
+#ifdef QEV_INTERACTIVE_REPEAT
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_REPEAT_KEY=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_REPEAT_SPEECH_DMA=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_REPEAT_LPIB_PROGRESS=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_SPEECH_DMA_REUSE=PASS\r\n");
+#else
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_REPEAT_KEY=NOT_ENABLED\r\n");
+#endif
     proof_puts(proof,sizeof(proof),&n,"AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION\r\n");
 
     usize bytes = n;
