@@ -53,4 +53,16 @@ required-final-BDL-IOC = true
 required-HDA-waveform = true
 claim = success establishes a real UEFI OutputString capture path whose actual CHAR16 pointer is preserved, restored to firmware output semantics, converted after child return into first-party letter-name units, and emitted through runtime-discovered native HDA
 claim = success is a bridge foundation and does not yet establish synchronous speech inside every OutputString callback or arbitrary firmware-wide screen reading
-proof = PENDING_CI
+proof = PASS
+proof-run = 35384948624
+proof-head-sha = dc1840b0e4f1464329380de6a4f5ba09cb97c458
+proof-ConOut-capture = PASS
+proof-original-output-preserved = PASS
+proof-hook-restored = PASS
+proof-captured-Az-to-native-HDA = PASS
+proof-final-BDL-IOC = PASS
+proof-HDA-waveform = PASS
+proof-wave-metrics = frames=383967;peak=13822;active=746190
+proof-efi-sha256 = 810e6f546f35b682e7c8082b4aae9c4715589125136a76f1a444a69aec2c725d
+proof-serial-sha256 = af2b39fb34f5dca49f1316b896335c88e0627bf14b63ec57804cb6fd75d1bdd3
+proof-wave-sha256 = 52f8c812dc964259fc43e572efa0bc3577412b2dc750c0c137a1cf168d021324
