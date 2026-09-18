@@ -91,6 +91,16 @@ public sealed class NativeInputForm : Form
         status.AccessibleName = text;
     }
 
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.Enter && actionButton != null && actionButton.Focused)
+        {
+            NormalizeAndApply("keyboard-enter");
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
     private void NormalizeAndApply(string externalCarrier)
     {
         if (acceptedInputs != 0)
