@@ -30,6 +30,7 @@ MARKS={
  'opt_scope': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nONE_OF_SCOPE_MATCH=PASS\r\nEND\r\n',
  'opt_match': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_VALUE_MATCH=PASS\r\nEND\r\n',
  'opt_language': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_LANGUAGE_BINDING=PASS\r\nEND\r\n',
+ 'opt_token_pre': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_STRING_ID_PRE_RESOLVE_LE_HEX=',
  'opt_token': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_STRING_ID_LE_HEX=',
  'opt_flags': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_FLAGS_HEX=',
  'opt_type': b'\r\nCURRENT_OPTION_TYPE_HEX=',
@@ -396,9 +397,8 @@ def build():
  c.label('direct_scsu_found')
  c.emit(b'\x80\x3e\x00'); c.rel32(b'\x0f\x84','fail_string')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\x80\x38\x01'); c.rel32(b'\x0f\x84','selected_scsu_found')
- # Preserve the exact Strings package/language that resolved the question.
- # The selected option StringId must be decoded in that same language namespace.
- c.lea_rax_data(L['strings_ptr']); c.emit(b'\x48\x8b\x00'); c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x89\x02')
+ # Keep strings_ptr on the exact Strings package/language that resolved the
+ # question.  The proven selected-label resolver reuses this pointer directly.
  # Phase 0: resolve the live ONE_OF prompt, read its current Buffer Storage,
  # then select the child ONE_OF_OPTION whose typed value equals current_raw.
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x89\x32')
@@ -413,11 +413,12 @@ def build():
  # Move the proven selected-option StringId into the generic string decoder
  # only now.  Keeping it separate prevents protocol/metadata work from
  # accidentally reusing the original question Prompt StringId.
+ c.lea_rsi_data(L['option_token']); c.emit(b'\xb9\x02\x00\x00\x00')
+ serial('opt_token_pre')
+ c.label('current_option_pre_token_hex_loop'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','current_option_pre_token_hex_loop')
  c.lea_rax_data(L['option_token']); c.emit(b'\x0f\xb7\x00')
  c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\xc6\x00\x01')
- c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x8b\x02')
- c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x02')
  serial('opt_language')
  c.rel32(b'\xe9','resolve_string_package')
 
@@ -430,7 +431,7 @@ def build():
  c.label('direct_ucs_found')
  c.emit(b'\x66\x83\x3e\x00'); c.rel32(b'\x0f\x84','fail_string')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\x80\x38\x01'); c.rel32(b'\x0f\x84','selected_ucs_found')
- c.lea_rax_data(L['strings_ptr']); c.emit(b'\x48\x8b\x00'); c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x89\x02')
+ # Keep strings_ptr on the exact question Strings package for phase 1.
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x89\x32')
  c.rel32(b'\xe8','resolve_varstore'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
@@ -439,11 +440,12 @@ def build():
  serial('prefix'); c.rel32(b'\xe8','serial_utf16')
  serial('suffix')
  c.rel32(b'\xe8','resolve_current_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
+ c.lea_rsi_data(L['option_token']); c.emit(b'\xb9\x02\x00\x00\x00')
+ serial('opt_token_pre')
+ c.label('current_option_pre_token_hex_loop'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','current_option_pre_token_hex_loop')
  c.lea_rax_data(L['option_token']); c.emit(b'\x0f\xb7\x00')
  c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\xc6\x00\x01')
- c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x8b\x02')
- c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x02')
  serial('opt_language')
  c.rel32(b'\xe9','resolve_string_package')
 
