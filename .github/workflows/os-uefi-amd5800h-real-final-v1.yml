@@ -292,73 +292,73 @@ jobs:
             '-serial',"file:$serial",
             '-parallel','none','-net','none','-no-reboot','-no-shutdown'
           )
+          $script=Join-Path $root 'qemu_test.py'
+          @'
+          from pathlib import Path
+          import json,re,socket,sys,time,wave,struct
+          root=Path(sys.argv[1]); serial=root/"qemu.serial"
+          end=time.time()+45
+          while time.time()<end:
+              raw=serial.read_bytes() if serial.exists() else b""
+              if b"STATUS=BLOCKED\r\n" in raw: raise SystemExit("blocked before DOWN: "+repr(raw[-16000:]))
+              if b"HII_NAVIGATION_KEY=WAIT_DOWN\r\n" in raw: break
+              time.sleep(.1)
+          else: raise SystemExit("timeout waiting DOWN: "+repr((serial.read_bytes() if serial.exists() else b"")[-16000:]))
+          for _ in range(100):
+              try:
+                  s=socket.create_connection(("127.0.0.1",45555),.5); break
+              except OSError: time.sleep(.1)
+          else: raise SystemExit("QMP unavailable")
+          with s:
+              f=s.makefile("rwb",buffering=0)
+              json.loads(f.readline())
+              f.write((json.dumps({"execute":"qmp_capabilities"})+"\r\n").encode())
+              while True:
+                  m=json.loads(f.readline())
+                  if "return" in m: break
+              f.write((json.dumps({"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"down"}],"hold-time":50}})+"\r\n").encode())
+              while True:
+                  m=json.loads(f.readline())
+                  if "return" in m: break
+                  if "error" in m: raise SystemExit(repr(m))
+          req=[
+              b"HII_NAVIGATION_KEY=PASS\r\n",
+              b"NAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\n",
+              b"NAV_FOCUS_OPTION_STRING=PASS\r\n",
+              b"NAV_FOCUS_LABEL_BINDING=PASS\r\n",
+              b"NAV_FOCUS_SOURCE=PASS\r\n",
+              b"LPIB_PROGRESS=PASS\r\n",
+              b"NAV_FOCUS_SPEECH_HDA=PASS\r\n",
+              b"STATUS=PASS\r\n",
+          ]
+          end=time.time()+45
+          while time.time()<end:
+              raw=serial.read_bytes() if serial.exists() else b""
+              if b"STATUS=BLOCKED\r\n" in raw: raise SystemExit("blocked after DOWN: "+repr(raw[-20000:]))
+              if all(x in raw for x in req):
+                  label=re.search(br"NAV_FOCUS_OPTION_TEXT=([^\r\n]+)",raw)
+                  spoken=re.search(br"NAV_FOCUS_SPOKEN_PREFIX=([a-z0-9]{1,8})\r\nNAV_FOCUS_SPOKEN_PREFIX=PASS",raw)
+                  assert label and spoken,(label,spoken)
+                  print("QEMU_UEFI_HII_HDA_SPEECH=PASS")
+                  print("QEMU_FOCUS_LABEL="+label.group(1).decode("ascii","replace").strip())
+                  print("QEMU_SPOKEN_PREFIX="+spoken.group(1).decode())
+                  break
+              time.sleep(.1)
+          else: raise SystemExit("timeout final speech")
+          wav=root/"qemu.wav"
+          end=time.time()+10
+          while time.time()<end and (not wav.exists() or wav.stat().st_size<10000): time.sleep(.1)
+          assert wav.exists() and wav.stat().st_size>10000,wav
+          with wave.open(str(wav),"rb") as w:
+              assert (w.getnchannels(),w.getframerate(),w.getsampwidth())==(2,48000,2)
+              raw=w.readframes(w.getnframes())
+          vals=struct.unpack("<"+"h"*(len(raw)//2),raw)
+          assert max(abs(v) for v in vals)>=5000
+          assert sum(abs(v)>=500 for v in vals)>=3000
+          print("QEMU_HDA_WAVEFORM=PASS")
+          '@ | Set-Content $script -Encoding utf8
           $p=Start-Process -FilePath $env:QEMU_EXE -ArgumentList $args -PassThru -WindowStyle Hidden
           try {
-            $script=Join-Path $root 'qemu_test.py'
-            @'
-            from pathlib import Path
-            import json,re,socket,sys,time,wave,struct
-            root=Path(sys.argv[1]); serial=root/"qemu.serial"
-            end=time.time()+45
-            while time.time()<end:
-                raw=serial.read_bytes() if serial.exists() else b""
-                if b"STATUS=BLOCKED\r\n" in raw: raise SystemExit("blocked before DOWN: "+repr(raw[-16000:]))
-                if b"HII_NAVIGATION_KEY=WAIT_DOWN\r\n" in raw: break
-                time.sleep(.1)
-            else: raise SystemExit("timeout waiting DOWN: "+repr((serial.read_bytes() if serial.exists() else b"")[-16000:]))
-            for _ in range(100):
-                try:
-                    s=socket.create_connection(("127.0.0.1",45555),.5); break
-                except OSError: time.sleep(.1)
-            else: raise SystemExit("QMP unavailable")
-            with s:
-                f=s.makefile("rwb",buffering=0)
-                json.loads(f.readline())
-                f.write((json.dumps({"execute":"qmp_capabilities"})+"\r\n").encode())
-                while True:
-                    m=json.loads(f.readline())
-                    if "return" in m: break
-                f.write((json.dumps({"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"down"}],"hold-time":50}})+"\r\n").encode())
-                while True:
-                    m=json.loads(f.readline())
-                    if "return" in m: break
-                    if "error" in m: raise SystemExit(repr(m))
-            req=[
-                b"HII_NAVIGATION_KEY=PASS\r\n",
-                b"NAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\n",
-                b"NAV_FOCUS_OPTION_STRING=PASS\r\n",
-                b"NAV_FOCUS_LABEL_BINDING=PASS\r\n",
-                b"NAV_FOCUS_SOURCE=PASS\r\n",
-                b"LPIB_PROGRESS=PASS\r\n",
-                b"NAV_FOCUS_SPEECH_HDA=PASS\r\n",
-                b"STATUS=PASS\r\n",
-            ]
-            end=time.time()+45
-            while time.time()<end:
-                raw=serial.read_bytes() if serial.exists() else b""
-                if b"STATUS=BLOCKED\r\n" in raw: raise SystemExit("blocked after DOWN: "+repr(raw[-20000:]))
-                if all(x in raw for x in req):
-                    label=re.search(br"NAV_FOCUS_OPTION_TEXT=([^\r\n]+)",raw)
-                    spoken=re.search(br"NAV_FOCUS_SPOKEN_PREFIX=([a-z0-9]{1,8})\r\nNAV_FOCUS_SPOKEN_PREFIX=PASS",raw)
-                    assert label and spoken,(label,spoken)
-                    print("QEMU_UEFI_HII_HDA_SPEECH=PASS")
-                    print("QEMU_FOCUS_LABEL="+label.group(1).decode("ascii","replace").strip())
-                    print("QEMU_SPOKEN_PREFIX="+spoken.group(1).decode())
-                    break
-                time.sleep(.1)
-            else: raise SystemExit("timeout final speech")
-            wav=root/"qemu.wav"
-            end=time.time()+10
-            while time.time()<end and (not wav.exists() or wav.stat().st_size<10000): time.sleep(.1)
-            assert wav.exists() and wav.stat().st_size>10000,wav
-            with wave.open(str(wav),"rb") as w:
-                assert (w.getnchannels(),w.getframerate(),w.getsampwidth())==(2,48000,2)
-                raw=w.readframes(w.getnframes())
-            vals=struct.unpack("<"+"h"*(len(raw)//2),raw)
-            assert max(abs(v) for v in vals)>=5000
-            assert sum(abs(v)>=500 for v in vals)>=3000
-            print("QEMU_HDA_WAVEFORM=PASS")
-          '@ | Set-Content $script -Encoding utf8
             & $env:PYTHON_EXE $script $root | Tee-Object (Join-Path $root 'qemu-result.txt')
             if($LASTEXITCODE -ne 0){ throw 'QEMU UEFI screen reader runtime failed' }
           } finally {
