@@ -164,9 +164,13 @@ jobs:
             Wait-TraceCount 2
 
             [void][NativeRecallWin32]::SetForegroundWindow([IntPtr]::new($window.Current.NativeWindowHandle))
+            $next.SetFocus()
+            Start-Sleep -Milliseconds 250
+            if (-not $next.Current.HasKeyboardFocus) { throw 'recall next button keyboard focus failed' }
             $ws=New-Object -ComObject WScript.Shell
             [void]$ws.AppActivate([int]$p.Id)
-            Start-Sleep -Milliseconds 150
+            Start-Sleep -Milliseconds 200
+            if (-not $next.Current.HasKeyboardFocus) { throw 'recall next button lost keyboard focus' }
             $ws.SendKeys('{RIGHT}')
             Wait-TraceCount 3
             $ws.SendKeys('{RIGHT}')
@@ -175,7 +179,13 @@ jobs:
             $invokePrev.Invoke()
             Wait-TraceCount 5
 
+            [void][NativeRecallWin32]::SetForegroundWindow([IntPtr]::new($window.Current.NativeWindowHandle))
+            $previous.SetFocus()
+            Start-Sleep -Milliseconds 250
+            if (-not $previous.Current.HasKeyboardFocus) { throw 'recall previous button keyboard focus failed' }
             [void]$ws.AppActivate([int]$p.Id)
+            Start-Sleep -Milliseconds 200
+            if (-not $previous.Current.HasKeyboardFocus) { throw 'recall previous button lost keyboard focus' }
             $ws.SendKeys('{LEFT}')
             Wait-TraceCount 6
 
