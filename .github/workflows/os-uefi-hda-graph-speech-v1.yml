@@ -52,6 +52,8 @@ jobs:
               'qev_unit_d_len',
               'qev_unit_e_len',
               '*(volatile u16 *)(sd + 0x0c) = 1',
+              'WORD=AIDE',
+              'UNIT_BANK_ORDER=d,e',
               'BDL_RUNTIME_ORDER=e,d',
               'HDA_GRAPH_SPEECH_DMA=PASS',
               'RUNTIME_ALLOPHONE_HDA=PASS',
@@ -103,11 +105,11 @@ jobs:
           for i in range(nsec):
               ch=struct.unpack_from('<I',b,sec+i*40+36)[0]
               assert not ((ch&0x80000000) and (ch&0x20000000))
+          # Clang can inline very short serial literals into instructions, so
+          # short WORD/ORDER markers are source-checked above and runtime-checked
+          # below instead of requiring their contiguous bytes in the PE image.
           for token in [
               b'SYNTH=ALLOPHONE_CONCATENATIVE_V1',
-              b'WORD=AIDE',
-              b'UNIT_BANK_ORDER=d,e',
-              b'BDL_RUNTIME_ORDER=e,d',
               b'HDA_GRAPH_SPEECH_DMA=PASS',
               b'RUNTIME_ALLOPHONE_HDA=PASS',
           ]:
