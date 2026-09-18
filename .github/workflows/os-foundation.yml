@@ -37,6 +37,7 @@ jobs:
           grep -q "Accessibility is intrinsic" docs/CONSTITUTION.md
           grep -q "GitHub Actions is authoritative" docs/CONSTITUTION.md
           grep -q "NOT IMPLEMENTED" docs/STORAGE.md
+          grep -q "pub struct SemanticObjectV1" crates/aw-core/src/lib.rs
 
   host-validation:
     strategy:
@@ -123,6 +124,21 @@ jobs:
       - name: Native namespace projection
         run: cargo +1.98.1 test -p aw-storage namespace_binding -- --nocapture
 
+  semantic-core-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Native semantic source of truth
+        run: cargo +1.98.1 test -p aw-core semantic_ -- --nocapture
+
   bare-metal-contracts:
     runs-on: ubuntu-24.04
     steps:
@@ -131,6 +147,8 @@ jobs:
         run: |
           rustup toolchain install 1.98.1 --profile minimal --component clippy --component rustfmt
           rustup target add --toolchain 1.98.1 x86_64-unknown-none x86_64-unknown-uefi
+      - name: Native semantic core bare-metal check
+        run: cargo +1.98.1 check -p aw-core --target x86_64-unknown-none
       - name: Bare-metal kernel check
         run: cargo +1.98.1 check -p aw-kernel --target x86_64-unknown-none
       - name: Native storage bare-metal check
