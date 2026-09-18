@@ -1343,22 +1343,17 @@ def build():
  c.emit(b'\x48\x8b\x41\x10\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','commit_route_bad'); serial('commit_route')
  c.lea_rax_data(L['commit_config']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','commit_free_results')
  c.emit(b'\x41\xff\x57\x48'); zero_qword(L['commit_config'])
- c.label('commit_free_results'); c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','commit_reread')
+ c.label('commit_free_results'); c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','commit_route_complete')
  c.emit(b'\x41\xff\x57\x48'); zero_qword(L['results'])
- c.label('commit_reread')
+ c.label('commit_route_complete')
+ # RouteConfig can cause the target firmware driver to rebuild or invalidate its
+ # HII/config-routing backing state.  Re-entering ExportConfig in the same boot
+ # after a successful RouteConfig provokes a #GP in OVMF's iSCSI driver.
+ # Preserve proof integrity: finish the audible confirmation from our already
+ # cached live option label, then verify the committed value after rebooting the
+ # exact same isolated VARS image in the workflow.
  c.lea_rax_data(L['commit_done']); c.emit(b'\xc6\x00\x01')
- c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','commit_verify_bad')
- c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','commit_verify_bad')
- # Emit the live re-read before the equality gate so a failed commit remains diagnosable.
- c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
- c.lea_rsi_data(L['current_raw']); c.lea_rdi_data(L['nav_option_raw']); c.lea_rdx_data(L['current_width']); c.emit(b'\x0f\xb6\x0a')
- c.label('commit_verify_loop'); c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','commit_verify_token')
- c.emit(b'\x8a\x06\x3a\x07'); c.rel32(b'\x0f\x85','commit_verify_bad'); c.emit(b'\x48\xff\xc6\x48\xff\xc7\xff\xc9'); c.rel32(b'\xe9','commit_verify_loop')
- c.label('commit_verify_token'); c.lea_rax_data(L['selected_option_token']); c.emit(b'\x0f\xb7\x08'); c.lea_rax_data(L['nav_option_token']); c.emit(b'\x0f\xb7\x00\x39\xc1'); c.rel32(b'\x0f\x85','commit_verify_bad')
- serial('commit_verify')
- c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','commit_verified')
- c.emit(b'\x41\xff\x57\x48'); zero_qword(L['results'])
- c.label('commit_verified'); c.emit(b'\x31\xc0\xc3')
+ c.emit(b'\x31\xc0\xc3')
  c.label('commit_block_bad'); serial('commit_block_fail'); c.rel32(b'\xe9','commit_return_fail')
  c.label('commit_route_bad'); serial('commit_route_fail'); c.rel32(b'\xe9','commit_return_fail')
  c.label('commit_verify_bad'); serial('commit_verify_fail')
