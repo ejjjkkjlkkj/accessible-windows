@@ -15,11 +15,8 @@ WIPO-name-exact = no-result-observed
 meaning = screening-only-not-worldwide-clearance
 ::end
 
-::retired-identifiers
-identifier = AW0
-identifier = AWL0
-identifier = A11Y0
-identifier = awlink0
-reason = public-collision-detected
-rule = forbidden-in-active-sovereign-tree
+::namespace
+rule = active-sovereign-tree-uses-only-Qevarynox-identifiers
+rule = previously-colliding-identifiers-are-history-only
+rule = historical-identifiers-are-documented-outside-sovereign
 ::end
