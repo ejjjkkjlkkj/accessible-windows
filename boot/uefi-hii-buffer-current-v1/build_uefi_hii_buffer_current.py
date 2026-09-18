@@ -106,7 +106,7 @@ def build():
   'cfgacc_guid':240,'routing_guid':256,'routing_ptr':272,'config_ptr':280,
   'driver_handle':288,'progress':296,'results':304,'match_pkg_size':312,
   'matched_hii_handle':320,'block_size':328,'current_width':336,'current_raw':344,'config_boundary':352,
-  'varstore_name_ptr':360,
+  'varstore_name_ptr':360,'varstore_name_remaining':368,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -508,6 +508,7 @@ def build():
  # EFI_IFR_VARSTORE.Name is the NUL-terminated ASCII name starting at +0x16.
  # Preserve its live pointer so ConfigResp routing is bound to GUID + NAME.
  c.emit(b'\x49\x8d\x41\x16'); c.lea_rdx_data(L['varstore_name_ptr']); c.emit(b'\x48\x89\x02')
+ c.emit(b'\x89\xc8\x83\xe8\x16'); c.lea_rdx_data(L['varstore_name_remaining']); c.emit(b'\x89\x02')
  c.rel32(b'\xe9','varstore_found')
 
  c.label('varstore_name_value')
@@ -587,7 +588,9 @@ def build():
   c.rel32(b'\x0f\x85','config_guid_mismatch')
  c.emit(b'\x48\x83\xc7\x0c')
  c.lea_rax_data(L['varstore_name_ptr']); c.emit(b'\x48\x8b\x18')
+ c.lea_rax_data(L['varstore_name_remaining']); c.emit(b'\x8b\x08')
  c.label('config_name_loop')
+ c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','config_guid_mismatch')
  c.emit(b'\x44\x8a\x13\x45\x84\xd2'); c.rel32(b'\x0f\x84','config_name_done')
  c.emit(b'\x66\x81\x3f\x30\x00'); c.rel32(b'\x0f\x85','config_guid_mismatch')
  c.emit(b'\x66\x81\x7f\x02\x30\x00'); c.rel32(b'\x0f\x85','config_guid_mismatch')
@@ -597,7 +600,7 @@ def build():
  c.emit(b'\x0f\xb7\x47\x06'); c.rel32(b'\xe8','hex_utf16_nibble')
  c.emit(b'\x3c\xff'); c.rel32(b'\x0f\x84','config_guid_mismatch')
  c.emit(b'\x44\x08\xc8\x44\x38\xd0'); c.rel32(b'\x0f\x85','config_guid_mismatch')
- c.emit(b'\x48\xff\xc3\x48\x83\xc7\x08'); c.rel32(b'\xe9','config_name_loop')
+ c.emit(b'\x48\xff\xc3\x48\x83\xc7\x08\xff\xc9'); c.rel32(b'\xe9','config_name_loop')
  c.label('config_name_done')
  for disp,ch in ((0,0x26),(2,0x50),(4,0x41),(6,0x54),(8,0x48),(10,0x3d)):
   if disp==0: c.emit(b'\x66\x81\x3f'+struct.pack('<H',ch))
