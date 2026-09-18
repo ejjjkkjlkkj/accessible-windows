@@ -13,6 +13,7 @@ WAIT_UP_SPEAK=False
 WAIT_DOWN_COMMIT=False
 WAIT_DOWN_CANCEL=False
 EFI_VARSTORE_ONLY=False
+PLATFORM_TARGET_ONLY=False
 
 ROOT=Path(__file__).resolve().parents[2]
 SPEECH_BUILDER=ROOT/'boot'/'uefi-hii-option-speech-v1'/'build_uefi_hii_option_speech.py'
@@ -130,6 +131,7 @@ MARKS={
  'up_type': b'\r\nNAV_PREV_OPTION_TYPE_HEX=',
  'up_raw': b'\r\nNAV_PREV_OPTION_VALUE_RAW8_HEX=',
  'up_done': b'\r\nNAV_PREV_OPTION_DIRECT_CHILD=PASS\r\nNAV_PREV_OPTION_WRAP_POLICY=PASS\r\nEND\r\n',
+ 'platform_target': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nPLATFORM_WRITABLE_TARGET=PASS\r\nEND\r\n',
  'commit_wait': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_COMMIT_KEY=WAIT_ENTER\r\nEND\r\n',
  'commit_accept': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_COMMIT_KEY=ENTER\r\nHII_COMMIT_KEY=PASS\r\nEND\r\n',
  'commit_stage': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_COMMIT_TARGET_STAGED=PASS\r\nEND\r\n',
@@ -387,6 +389,11 @@ def build():
  c.emit(b'\x66\x85\xc0'); c.rel32(b'\x0f\x84','ifr_next')
  c.lea_rdx_data(L['varstore_id']); c.emit(b'\x66\x89\x02')
  c.emit(b'\x41\x0f\xb7\x41\x0a'); c.lea_rdx_data(L['varstore_info']); c.emit(b'\x66\x89\x02')
+ if PLATFORM_TARGET_ONLY:
+  # OVMF PlatformDxe MAIN_FORM_STATE.NextPreferredResolution: QID=2, VarStore=1, offset=32.
+  c.lea_rax_data(L['question_id']); c.emit(b'\x66\x83\x38\x02'); c.rel32(b'\x0f\x85','ifr_next')
+  c.lea_rax_data(L['varstore_id']); c.emit(b'\x66\x83\x38\x01'); c.rel32(b'\x0f\x85','ifr_next')
+  c.lea_rax_data(L['varstore_info']); c.emit(b'\x66\x83\x38\x20'); c.rel32(b'\x0f\x85','ifr_next')
  c.emit(b'\x41\x0f\xb6\x41\x0c'); c.lea_rdx_data(L['question_flags']); c.emit(b'\x88\x02')
  c.emit(b'\x41\x0f\xb6\x41\x0d'); c.lea_rdx_data(L['oneof_flags']); c.emit(b'\x88\x02')
  c.emit(b'\x41\x0f\xb7\x41\x02')
@@ -506,6 +513,9 @@ def build():
  # nested UEFI protocol calls retain Microsoft x64 / UEFI 16-byte stack alignment.
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x89\x32')
  c.rel32(b'\xe8','resolve_varstore'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
+ if PLATFORM_TARGET_ONLY:
+  c.lea_rax_data(L['varstore_size']); c.emit(b'\x66\x83\x38\x24'); c.rel32(b'\x0f\x85','prompt_next')
+  serial('platform_target')
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
@@ -533,6 +543,9 @@ def build():
  c.lea_rax_data(L['string_mode']); c.emit(b'\x80\x38\x01'); c.rel32(b'\x0f\x84','selected_ucs_found')
  c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x89\x32')
  c.rel32(b'\xe8','resolve_varstore'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
+ if PLATFORM_TARGET_ONLY:
+  c.lea_rax_data(L['varstore_size']); c.emit(b'\x66\x83\x38\x24'); c.rel32(b'\x0f\x85','prompt_next')
+  serial('platform_target')
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
@@ -576,8 +589,11 @@ def build():
  c.label('capture_scsu_loop')
  c.emit(b'\x8a\x06\x84\xc0'); c.rel32(b'\x0f\x84','capture_done')
  c.emit(b'\x48\xff\xc6\x0c\x20')
+ c.emit(b'\x3c\x30'); c.rel32(b'\x0f\x82','capture_scsu_loop')
+ c.emit(b'\x3c\x39'); c.rel32(b'\x0f\x86','capture_scsu_accept')
  c.emit(b'\x3c\x61'); c.rel32(b'\x0f\x82','capture_scsu_loop')
  c.emit(b'\x3c\x7a'); c.rel32(b'\x0f\x87','capture_scsu_loop')
+ c.label('capture_scsu_accept')
  c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','capture_done')
  c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT or WAIT_DOWN_CANCEL) else 'speech_char')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\x44\x89\x18\xff\xc7')
@@ -593,8 +609,11 @@ def build():
  c.label('capture_ucs_loop')
  c.emit(b'\x0f\xb7\x06\x85\xc0'); c.rel32(b'\x0f\x84','capture_done')
  c.emit(b'\x48\x83\xc6\x02\x83\xc8\x20')
+ c.emit(b'\x83\xf8\x30'); c.rel32(b'\x0f\x82','capture_ucs_loop')
+ c.emit(b'\x83\xf8\x39'); c.rel32(b'\x0f\x86','capture_ucs_accept')
  c.emit(b'\x83\xf8\x61'); c.rel32(b'\x0f\x82','capture_ucs_loop')
  c.emit(b'\x83\xf8\x7a'); c.rel32(b'\x0f\x87','capture_ucs_loop')
+ c.label('capture_ucs_accept')
  c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','capture_done')
  c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT or WAIT_DOWN_CANCEL) else 'speech_char')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\x44\x89\x18\xff\xc7')
@@ -1681,8 +1700,8 @@ def validate(image,pcm):
   assert token in image,token
 
 def main():
- global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE, WAIT_DOWN_SPEAK, WAIT_UP_PROBE, WAIT_UP_SPEAK, WAIT_DOWN_COMMIT, WAIT_DOWN_CANCEL, EFI_VARSTORE_ONLY
- if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak|--wait-up-probe|--wait-up-speak|--wait-down-repeat-speak|--wait-down-commit|--wait-down-cancel|--efivar-probe]')
+ global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE, WAIT_DOWN_SPEAK, WAIT_UP_PROBE, WAIT_UP_SPEAK, WAIT_DOWN_COMMIT, WAIT_DOWN_CANCEL, EFI_VARSTORE_ONLY, PLATFORM_TARGET_ONLY
+ if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak|--wait-up-probe|--wait-up-speak|--wait-down-repeat-speak|--wait-down-commit|--wait-down-cancel|--efivar-probe|--platform-probe|--wait-platform-commit]')
  if len(sys.argv)==3:
   if sys.argv[2]=='--wait-repeat': WAIT_REPEAT_KEY=True
   elif sys.argv[2]=='--wait-down-probe': WAIT_DOWN_PROBE=True
@@ -1693,6 +1712,8 @@ def main():
   elif sys.argv[2]=='--wait-down-commit': WAIT_DOWN_COMMIT=True
   elif sys.argv[2]=='--wait-down-cancel': WAIT_DOWN_CANCEL=True
   elif sys.argv[2]=='--efivar-probe': EFI_VARSTORE_ONLY=True
+  elif sys.argv[2]=='--platform-probe': PLATFORM_TARGET_ONLY=True
+  elif sys.argv[2]=='--wait-platform-commit': PLATFORM_TARGET_ONLY=True; WAIT_DOWN_COMMIT=True
   else: raise SystemExit('unknown mode: '+sys.argv[2])
  image,pcm=build(); validate(image,pcm)
  p=Path(sys.argv[1]); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(image)
@@ -1705,6 +1726,7 @@ def main():
  print('hii-down-speak=' + ('enabled' if WAIT_DOWN_SPEAK else 'disabled'))
  print('hii-up-probe=' + ('enabled' if WAIT_UP_PROBE else 'disabled'))
  print('efi-varstore-only=' + ('enabled' if EFI_VARSTORE_ONLY else 'disabled'))
+ print('platform-target-only=' + ('enabled' if PLATFORM_TARGET_ONLY else 'disabled'))
  print('hii-up-speak=' + ('enabled' if WAIT_UP_SPEAK else 'disabled'))
  print('hii-down-repeat-speak=' + ('enabled' if (WAIT_DOWN_SPEAK and WAIT_REPEAT_KEY) else 'disabled'))
  print('hii-down-commit=' + ('enabled' if WAIT_DOWN_COMMIT else 'disabled'))
