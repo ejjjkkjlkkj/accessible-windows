@@ -56,6 +56,8 @@ MARKS={
  'key_fail': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=TEXT_INPUT_INVALID_OR_TOO_LONG\r\nEND\r\n',
  'topology_fail': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=AUTO_OUTPUT_ROUTE_DISCOVERY_FAILED\r\nEND\r\n',
  'policy_fail': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=OUTPUT_POLICY_FAILED\r\nEND\r\n',
+ 'spoken_prefix': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nOPTION_SPOKEN_PREFIX=',
+ 'spoken_prefix_done': b'\r\nOPTION_SPOKEN_PREFIX=PASS\r\nEND\r\n',
 }
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -430,6 +432,7 @@ def build():
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\xc7\x00\x00\x00')
  c.lea_rdx_data(L['text_count']); c.emit(b'\x89\x3a')
  serial('hii')
+ serial('spoken_prefix'); c.rel32(b'\xe8','serial_textbuf'); serial('spoken_prefix_done')
 
  # Scan full PCI config mechanism-1 segment for class 04/subclass 03.
  c.emit(b'\x45\x31\xe4')
@@ -739,6 +742,16 @@ def build():
 
  c.label('pci_read32'); c.emit(b'\x66\xba\xf8\x0c\xef\x66\xba\xfc\x0c\xed\xc3')
  c.label('pci_write32'); c.emit(b'\x66\xba\xf8\x0c\xef\x89\xc8\x66\xba\xfc\x0c\xef\xc3')
+
+ c.label('serial_textbuf')
+ c.lea_rsi_data(L['textbuf']); c.lea_rdx_data(L['text_count']); c.emit(b'\x8b\x0a')
+ c.label('serial_textbuf_loop')
+ c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','serial_textbuf_done')
+ c.emit(b'\x0f\xb7\x06\x48\x83\xc6\x02\x88\xc3\x66\xba\xfd\x03')
+ c.label('serial_textbuf_wait'); c.emit(b'\xec\xa8\x20'); c.rel8(0x74,'serial_textbuf_wait')
+ c.emit(b'\x66\xba\xf8\x03\x88\xd8\xee\xff\xc9'); c.rel32(b'\xe9','serial_textbuf_loop')
+ c.label('serial_textbuf_done'); c.emit(b'\xc3')
+
  c.label('serial_emit')
  c.emit(b'\x49\x89\xd0\x66\xba\xfd\x03')
  c.label('serial_wait'); c.emit(b'\xec\xa8\x20'); c.rel8(0x74,'serial_wait')
