@@ -127,6 +127,21 @@ public sealed class NativeRecallForm : Form
         Project(carrier);
     }
 
+    protected override bool ProcessDialogKey(Keys keyData)
+    {
+        if (keyData == Keys.Left)
+        {
+            Previous("keyboard-left");
+            return true;
+        }
+        if (keyData == Keys.Right)
+        {
+            Next("keyboard-right");
+            return true;
+        }
+        return base.ProcessDialogKey(keyData);
+    }
+
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         if (keyData == Keys.Left)
