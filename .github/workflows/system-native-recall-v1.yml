@@ -175,11 +175,13 @@ jobs:
             $next.SetFocus()
             Start-Sleep -Milliseconds 250
             if (-not $next.Current.HasKeyboardFocus) { throw 'recall next button keyboard focus failed' }
+            $ws=New-Object -ComObject WScript.Shell
+            [void]$ws.AppActivate([int]$p.Id)
             Start-Sleep -Milliseconds 200
             if (-not $next.Current.HasKeyboardFocus) { throw 'recall next button lost keyboard focus' }
-            [NativeRecallWin32]::SendVirtualKey(0x27)
+            $ws.SendKeys('{ENTER}')
             Wait-TraceCount 3
-            [NativeRecallWin32]::SendVirtualKey(0x27)
+            $ws.SendKeys('{ENTER}')
             Wait-TraceCount 4
 
             $invokePrev.Invoke()
@@ -189,9 +191,10 @@ jobs:
             $previous.SetFocus()
             Start-Sleep -Milliseconds 250
             if (-not $previous.Current.HasKeyboardFocus) { throw 'recall previous button keyboard focus failed' }
+            [void]$ws.AppActivate([int]$p.Id)
             Start-Sleep -Milliseconds 200
             if (-not $previous.Current.HasKeyboardFocus) { throw 'recall previous button lost keyboard focus' }
-            [NativeRecallWin32]::SendVirtualKey(0x25)
+            $ws.SendKeys('{ENTER}')
             Wait-TraceCount 6
 
             $invokePrev.Invoke()
@@ -214,10 +217,10 @@ jobs:
           $expected=@(
             @{carrier='startup';index='0';msg='Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'},
             @{carrier='assistive-next';index='1';msg='Episode 2 of 4: current exchange, goal identity, target identity, result identity'},
-            @{carrier='keyboard-right';index='2';msg='Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'},
-            @{carrier='keyboard-right';index='3';msg='Episode 4 of 4: current identity, goal exchange, target identity, result identity'},
+            @{carrier='keyboard-next';index='2';msg='Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'},
+            @{carrier='keyboard-next';index='3';msg='Episode 4 of 4: current identity, goal exchange, target identity, result identity'},
             @{carrier='assistive-previous';index='2';msg='Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'},
-            @{carrier='keyboard-left';index='1';msg='Episode 2 of 4: current exchange, goal identity, target identity, result identity'},
+            @{carrier='keyboard-previous';index='1';msg='Episode 2 of 4: current exchange, goal identity, target identity, result identity'},
             @{carrier='assistive-previous';index='0';msg='Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'}
           )
 
@@ -245,8 +248,8 @@ jobs:
             'episodes-recalled = 4'
             'assistive-next = PASS'
             'assistive-previous = PASS'
-            'keyboard-right = PASS'
-            'keyboard-left = PASS'
+            'keyboard-next = PASS'
+            'keyboard-previous = PASS'
             'visible-uia-speech-braille-equivalence = PASS'
             'read-only-history = PASS'
             "history-before-sha256 = $before"
@@ -348,8 +351,8 @@ jobs:
           assert values['episodes-recalled']=='4'
           assert values['assistive-next']=='PASS'
           assert values['assistive-previous']=='PASS'
-          assert values['keyboard-right']=='PASS'
-          assert values['keyboard-left']=='PASS'
+          assert values['keyboard-next']=='PASS'
+          assert values['keyboard-previous']=='PASS'
           assert values['visible-uia-speech-braille-equivalence']=='PASS'
           assert values['read-only-history']=='PASS'
           assert values['history-before-sha256']==digest
