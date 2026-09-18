@@ -478,7 +478,6 @@ impl MemoryRecordV1 {
     }
 }
 
-
 /// Native identity for an explicit capability grant.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -543,8 +542,7 @@ pub mod capability_right {
     pub const DELEGATE: u64 = 1 << 6;
 
     /// Rights that can mutate or extend authority.
-    pub const MUTATING: u64 =
-        WRITE | INVOKE | CONFIGURE | RECOVER | UPDATE | DELEGATE;
+    pub const MUTATING: u64 = WRITE | INVOKE | CONFIGURE | RECOVER | UPDATE | DELEGATE;
 }
 
 /// Target and lifetime of a capability.
@@ -581,8 +579,7 @@ impl CapabilityScopeV1 {
     /// Returns true when the scope is active for a generation.
     #[must_use]
     pub const fn is_active_at(self, generation: u64) -> bool {
-        generation >= self.valid_from_generation
-            && generation <= self.valid_until_generation
+        generation >= self.valid_from_generation && generation <= self.valid_until_generation
     }
 }
 
@@ -664,8 +661,7 @@ impl CapabilityGrantV1 {
             return Err(CapabilityGrantError::PlannerMayNotMutate);
         }
         if matches!(self.subject, AuthorityDomain::KernelAuthority)
-            && (!matches!(self.issuer, AuthorityDomain::KernelAuthority)
-                || !self.parent.is_zero())
+            && (!matches!(self.issuer, AuthorityDomain::KernelAuthority) || !self.parent.is_zero())
         {
             return Err(CapabilityGrantError::KernelAuthorityNotDelegable);
         }
@@ -694,10 +690,7 @@ impl CapabilityGrantV1 {
 mod tests {
     use super::*;
 
-    fn scoped_capability(
-        subject: AuthorityDomain,
-        rights: u64,
-    ) -> CapabilityGrantV1 {
+    fn scoped_capability(subject: AuthorityDomain, rights: u64) -> CapabilityGrantV1 {
         CapabilityGrantV1::new(
             CapabilityId::new(1),
             CapabilityId::ZERO,
@@ -726,34 +719,15 @@ mod tests {
             capability_right::READ | capability_right::INVOKE,
         );
         assert_eq!(grant.validate(), Ok(()));
-        assert!(grant.authorizes(
-            SemanticObjectId::new(500),
-            capability_right::INVOKE,
-            15,
-        ));
-        assert!(!grant.authorizes(
-            SemanticObjectId::new(501),
-            capability_right::INVOKE,
-            15,
-        ));
-        assert!(!grant.authorizes(
-            SemanticObjectId::new(500),
-            capability_right::WRITE,
-            15,
-        ));
-        assert!(!grant.authorizes(
-            SemanticObjectId::new(500),
-            capability_right::INVOKE,
-            21,
-        ));
+        assert!(grant.authorizes(SemanticObjectId::new(500), capability_right::INVOKE, 15,));
+        assert!(!grant.authorizes(SemanticObjectId::new(501), capability_right::INVOKE, 15,));
+        assert!(!grant.authorizes(SemanticObjectId::new(500), capability_right::WRITE, 15,));
+        assert!(!grant.authorizes(SemanticObjectId::new(500), capability_right::INVOKE, 21,));
     }
 
     #[test]
     fn capability_kernel_authority_cannot_be_minted_by_human_domain() {
-        let grant = scoped_capability(
-            AuthorityDomain::KernelAuthority,
-            capability_right::READ,
-        );
+        let grant = scoped_capability(AuthorityDomain::KernelAuthority, capability_right::READ);
         assert_eq!(
             grant.validate(),
             Err(CapabilityGrantError::KernelAuthorityNotDelegable)
