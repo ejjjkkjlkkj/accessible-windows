@@ -28,17 +28,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 ovmf
 
-      - name: Enforce proven native dependencies
+      - name: Enforce proven current native dependencies
         shell: python
         run: |
           from pathlib import Path
-          for path in [
-              'boot/uefi-native-speech-v1/os-uefi-native-speech-v1.labproof',
-              'boot/uefi-hda-playback-v1/os-uefi-hda-playback-v1.labproof',
-          ]:
-              lines=set(Path(path).read_text().splitlines())
-              assert 'proof = PASS' in lines, path
-          print('HDA_SPEECH_DEPENDENCIES=PASS')
+          import subprocess
+
+          deps=[
+              (
+                  'boot/uefi-native-speech-v1/os-uefi-native-speech-v1.labproof',
+                  'boot/uefi-native-speech-v1/build_uefi_native_speech.py',
+              ),
+              (
+                  'boot/uefi-hda-playback-v1/os-uefi-hda-playback-v1.labproof',
+                  'boot/uefi-hda-playback-v1/build_uefi_hda_playback.py',
+              ),
+          ]
+          def git(*args):
+              return subprocess.check_output(['git',*args],text=True).strip()
+          for proof_path,source_path in deps:
+              lines=Path(proof_path).read_text().splitlines()
+              assert 'proof = PASS' in lines, proof_path
+              heads=[x.split(' = ',1)[1] for x in lines if x.startswith('proof-head-sha = ')]
+              assert len(heads)==1, (proof_path,heads)
+              tested=git('rev-parse',f'{heads[0]}:{source_path}')
+              current=git('rev-parse',f'HEAD:{source_path}')
+              assert tested==current, f'stale dependency proof: {proof_path}'
+          print('HDA_SPEECH_DEPENDENCIES_CURRENT=PASS')
 
       - name: Build deterministic HDA speech image twice
         shell: bash
@@ -286,7 +302,9 @@ jobs:
           builder="$root/build_uefi_hda_speech.py"
           speech_builder=boot/uefi-native-speech-v1/build_uefi_native_speech.py
           playback_builder=boot/uefi-hda-playback-v1/build_uefi_hda_playback.py
+          workflow=.github/workflows/os-uefi-hda-speech-v1.yml
           tested_builder="$(git rev-parse "$GITHUB_SHA:$builder")"
+          tested_workflow="$(git rev-parse "$GITHUB_SHA:$workflow")"
           tested_speech="$(git rev-parse "$GITHUB_SHA:$speech_builder")"
           tested_playback="$(git rev-parse "$GITHUB_SHA:$playback_builder")"
           cp "$root/hda-speech.wav" /tmp/hda-speech.wav
@@ -297,6 +315,7 @@ jobs:
           git fetch origin os
           git checkout -B os origin/os
           [[ "$tested_builder" == "$(git rev-parse "os:$builder")" ]] || { echo HDA_SPEECH_STALE_BUILDER=SKIP; exit 0; }
+          [[ "$tested_workflow" == "$(git rev-parse "os:$workflow")" ]] || { echo HDA_SPEECH_STALE_WORKFLOW=SKIP; exit 0; }
           [[ "$tested_speech" == "$(git rev-parse "os:$speech_builder")" ]] || { echo HDA_SPEECH_STALE_SYNTH=SKIP; exit 0; }
           [[ "$tested_playback" == "$(git rev-parse "os:$playback_builder")" ]] || { echo HDA_SPEECH_STALE_PLAYBACK=SKIP; exit 0; }
 
@@ -308,15 +327,19 @@ jobs:
           root=Path('boot/uefi-hda-speech-v1')
           p=root/'os-uefi-hda-speech-v1.labproof'
           text=p.read_text()
-          if 'proof = PASS' in text:
-              raise SystemExit(0)
-          if 'proof = PENDING_CI' not in text:
+          states=[line for line in text.splitlines() if line.startswith('proof = ')]
+          if len(states) != 1 or states[0] not in {'proof = PENDING_CI','proof = PASS'}:
               raise SystemExit('unexpected proof state')
           efi=Path('/tmp/hda-speech.efi').read_bytes()
           wav=Path('/tmp/hda-speech.wav').read_bytes()
           serial=Path('/tmp/hda-speech.serial').read_bytes()
           metrics=Path('/tmp/hda-speech-metrics.txt').read_text().strip().replace('\n','; ')
-          text=text.replace('proof = PENDING_CI','proof = PASS')
+          kept=[]
+          for line in text.splitlines():
+              if line.startswith('proof-') or line.startswith('revalidation-reason ='):
+                  continue
+              kept.append('proof = PASS' if line.startswith('proof = ') else line)
+          text='\n'.join(kept).rstrip()+'\n'
           text += (
               f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
               f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
