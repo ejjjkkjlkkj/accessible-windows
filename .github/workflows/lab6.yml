@@ -2,6 +2,10 @@ name: lab6-relation-closure
 on:
   push:
     branches: [os]
+    paths:
+      - 'lab2/relation0'
+      - 'lab6/relation1'
+      - 'lab6/relation2'
   workflow_dispatch:
 
 permissions:

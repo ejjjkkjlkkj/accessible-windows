@@ -2,6 +2,9 @@ name: lab10-machine-binary-scale
 on:
   push:
     branches: [os]
+    paths:
+      - 'lab10/**'
+      - '!lab10/*.labproof'
   workflow_dispatch:
 
 permissions:

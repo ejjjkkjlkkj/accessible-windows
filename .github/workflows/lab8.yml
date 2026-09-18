@@ -2,6 +2,10 @@ name: lab8-pair-composition
 on:
   push:
     branches: [os]
+    paths:
+      - 'lab0/mark0'
+      - 'lab3/inverted0'
+      - 'lab2/relation0'
   workflow_dispatch:
 
 permissions:

@@ -2,6 +2,9 @@ name: lab7-local-disturbance
 on:
   push:
     branches: [os]
+    paths:
+      - 'lab0/mark0'
+      - 'lab2/relation0'
   workflow_dispatch:
 
 permissions:

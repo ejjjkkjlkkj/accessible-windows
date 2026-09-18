@@ -2,6 +2,9 @@ name: lab9-exhaustive-finite-closure
 on:
   push:
     branches: [os]
+    paths:
+      - 'lab9/**'
+      - '!lab9/*.labproof'
   workflow_dispatch:
 
 permissions:
