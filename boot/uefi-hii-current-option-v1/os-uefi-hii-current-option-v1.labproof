@@ -21,6 +21,7 @@ question-text-source = live Strings package belonging to the same exported HII p
 current-value-source = live read-only HII Config Routing ExportConfig plus ConfigToBlock
 option-selection-source = direct child EFI_IFR_ONE_OF_OPTION whose numeric width and typed value equal the live current ONE_OF value
 option-string-id-source = matching live EFI_IFR_ONE_OF_OPTION in that same Forms package
+option-string-id-state = dedicated current-option token retained separately from the question Prompt StringId until selected-label decoding
 option-text-source = live Strings package belonging to the same HII package-list namespace as the matched Forms package
 option-text-language-binding = exact same EFI_HII_PACKAGE_STRINGS package that successfully resolved QUESTION_TEXT
 string-decoder = native direct EFI HII SCSU and UCS2 string-block decoder
