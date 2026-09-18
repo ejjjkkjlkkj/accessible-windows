@@ -403,15 +403,31 @@ jobs:
               print("QEMU_HDA_WAVEFORM=PASS")
               (root/"qemu-waveform.txt").write_text("qemu-waveform = PASS\n")
           except Exception as e:
-              # Runtime HDA proof above is independent: controller, DMA/LPIB and
-              # speech all passed. Preserve the Windows WAV-backend anomaly as
-              # explicit evidence instead of turning it into a false waveform PASS.
-              print("QEMU_HDA_WAVEFORM=NOT_ESTABLISHED_ON_WINDOWS_BACKEND")
-              print("QEMU_WAV_PARSE_ERROR="+repr(e))
+              # QEMU's Windows wav backend can leave RIFF/data length fields at
+              # zero even after QMP quit. Validate the actual PCM payload from
+              # the canonical 44-byte PCM header instead of rejecting valid audio.
+              assert blob[:4]==b"RIFF" and blob[8:12]==b"WAVE",blob[:16]
+              assert blob[12:16]==b"fmt " and blob[36:40]==b"data",blob[:44]
+              audio_fmt,channels,rate,byte_rate,align,bits=struct.unpack_from("<HHIIHH",blob,20)
+              assert (audio_fmt,channels,rate,bits)==(1,2,48000,16),(audio_fmt,channels,rate,bits)
+              assert align==4 and byte_rate==192000,(align,byte_rate)
+              raw=blob[44:]
+              assert len(raw)>=10000 and len(raw)%2==0,len(raw)
+              vals=struct.unpack("<"+"h"*(len(raw)//2),raw)
+              peak=max(abs(v) for v in vals)
+              active=sum(abs(v)>=500 for v in vals)
+              assert peak>=5000,peak
+              assert active>=3000,active
+              print("QEMU_WAV_PARSE_FALLBACK=PASS")
+              print("QEMU_WAV_PARSE_ORIGINAL_ERROR="+repr(e))
+              print("QEMU_HDA_WAVEFORM=PASS")
               (root/"qemu-waveform.txt").write_text(
-                  "qemu-waveform = NOT_ESTABLISHED_ON_WINDOWS_BACKEND\n"
+                  "qemu-waveform = PASS\n"
+                  "qemu-wave-header-size-fields = zero-on-windows-backend\n"
                   "qemu-wav-head-hex = "+blob[:64].hex()+"\n"
                   "qemu-wav-bytes = "+str(len(blob))+"\n"
+                  "qemu-wave-peak = "+str(peak)+"\n"
+                  "qemu-wave-active = "+str(active)+"\n"
               )
           '@ | Set-Content $script -Encoding utf8
           & $env:PYTHON_EXE $script $root | Tee-Object (Join-Path $root 'qemu-result.txt')
@@ -455,31 +471,37 @@ jobs:
           Remove-Item $serial -Force -ErrorAction SilentlyContinue
           & $env:VMRUN_EXE -T ws start $vmx nogui
           if($LASTEXITCODE -ne 0){ throw 'vmrun start failed' }
+          $started=$true
           try {
-            $ok=$false
-            for($i=0;$i -lt 90;$i++){
-              Start-Sleep -Milliseconds 500
-              if(Test-Path $serial){
-                $raw=[IO.File]::ReadAllText($serial)
-                if($raw -match 'STATE=START' -and $raw -match 'HII_DATABASE_PROTOCOL=PASS' -and $raw -match 'HII_STRING_PROTOCOL=PASS'){
-                  $ok=$true; break
-                }
-              }
-            }
-            if(-not $ok){
-              $tail=if(Test-Path $serial){ Get-Content $serial -Raw }else{'<no serial>'}
-              throw "VMware UEFI reader did not establish loader+HII protocols: $tail"
-            }
-            @(
-              'VMWARE_WORKSTATION=PASS'
-              'VMWARE_UEFI_LOADER=PASS'
-              'VMWARE_HII_DATABASE_PROTOCOL=PASS'
-              'VMWARE_HII_STRING_PROTOCOL=PASS'
-              'VMWARE_FULL_HDA_SPEECH=' + $(if((Get-Content $serial -Raw) -match 'CURRENT_OPTION_SPEECH_HDA=PASS|NAV_FOCUS_SPEECH_HDA=PASS'){'PASS'}else{'NOT_ESTABLISHED'})
-            ) | Set-Content (Join-Path $root 'vmware-result.txt') -Encoding ascii
+            # VMware Workstation opens file-backed serial output exclusively on
+            # Windows. Let UEFI execute, stop the VM, then inspect the released file.
+            Start-Sleep -Seconds 20
           } finally {
-            & $env:VMRUN_EXE -T ws stop $vmx hard 2>$null | Out-Null
+            if($started){
+              & $env:VMRUN_EXE -T ws stop $vmx hard 2>$null | Out-Null
+              Start-Sleep -Seconds 1
+            }
           }
+          if(-not (Test-Path $serial)){ throw 'VMware serial evidence file was not created' }
+          $raw=''
+          for($i=0;$i -lt 20;$i++){
+            try {
+              $raw=[IO.File]::ReadAllText($serial)
+              break
+            } catch {
+              Start-Sleep -Milliseconds 250
+            }
+          }
+          if(-not ($raw -match 'STATE=START' -and $raw -match 'HII_DATABASE_PROTOCOL=PASS' -and $raw -match 'HII_STRING_PROTOCOL=PASS')){
+            throw "VMware UEFI reader did not establish loader+HII protocols: $raw"
+          }
+          @(
+            'VMWARE_WORKSTATION=PASS'
+            'VMWARE_UEFI_LOADER=PASS'
+            'VMWARE_HII_DATABASE_PROTOCOL=PASS'
+            'VMWARE_HII_STRING_PROTOCOL=PASS'
+            'VMWARE_FULL_HDA_SPEECH=' + $(if($raw -match 'CURRENT_OPTION_SPEECH_HDA=PASS|NAV_FOCUS_SPEECH_HDA=PASS'){'PASS'}else{'NOT_ESTABLISHED'})
+          ) | Set-Content (Join-Path $root 'vmware-result.txt') -Encoding ascii
 
       - name: Final evidence manifest
         shell: pwsh
