@@ -18,6 +18,9 @@ MARKS={
  'no_protocol': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_PROTOCOL_NOT_FOUND\r\nEND\r\n',
  'list_size_fail': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_SIZE_QUERY_FAILED\r\nEND\r\n',
  'list_fetch_fail': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_FAILED\r\nEND\r\n',
+ 'list_fetch_invalid': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_EFI_INVALID_PARAMETER\r\nEND\r\n',
+ 'list_fetch_not_found': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_EFI_NOT_FOUND\r\nEND\r\n',
+ 'list_static_small': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_STATIC_BUFFER_TOO_SMALL\r\nEND\r\n',
  'no_handle': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_FORMS_HANDLE_NOT_FOUND\r\nEND\r\n',
  'alloc': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=POOL_ALLOC_FAILED\r\nEND\r\n',
  'export': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_HANDLE_EXPORT_FAILED\r\nEND\r\n',
@@ -55,12 +58,13 @@ class Code:
 def put(b,o,f,*v): struct.pack_into(f,b,o,*v)
 
 def build():
- data=bytearray(0x100)
+ data=bytearray(0x1100)
  L={
   'db_guid':0,'str_guid':16,'dbptr':32,'strptr':40,
   'handles_size':48,'handles_ptr':56,'pkg_size':64,'pkg_ptr':72,
   'langs_size':80,'langs_ptr':88,'string_size':96,'string_ptr':104,
   'token':112,'temp_handle':120,'handle_cursor':128,'handles_remaining':136,
+  'handles_static':0x100,
  }
  struct.pack_into('<IHH8B',data,L['db_guid'],
   0xef9fc172,0xa1b2,0x4693,0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42)
@@ -107,36 +111,21 @@ def build():
  c.emit(b'\x4d\x85\xed'); c.rel32(b'\x0f\x84','fail_protocol')
  serial('string_protocol')
 
- # Enumerate every HII handle, then verify package ownership by export.
- zero_qword(L['handles_size'])
- zero_qword(L['temp_handle'])
- c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')  # PackageType=ALL
- c.lea_r9_data(L['handles_size'])
- c.lea_rax_data(L['temp_handle']); c.emit(b'\x48\x89\x44\x24\x20')
- c.emit(b'\x41\xff\x54\x24\x18')
- c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x08'); c.rel32(b'\x0f\x82','fail_list_size')
-
- alloc(True,L['handles_ptr'])
+ # Take one atomic snapshot of every active HII handle into bridge-owned
+ # storage. Avoid a sizing/fetch race while firmware HII registrations move.
+ c.lea_rdx_data(L['handles_size'])
+ c.emit(b'\x48\xc7\x02'+struct.pack('<I',0x1000))
  c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')
  c.lea_r9_data(L['handles_size'])
- c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02\x48\x89\x44\x24\x20')
+ c.lea_rax_data(L['handles_static']); c.emit(b'\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
  c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x84','list_fetch_ready')
- # EFI_BUFFER_TOO_SMALL may recur if HII grows between sizing and fetch.
- # Retry once with the newly reported handle-buffer size.
- c.emit(b'\x83\xf8\x05'); c.rel32(b'\x0f\x85','fail_list_fetch')
- c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x08'); c.rel32(b'\x0f\x82','fail_list_fetch')
- alloc(True,L['handles_ptr'])
- c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')
- c.lea_r9_data(L['handles_size'])
- c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02\x48\x89\x44\x24\x20')
- c.emit(b'\x41\xff\x54\x24\x18')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_list_fetch')
+ c.emit(b'\x83\xf8\x02'); c.rel32(b'\x0f\x84','fail_list_fetch_invalid')
+ c.emit(b'\x83\xf8\x0e'); c.rel32(b'\x0f\x84','fail_list_fetch_not_found')
+ c.emit(b'\x83\xf8\x05'); c.rel32(b'\x0f\x84','fail_list_static_small')
+ c.rel32(b'\xe9','fail_list_fetch')
  c.label('list_fetch_ready')
-
- c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02')
+ c.lea_rax_data(L['handles_static'])
  c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x89\x02')
  c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x02')
  c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x89\x02')
@@ -268,6 +257,9 @@ def build():
  c.label('fail_protocol'); serial('no_protocol'); c.rel32(b'\xe9','return_fail')
  c.label('fail_list_size'); serial('list_size_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_list_fetch'); serial('list_fetch_fail'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_list_fetch_invalid'); serial('list_fetch_invalid'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_list_fetch_not_found'); serial('list_fetch_not_found'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_list_static_small'); serial('list_static_small'); c.rel32(b'\xe9','return_fail')
  c.label('fail_no_handle'); serial('no_handle'); c.rel32(b'\xe9','return_fail')
  c.label('fail_alloc'); serial('alloc'); c.rel32(b'\xe9','return_fail')
  c.label('fail_export'); serial('export'); c.rel32(b'\xe9','return_fail')
