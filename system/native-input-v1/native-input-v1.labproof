@@ -1,0 +1,26 @@
+NATIVE-INPUT-V1
+role = system-owned-multimodal-input-normalization-foundation-v1
+system-foundation = true
+depends-on = LAB21 native relational core v1
+depends-on = LAB24 native transition core v1
+depends-on = NATIVE-ACCESSIBILITY-V1
+input-semantic-source = structurally discovered LAB21 relation roles
+external-input-carrier-a = UIA InvokePattern
+external-input-carrier-b = keyboard Enter
+normalization-rule = from identical initial exchange role derive the unique native inverse action
+normalized-native-action-role = exchange
+target-native-role = identity
+carrier-specific-semantics-after-normalization = forbidden
+pointer-required = false
+vision-required = false
+human-facing = true
+accessibility-behavior = PENDING
+target-real-runner = AMD-5800H-REAL
+independent-observer = GitHub-hosted Linux semantic trace replay
+external-infrastructure = Windows Forms UIA keyboard Windows AMD x86-64 Linux GitHub Actions PowerShell CSharp Python .NET
+external-infrastructure-semantics = carrier-and-witness-only
+proof = PENDING
+accessibility-gate = every future input modality including braille keys speech touch switches gaze or device events must normalize into native action semantics before system-owned cognition or action processing and must not require sight or pointer use
+claim = success will establish that assistive invocation and keyboard input from the same initial native state normalize to the same native structural action and reach the same native goal
+claim = success will not make UIA keyboard WinForms Windows or host-language event models part of system semantics
+claim = this proof does not yet establish speech recognition braille hardware touch switch or gaze input
