@@ -370,11 +370,21 @@ jobs:
                   break
               time.sleep(.1)
           else: raise SystemExit("timeout final speech")
-          proc.terminate()
-          try: proc.wait(timeout=5)
+          # Ask QEMU to exit through QMP so the Windows WAV backend can
+          # flush PCM data and finalize the RIFF/WAVE header before validation.
+          with socket.create_connection(("127.0.0.1",45555),2) as qs:
+              qf=qs.makefile("rwb",buffering=0)
+              json.loads(qf.readline())
+              qf.write((json.dumps({"execute":"qmp_capabilities"})+"\r\n").encode())
+              while True:
+                  m=json.loads(qf.readline())
+                  if "return" in m: break
+              qf.write((json.dumps({"execute":"quit"})+"\r\n").encode())
+          try: proc.wait(timeout=10)
           except subprocess.TimeoutExpired:
               proc.kill()
               proc.wait(timeout=5)
+              raise SystemExit("QEMU did not exit cleanly after QMP quit")
           wav=root/"qemu.wav"
           end=time.time()+10
           while time.time()<end and (not wav.exists() or wav.stat().st_size<10000): time.sleep(.1)
