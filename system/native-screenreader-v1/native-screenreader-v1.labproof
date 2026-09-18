@@ -1,0 +1,27 @@
+NATIVE-SCREENREADER-V1
+role = external-screen-reader-behavior-witness-for-native-accessibility-v1
+system-foundation = false
+depends-on = NATIVE-ACCESSIBILITY-V1
+native-semantic-source = structurally discovered identity role
+human-semantic-message = Native state identity
+speech-projection = NVDA Controller Client nvdaController_speakText
+braille-projection = NVDA Controller Client nvdaController_brailleMessage
+screen-reader-running-probe = NVDA Controller Client nvdaController_testIfRunning
+screen-reader-process-probe = NVDA Controller Client nvdaController_getProcessId when supported
+required-controller-success-code = 0
+controller-version-source = official NV Access stable controllerClient package
+controller-version-target = 2026.2 stable
+controller-architecture = x64
+secure-data = false
+secure-screen-policy = refuse controller output when Windows LogonUI indicates a locked or secure screen
+target-real-runner = AMD-5800H-REAL
+screen-reader = NVDA
+screen-reader-semantics = external-witness-only
+controller-client-semantics = external-witness-only
+system-semantic-authority = NATIVE-ACCESSIBILITY-V1 only
+proof = PENDING
+human-facing = true
+accessibility-behavior = PENDING
+claim = success will prove that the exact native human semantic message is accepted by a running NVDA instance for speech and braille projection
+claim = success will not prove audible acoustic capture or physical braille-cell movement
+claim = NVDA and its controller client remain external compatibility witnesses rather than foundations of the system
