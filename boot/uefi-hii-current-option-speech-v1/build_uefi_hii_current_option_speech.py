@@ -10,6 +10,7 @@ WAIT_DOWN_PROBE=False
 WAIT_DOWN_SPEAK=False
 WAIT_UP_PROBE=False
 WAIT_UP_SPEAK=False
+WAIT_DOWN_COMMIT=False
 
 ROOT=Path(__file__).resolve().parents[2]
 SPEECH_BUILDER=ROOT/'boot'/'uefi-hii-option-speech-v1'/'build_uefi_hii_option_speech.py'
@@ -125,6 +126,18 @@ MARKS={
  'up_type': b'\r\nNAV_PREV_OPTION_TYPE_HEX=',
  'up_raw': b'\r\nNAV_PREV_OPTION_VALUE_RAW8_HEX=',
  'up_done': b'\r\nNAV_PREV_OPTION_DIRECT_CHILD=PASS\r\nNAV_PREV_OPTION_WRAP_POLICY=PASS\r\nEND\r\n',
+ 'commit_wait': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_COMMIT_KEY=WAIT_ENTER\r\nEND\r\n',
+ 'commit_accept': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_COMMIT_KEY=ENTER\r\nHII_COMMIT_KEY=PASS\r\nEND\r\n',
+ 'commit_stage': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_COMMIT_TARGET_STAGED=PASS\r\nEND\r\n',
+ 'commit_request': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_COMMIT_CONFIG_REQUEST=PASS\r\nEND\r\n',
+ 'commit_block': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nBLOCK_TO_CONFIG=PASS\r\nEND\r\n',
+ 'commit_route': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nROUTE_CONFIG=PASS\r\nEND\r\n',
+ 'commit_verify': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nPOST_COMMIT_REREAD=PASS\r\nPOST_COMMIT_OPTION_MATCH=PASS\r\nEND\r\n',
+ 'commit_confirm': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nCOMMIT_CONFIRMATION_SPEECH_HDA=PASS\r\nEND\r\n',
+ 'commit_request_fail': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=COMMIT_CONFIG_REQUEST_FAILED\r\nEND\r\n',
+ 'commit_block_fail': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=BLOCK_TO_CONFIG_FAILED\r\nEND\r\n',
+ 'commit_route_fail': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=ROUTE_CONFIG_FAILED\r\nEND\r\n',
+ 'commit_verify_fail': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=POST_COMMIT_REREAD_MISMATCH\r\nEND\r\n',
  'done': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=PASS\r\nEND\r\n',
  'no_hda': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_PCI_NOT_FOUND\r\nEND\r\n',
  'bad_hda': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HDA_CONTROLLER_OR_CODEC_FAILED\r\nEND\r\n',
@@ -170,7 +183,7 @@ def put(b,o,f,*v): struct.pack_into(f,b,o,*v)
 
 def build():
  pcm=speech.make_pcm()
- data=bytearray(0x211400)
+ data=bytearray(0x216000)
  L={
   'db_guid':0,'str_guid':16,'dbptr':32,'strptr':40,
   'handles_size':48,'handles_ptr':56,'pkg_size':64,'pkg_ptr':72,
@@ -190,6 +203,8 @@ def build():
   'textbuf':432,'text_count':452,'keybuf':456,
   'selected_option_ptr':464,'nav_option_token':472,'nav_option_type':474,'nav_option_raw':480,
   'prev_option_ptr':488,'prev_wrap_flag':496,'conin_ptr':504,
+  'commit_config':512,'commit_progress':520,'commit_done':528,
+  'commit_request':0x212000,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -204,12 +219,14 @@ def build():
  struct.pack_into('<Q',data,L['maxaddr'],0xffffffff)
  for n,m in MARKS.items():
   L[n]=len(data); data+=m
+ L['commit_offset_utf16']=len(data); data+='&OFFSET='.encode('utf-16le')
+ L['commit_width_utf16']=len(data); data+='&WIDTH='.encode('utf-16le')
  L['pcm']=len(data); data+=pcm
 
  c=Code()
  c.emit(b'\x53\x55\x56\x57\x41\x54\x41\x55\x41\x56\x41\x57')
  c.emit(b'\x4c\x8b\x7a\x60')  # r15=BootServices
- if WAIT_REPEAT_KEY or WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK or WAIT_UP_PROBE or WAIT_UP_SPEAK:
+ if WAIT_REPEAT_KEY or WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK or WAIT_UP_PROBE or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT:
   # Persist ConIn in bridge-owned data. RBP is intentionally used as scratch by
   # later machine-code paths, so keeping ConIn in RBP can corrupt ReadKeyStroke.
   c.emit(b'\x48\x8b\x42\x30')
@@ -486,11 +503,11 @@ def build():
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
- if WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK:
+ if WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK or WAIT_DOWN_COMMIT:
   c.rel32(b'\xe8','wait_down_key'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','resolve_next_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','emit_nav_meta')
-  if WAIT_DOWN_SPEAK or WAIT_UP_SPEAK:
+  if WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT:
    c.lea_rax_data(L['nav_option_token']); c.emit(b'\x0f\xb7\x00'); c.lea_rdx_data(L['selected_option_token']); c.emit(b'\x66\x89\x02')
    serial('nav_focus_activate')
  elif WAIT_UP_PROBE or WAIT_UP_SPEAK:
@@ -513,11 +530,11 @@ def build():
  c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.rel32(b'\xe8','emit_question_meta'); c.rel32(b'\xe8','emit_varstore_meta'); c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta')
- if WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK:
+ if WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK or WAIT_DOWN_COMMIT:
   c.rel32(b'\xe8','wait_down_key'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','resolve_next_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_nav')
   c.rel32(b'\xe8','emit_nav_meta')
-  if WAIT_DOWN_SPEAK or WAIT_UP_SPEAK:
+  if WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT:
    c.lea_rax_data(L['nav_option_token']); c.emit(b'\x0f\xb7\x00'); c.lea_rdx_data(L['selected_option_token']); c.emit(b'\x66\x89\x02')
    serial('nav_focus_activate')
  elif WAIT_UP_PROBE or WAIT_UP_SPEAK:
@@ -545,9 +562,9 @@ def build():
  c.label('selected_scsu_found')
  c.emit(b'\x80\x3e\x00'); c.rel32(b'\x0f\x84','fail_selected_string')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x89\x32')
- serial('nav_focus_text_prefix' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'selected_text_prefix'); c.rel32(b'\xe8','serial_scsu_ascii')
+ serial('nav_focus_text_prefix' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT) else 'selected_text_prefix'); c.rel32(b'\xe8','serial_scsu_ascii')
  c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_selected_string')
- serial('nav_focus_text_done' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'selected_text_done')
+ serial('nav_focus_text_done' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT) else 'selected_text_done')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x8b\x32')
  c.emit(b'\x31\xff')
  c.label('capture_scsu_loop')
@@ -556,15 +573,15 @@ def build():
  c.emit(b'\x3c\x61'); c.rel32(b'\x0f\x82','capture_scsu_loop')
  c.emit(b'\x3c\x7a'); c.rel32(b'\x0f\x87','capture_scsu_loop')
  c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','capture_done')
- c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'speech_char')
+ c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT) else 'speech_char')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\x44\x89\x18\xff\xc7')
  c.rel32(b'\xe9','capture_scsu_loop')
 
  c.label('selected_ucs_found')
  c.emit(b'\x66\x83\x3e\x00'); c.rel32(b'\x0f\x84','fail_selected_string')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x89\x32')
- serial('nav_focus_text_prefix' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'selected_text_prefix'); c.rel32(b'\xe8','serial_utf16')
- serial('nav_focus_text_done' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'selected_text_done')
+ serial('nav_focus_text_prefix' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT) else 'selected_text_prefix'); c.rel32(b'\xe8','serial_utf16')
+ serial('nav_focus_text_done' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT) else 'selected_text_done')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x8b\x32')
  c.emit(b'\x31\xff')
  c.label('capture_ucs_loop')
@@ -573,7 +590,7 @@ def build():
  c.emit(b'\x83\xf8\x61'); c.rel32(b'\x0f\x82','capture_ucs_loop')
  c.emit(b'\x83\xf8\x7a'); c.rel32(b'\x0f\x87','capture_ucs_loop')
  c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','capture_done')
- c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'speech_char')
+ c.emit(b'\x41\x89\xc3'); serial('nav_speech_char' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT) else 'speech_char')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\x44\x89\x18\xff\xc7')
  c.rel32(b'\xe9','capture_ucs_loop')
 
@@ -581,7 +598,7 @@ def build():
  c.emit(b'\x85\xff'); c.rel32(b'\x0f\x84','fail_speech_text')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\xc7\x00\x00\x00')
  c.lea_rdx_data(L['text_count']); c.emit(b'\x89\x3a')
- if WAIT_DOWN_SPEAK or WAIT_UP_SPEAK:
+ if WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT:
   serial('nav_speech_hii')
   serial('nav_spoken_prefix'); c.rel32(b'\xe8','serial_textbuf'); serial('nav_spoken_prefix_done')
  else:
@@ -600,6 +617,7 @@ def build():
   c.rel32(b'\x0f\x85','repeat_read_key')
   serial('repeat_accept')
 
+ c.label('hda_begin')
  # Scan full PCI config mechanism-1 segment for class 04/subclass 03.
  c.emit(b'\x45\x31\xe4')
  c.label('scan')
@@ -790,7 +808,7 @@ def build():
  c.emit(bytes.fromhex('89d8ffc848c1e0044c01e8'))
  c.emit(bytes.fromhex('c7400c01000000'))
  c.emit(bytes.fromhex('4189db41ffcb'))
- serial('nav_text_ready' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'text_ready')
+ serial('nav_text_ready' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT) else 'text_ready')
  c.emit(bytes.fromhex('0f09'))
  serial('dma')
 
@@ -829,11 +847,19 @@ def build():
  # Give HDA backend time to consume DMA, then prove LPIB moved.
  c.emit(b'\xb9\x80\x1a\x06\x00\x49\x8b\x87\xf8\x00\x00\x00\xff\xd0')
  c.emit(b'\x8b\x43\x04\x85\xc0'); c.rel32(b'\x0f\x84','fail_stream')
- serial('nav_progress' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK) else 'progress')
+ serial('nav_progress' if (WAIT_DOWN_SPEAK or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT) else 'progress')
  # Stop stream.
  c.emit(b'\x8a\x03\x24\xfd\x88\x03')
- serial('done')
- c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
+ if WAIT_DOWN_COMMIT:
+  c.lea_rax_data(L['commit_done']); c.emit(b'\x80\x38\x01'); c.rel32(b'\x0f\x84','commit_second_audio_done')
+  c.rel32(b'\xe8','wait_commit_key'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','return_fail')
+  c.rel32(b'\xe8','commit_focused_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','return_fail')
+  c.lea_rax_data(L['commit_done']); c.emit(b'\xc6\x00\x01'); c.rel32(b'\xe9','hda_begin')
+  c.label('commit_second_audio_done'); serial('commit_confirm'); serial('done')
+  c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
+ else:
+  serial('done')
+  c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
 
  c.label('fail_selected_string'); serial('selected_string_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_nav'); serial('nav_fail'); c.rel32(b'\xe9','return_fail')
@@ -1103,8 +1129,11 @@ def build():
  c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','buffer_copy_done')
  c.emit(b'\x8a\x06\x88\x02\x48\xff\xc6\x48\xff\xc2\xff\xc9'); c.rel32(b'\xe9','buffer_copy_loop')
  c.label('buffer_copy_done')
- c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x41\xff\x57\x48')
- c.emit(b'\x31\xc0\xc3')
+ if WAIT_DOWN_COMMIT:
+  c.emit(b'\x31\xc0\xc3')
+ else:
+  c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x41\xff\x57\x48')
+  c.emit(b'\x31\xc0\xc3')
 
  c.label('config_guid_mismatch')
  c.label('config_search_next'); c.emit(b'\x48\x83\xc6\x02'); c.rel32(b'\xe9','config_search')
@@ -1198,6 +1227,73 @@ def build():
  c.emit(b'\x48\x8b\x41\x08\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','up_read_key')
  c.lea_rdx_data(L['keybuf']); c.emit(b'\x0f\xb7\x02\x66\x83\xf8\x01'); c.rel32(b'\x0f\x85','up_read_key')
  serial('up_accept'); c.emit(b'\x31\xc0\xc3')
+
+ c.label('wait_commit_key')
+ serial('commit_wait')
+ c.label('commit_read_key')
+ c.lea_rax_data(L['conin_ptr']); c.emit(b'\x48\x8b\x08'); c.lea_rdx_data(L['keybuf'])
+ c.emit(b'\x48\x8b\x41\x08\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','commit_read_key')
+ c.lea_rdx_data(L['keybuf']); c.emit(b'\x0f\xb7\x42\x02\x66\x83\xf8\x0d'); c.rel32(b'\x0f\x85','commit_read_key')
+ serial('commit_accept'); c.emit(b'\x31\xc0\xc3')
+
+ c.label('write_hex16_4')
+ c.emit(b'\xb9\x04\x00\x00\x00')
+ c.label('write_hex16_4_loop')
+ c.emit(b'\x66\xc1\xc0\x04\x88\xc2\x80\xe2\x0f\x80\xfa\x09'); c.rel8(0x76,'write_hex16_4_digit')
+ c.emit(b'\x80\xc2\x37'); c.rel8(0xeb,'write_hex16_4_store')
+ c.label('write_hex16_4_digit'); c.emit(b'\x80\xc2\x30')
+ c.label('write_hex16_4_store'); c.emit(b'\x88\x17\xc6\x47\x01\x00\x48\x83\xc7\x02\xff\xc9'); c.rel8(0x75,'write_hex16_4_loop')
+ c.emit(b'\xc3')
+
+ c.label('build_commit_request')
+ c.lea_rax_data(L['config_ptr']); c.emit(b'\x48\x8b\x30\x48\x85\xf6'); c.rel32(b'\x0f\x84','commit_request_bad')
+ c.lea_rdi_data(L['commit_request']); c.emit(b'\xb9\x00\x18\x00\x00')
+ c.label('commit_hdr_scan')
+ c.emit(b'\x66\x83\x3e\x00'); c.rel32(b'\x0f\x84','commit_request_bad')
+ c.emit(b'\x66\x83\x3e\x26'); c.rel32(b'\x0f\x85','commit_hdr_copy')
+ for off,ch in ((2,0x4f),(4,0x46),(6,0x46),(8,0x53),(10,0x45),(12,0x54),(14,0x3d)):
+  c.emit(b'\x66\x83\x7e'+bytes((off,ch))); c.rel32(b'\x0f\x85','commit_hdr_copy')
+ c.lea_rsi_data(L['commit_offset_utf16']); c.emit(b'\xb9\x08\x00\x00\x00\xf3\x66\xa5')
+ c.lea_rdx_data(L['varstore_info']); c.emit(b'\x0f\xb7\x02'); c.rel32(b'\xe8','write_hex16_4')
+ c.lea_rsi_data(L['commit_width_utf16']); c.emit(b'\xb9\x07\x00\x00\x00\xf3\x66\xa5')
+ c.lea_rdx_data(L['current_width']); c.emit(b'\x0f\xb6\x02'); c.rel32(b'\xe8','write_hex16_4')
+ c.emit(b'\x66\xc7\x07\x00\x00'); serial('commit_request'); c.emit(b'\x31\xc0\xc3')
+ c.label('commit_hdr_copy')
+ c.emit(b'\x66\x8b\x06\x66\x89\x07\x48\x83\xc6\x02\x48\x83\xc7\x02\xff\xc9'); c.rel32(b'\x0f\x85','commit_hdr_scan')
+ c.label('commit_request_bad'); serial('commit_request_fail'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
+
+ c.label('commit_focused_option')
+ c.lea_rdi_data(L['current_data']); c.lea_rdx_data(L['varstore_info']); c.emit(b'\x0f\xb7\x02\x48\x01\xc7')
+ c.lea_rsi_data(L['nav_option_raw']); c.lea_rdx_data(L['current_width']); c.emit(b'\x0f\xb6\x0a')
+ c.label('commit_stage_copy'); c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','commit_stage_done')
+ c.emit(b'\x8a\x06\x88\x07\x48\xff\xc6\x48\xff\xc7\xff\xc9'); c.rel32(b'\xe9','commit_stage_copy')
+ c.label('commit_stage_done'); serial('commit_stage')
+ c.rel32(b'\xe8','build_commit_request'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','commit_return_fail')
+ zero_qword(L['commit_config']); zero_qword(L['commit_progress'])
+ c.lea_rax_data(L['routing_ptr']); c.emit(b'\x48\x8b\x08'); c.lea_rdx_data(L['commit_request']); c.lea_r8_data(L['current_data'])
+ c.lea_rax_data(L['varstore_size']); c.emit(b'\x44\x0f\xb7\x08')
+ c.lea_rax_data(L['commit_config']); c.emit(b'\x48\x89\x44\x24\x20'); c.lea_rax_data(L['commit_progress']); c.emit(b'\x48\x89\x44\x24\x28')
+ c.emit(b'\x48\x8b\x41\x18\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','commit_block_bad'); serial('commit_block')
+ zero_qword(L['commit_progress']); c.lea_rax_data(L['routing_ptr']); c.emit(b'\x48\x8b\x08'); c.lea_rax_data(L['commit_config']); c.emit(b'\x48\x8b\x10'); c.lea_r8_data(L['commit_progress'])
+ c.emit(b'\x48\x8b\x41\x10\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','commit_route_bad'); serial('commit_route')
+ c.lea_rax_data(L['commit_config']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','commit_free_results')
+ c.emit(b'\x41\xff\x57\x48'); zero_qword(L['commit_config'])
+ c.label('commit_free_results'); c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','commit_reread')
+ c.emit(b'\x41\xff\x57\x48'); zero_qword(L['results'])
+ c.label('commit_reread'); c.rel32(b'\xe8','read_buffer_current'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','commit_verify_bad')
+ c.rel32(b'\xe8','resolve_selected_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','commit_verify_bad')
+ c.lea_rsi_data(L['current_raw']); c.lea_rdi_data(L['nav_option_raw']); c.lea_rdx_data(L['current_width']); c.emit(b'\x0f\xb6\x0a')
+ c.label('commit_verify_loop'); c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','commit_verify_token')
+ c.emit(b'\x8a\x06\x3a\x07'); c.rel32(b'\x0f\x85','commit_verify_bad'); c.emit(b'\x48\xff\xc6\x48\xff\xc7\xff\xc9'); c.rel32(b'\xe9','commit_verify_loop')
+ c.label('commit_verify_token'); c.lea_rax_data(L['selected_option_token']); c.emit(b'\x0f\xb7\x08'); c.lea_rax_data(L['nav_option_token']); c.emit(b'\x0f\xb7\x00\x39\xc1'); c.rel32(b'\x0f\x85','commit_verify_bad')
+ c.rel32(b'\xe8','emit_current_meta'); c.rel32(b'\xe8','emit_selected_meta'); serial('commit_verify')
+ c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','commit_verified')
+ c.emit(b'\x41\xff\x57\x48'); zero_qword(L['results'])
+ c.label('commit_verified'); c.emit(b'\x31\xc0\xc3')
+ c.label('commit_block_bad'); serial('commit_block_fail'); c.rel32(b'\xe9','commit_return_fail')
+ c.label('commit_route_bad'); serial('commit_route_fail'); c.rel32(b'\xe9','commit_return_fail')
+ c.label('commit_verify_bad'); serial('commit_verify_fail')
+ c.label('commit_return_fail'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
 
  c.label('resolve_next_option')
  # Re-scan only the direct children of the same scoped ONE_OF. The current
@@ -1493,6 +1589,13 @@ def validate(image,pcm):
   b'NAV_FOCUS_SOURCE=PASS',
   b'NAV_FOCUS_SPOKEN_PREFIX=PASS',
   b'NAV_FOCUS_SPEECH_HDA=PASS',
+  b'HII_COMMIT_KEY=WAIT_ENTER',
+  b'HII_COMMIT_KEY=PASS',
+  b'HII_COMMIT_CONFIG_REQUEST=PASS',
+  b'BLOCK_TO_CONFIG=PASS',
+  b'ROUTE_CONFIG=PASS',
+  b'POST_COMMIT_REREAD=PASS',
+  b'COMMIT_CONFIRMATION_SPEECH_HDA=PASS',
   b'HDA_CONTROLLER_CODEC=PASS',
   b'AFG_RUNTIME_DISCOVERY=PASS',
   b'BDL_RUNTIME_TEXT_SCHEDULE=PASS',
@@ -1511,8 +1614,8 @@ def validate(image,pcm):
   assert token in image,token
 
 def main():
- global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE, WAIT_DOWN_SPEAK, WAIT_UP_PROBE, WAIT_UP_SPEAK
- if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak|--wait-up-probe|--wait-up-speak|--wait-down-repeat-speak]')
+ global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE, WAIT_DOWN_SPEAK, WAIT_UP_PROBE, WAIT_UP_SPEAK, WAIT_DOWN_COMMIT
+ if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak|--wait-up-probe|--wait-up-speak|--wait-down-repeat-speak|--wait-down-commit]')
  if len(sys.argv)==3:
   if sys.argv[2]=='--wait-repeat': WAIT_REPEAT_KEY=True
   elif sys.argv[2]=='--wait-down-probe': WAIT_DOWN_PROBE=True
@@ -1520,6 +1623,7 @@ def main():
   elif sys.argv[2]=='--wait-up-probe': WAIT_UP_PROBE=True
   elif sys.argv[2]=='--wait-up-speak': WAIT_UP_SPEAK=True
   elif sys.argv[2]=='--wait-down-repeat-speak': WAIT_DOWN_SPEAK=True; WAIT_REPEAT_KEY=True
+  elif sys.argv[2]=='--wait-down-commit': WAIT_DOWN_COMMIT=True
   else: raise SystemExit('unknown mode: '+sys.argv[2])
  image,pcm=build(); validate(image,pcm)
  p=Path(sys.argv[1]); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(image)
@@ -1533,6 +1637,7 @@ def main():
  print('hii-up-probe=' + ('enabled' if WAIT_UP_PROBE else 'disabled'))
  print('hii-up-speak=' + ('enabled' if WAIT_UP_SPEAK else 'disabled'))
  print('hii-down-repeat-speak=' + ('enabled' if (WAIT_DOWN_SPEAK and WAIT_REPEAT_KEY) else 'disabled'))
+ print('hii-down-commit=' + ('enabled' if WAIT_DOWN_COMMIT else 'disabled'))
  print('pcm-bytes='+str(len(pcm)))
  print('pcm-sha256='+hashlib.sha256(pcm).hexdigest())
  print('sha256='+hashlib.sha256(image).hexdigest())
