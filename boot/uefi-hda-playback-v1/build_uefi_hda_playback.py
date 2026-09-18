@@ -233,7 +233,7 @@ def build():
  reloc_rva=(DATA_RVA+len(data)+0xfff)&~0xfff; reloc_raw=data_raw+data_raw_size
  image=bytearray(reloc_raw+0x200); image_size=reloc_rva+0x1000
  put(image,0,'<H',0x5a4d); put(image,0x3c,'<I',0x80)
- pe=0x80; imae[pe:pe+4]=b'PE\0\0'; coff=pe+4
+ pe=0x80; image[pe:pe+4]=b'PE\0\0'; coff=pe+4
  put(image,coff,'<HHIIIHH',0x8664,3,0,0,0,0xf0,0x22); opt=coff+20
  put(image,opt,'<H',0x20b); put(image,opt+4,'<I',text_raw_size); put(image,opt+8,'<I',data_raw_size+0x200)
  put(image,opt+0x10,'<I',TEXT_RVA); put(image,opt+0x14,'<I',TEXT_RVA); put(image,opt+0x18,'<Q',0x400000)
