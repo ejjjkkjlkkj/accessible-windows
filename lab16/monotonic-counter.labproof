@@ -1,0 +1,23 @@
+LAB16
+role = external-monotonic-counter-witness-record
+system-foundation = false
+purpose = test per-worker nondecreasing observation of an external high-resolution counter on AMD-5800H-REAL
+target-runner = AMD-5800H-REAL
+parallel-worker-policy = one worker per reported logical processor
+samples-per-worker = 250000
+ordering-claim = per-worker-only
+cross-worker-ordering-claim = none
+time-unit-semantics = none
+external-infrastructure = AMD platform Windows high-resolution counter .NET Stopwatch scheduler PowerShell CSharp GitHub Actions runner
+external-infrastructure-semantics = witness-only
+proof = UNPROVEN
+proof-run = none
+proof-self-hosted = UNPROVEN
+proof-counter-available = UNPROVEN
+proof-per-worker-nondecreasing = UNPROVEN
+proof-per-worker-advance = UNPROVEN
+human-facing = false
+accessibility-behavior = not-applicable
+accessibility-gate = any future human-facing state must be perceivable and operable without requiring vision at the same native layer
+claim = success would prove only the tested per-worker external counter observations do not move backward and do advance during the run
+claim = success would not establish system-owned time duration clock scheduler timeout deadline ordering or temporal semantics
