@@ -357,6 +357,8 @@ jobs:
         run: |
           set -euo pipefail
           root=boot/uefi-conout-screenreader-v2
+          builder="$root/build_conout_screenreader_v2.py"
+
           python - <<'PY'
           from pathlib import Path
           import hashlib
@@ -364,11 +366,6 @@ jobs:
           import wave
 
           root=Path('boot/uefi-conout-screenreader-v2')
-          proof=root/'os-uefi-conout-screenreader-v2.labproof'
-          text=proof.read_text()
-          if 'proof = PENDING_CI' not in text:
-              raise SystemExit('proof state is not PENDING_CI')
-
           wav=root/'runtime.wav'
           with wave.open(str(wav),'rb') as w:
               frames=w.getnframes()
@@ -377,29 +374,71 @@ jobs:
           ratio=sum(abs(x-128)>=3 for x in raw)/max(1,len(raw))
           parent=(root/'build1/BOOTX64.EFI').read_bytes()
           child=(root/'build1/target.efi').read_bytes()
-          text=text.replace('proof = PENDING_CI','proof = PASS')
-          text += (
-              f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
-              f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
-              "proof-ConOut-hook = PASS\n"
-              "proof-runtime-character-dispatch = PASS\n"
-              "proof-uppercase = PASS\n"
-              "proof-lowercase-normalization = PASS\n"
-              "proof-digits = PASS\n"
-              "proof-space = PASS\n"
-              "proof-phrase-specific-match-required = false\n"
-              "proof-audio-waveform = PASS\n"
-              f"proof-audio-frames = {frames}\n"
-              f"proof-audio-duration-seconds = {frames/rate}\n"
-              f"proof-audio-active-ratio = {ratio}\n"
-              f"proof-parent-sha256 = {hashlib.sha256(parent).hexdigest()}\n"
-              f"proof-child-sha256 = {hashlib.sha256(child).hexdigest()}\n"
-              f"proof-wav-sha256 = {hashlib.sha256(wav.read_bytes()).hexdigest()}\n"
-          )
-          proof.write_text(text)
+          wav_bytes=wav.read_bytes()
+
+          lines=[
+              'proof = PASS',
+              f"proof-run = {os.environ['GITHUB_RUN_ID']}",
+              f"proof-head-sha = {os.environ['GITHUB_SHA']}",
+              'proof-ConOut-hook = PASS',
+              'proof-runtime-character-dispatch = PASS',
+              'proof-uppercase = PASS',
+              'proof-lowercase-normalization = PASS',
+              'proof-digits = PASS',
+              'proof-space = PASS',
+              'proof-phrase-specific-match-required = false',
+              'proof-audio-waveform = PASS',
+              f'proof-audio-frames = {frames}',
+              f'proof-audio-duration-seconds = {frames/rate}',
+              f'proof-audio-active-ratio = {ratio}',
+              f'proof-parent-sha256 = {hashlib.sha256(parent).hexdigest()}',
+              f'proof-child-sha256 = {hashlib.sha256(child).hexdigest()}',
+              f'proof-wav-sha256 = {hashlib.sha256(wav_bytes).hexdigest()}',
+          ]
+          Path('/tmp/conout-v2-proof.txt').write_text('\n'.join(lines)+'\n')
           PY
+
+          git fetch origin os
+          git checkout -B os origin/os
+
+          tested_blob="$(git rev-parse "\${GITHUB_SHA}:\${builder}")"
+          current_blob="$(git rev-parse "os:\${builder}")"
+          if [[ "$tested_blob" != "$current_blob" ]]; then
+            echo "CONOUT_V2_PROOF_STALE_RUN=SKIP"
+            echo "tested-builder=$tested_blob"
+            echo "current-builder=$current_blob"
+            exit 0
+          fi
+
+          python - <<'PY'
+          from pathlib import Path
+
+          proof=Path('boot/uefi-conout-screenreader-v2/os-uefi-conout-screenreader-v2.labproof')
+          text=proof.read_text()
+          if 'proof = PENDING_CI' not in text:
+              if 'proof = PASS' in text:
+                  print('CONOUT_V2_PROOF_ALREADY_RECORDED=PASS')
+                  raise SystemExit(0)
+              raise SystemExit('unexpected v2 proof state')
+          verified=Path('/tmp/conout-v2-proof.txt').read_text().rstrip('\n')
+          proof.write_text(text.replace('proof = PENDING_CI',verified))
+          PY
+
+          if git diff --quiet -- "$root/os-uefi-conout-screenreader-v2.labproof"; then
+            exit 0
+          fi
+
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add "$root/os-uefi-conout-screenreader-v2.labproof"
           git commit -m "Record runtime ConOut speech proof [skip ci]"
-          git push origin HEAD:os
+
+          for attempt in 1 2 3; do
+            if git push origin os; then
+              exit 0
+            fi
+            git fetch origin os
+            git rebase origin/os
+          done
+          echo "Unable to persist v2 proof without overwriting concurrent work" >&2
+          exit 1
