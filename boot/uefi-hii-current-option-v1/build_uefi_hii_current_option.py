@@ -726,6 +726,10 @@ def build():
  c.rel32(b'\xe9','current_option_advance')
 
  c.label('current_option_candidate')
+ # Only a direct child of this exact ONE_OF is eligible. Nested conditional
+ # scopes can legally contain option-like opcodes but must never satisfy the
+ # current-option binding for the parent question.
+ c.lea_rax_data(L['option_scope_depth']); c.emit(b'\x83\x38\x01'); c.rel32(b'\x0f\x85','current_option_scope_and_advance')
  # Numeric ONE_OF_OPTION layout is 6-byte fixed prefix + type-sized value.
  c.emit(b'\x41\x83\xf8\x07'); c.rel32(b'\x0f\x82','current_option_scope_and_advance')
  c.emit(b'\x41\x0f\xb7\x41\x02\x66\x85\xc0'); c.rel32(b'\x0f\x84','current_option_scope_and_advance')
