@@ -1,0 +1,26 @@
+OS-UEFI-HII-STORED-QUESTION-V1
+role = native pre-OS read-only discovery of a live EFI_IFR_ONE_OF question backed by a nonzero VarStoreId
+system-foundation = true
+depends-on = OS-UEFI-HII-QUESTION-META-V1
+execution-domain = pre-OS UEFI
+artifact-format = PE32+ EFI application
+architecture = x86-64
+operating-system-required = false
+external-screen-reader-required = false
+external-accessibility-api-required = false
+IFR-question-opcode = 0x05 EFI_IFR_ONE_OF
+selection-policy = skip VarStoreId zero and continue all Forms package lists
+question-prompt-resolution = native direct HII Strings-package decoder
+question-id = required
+varstore-id = required-nonzero
+varstore-info = captured
+question-flags = captured
+oneof-flags = captured
+varstore-definition-resolution = not-established-in-this-stage
+current-value-read = forbidden-in-this-stage
+varstore-write = forbidden
+firmware-setting-mutation = forbidden
+claim = success establishes a real resolvable ONE_OF question whose IFR Question Header names a nonzero VarStoreId
+claim = success does not establish VarStore definition current value or any configuration mutation
+proof = PENDING_CI
+revalidation-request = 2026-09-18T22:20+02:00
