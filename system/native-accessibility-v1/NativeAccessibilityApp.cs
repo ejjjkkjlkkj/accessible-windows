@@ -85,7 +85,6 @@ public sealed class NativeAccessibilityForm : Form
 
         activations++;
         ApplyHumanState();
-        status.AccessibilityNotifyClients(AccessibleEvents.NameChange, -1);
         Trace("activation=" + activations + ";role=" + RoleName(current));
 
         if (current != identity)
