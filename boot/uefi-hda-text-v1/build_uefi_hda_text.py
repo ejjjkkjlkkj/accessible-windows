@@ -278,7 +278,7 @@ def build():
  c.emit(b'\xb9'+struct.pack('<I',len(pcm))+b'\xf3\xa4')
  # Runtime text input: append up to 8 vowel graphemes and construct
  # one HDA BDL descriptor per typed grapheme. Enter commits the text.
- c.emit(b'\x45\x31\xd2\x45\x31\xdb')  # r10d=count, r11d=total bytes
+ c.emit(b'\x31\xff\x31\xf6')  # edi=count, esi=total bytes; both nonvolatile across EFI calls
  serial('wait')
  c.label('read_key')
  c.emit(b'\x48\x89\xe9')
@@ -298,36 +298,36 @@ def build():
  def emit_append(name,char):
   unit_off,unit_len=UNIT_LAYOUT[name]
   c.label('append_'+name)
-  c.emit(b'\x41\x83\xfa\x08'); c.rel32(b'\x0f\x83','fail_key')
+  c.emit(b'\x83\xff\x08'); c.rel32(b'\x0f\x83','fail_key')
   serial('char_'+name)
-  # textbuf[count] = UTF-16 character
+  # textbuf[edi] = UTF-16 character
   c.lea_rdx_data(L['textbuf'])
-  c.emit(b'\x44\x89\xd0\x48\x8d\x04\x42')
+  c.emit(b'\x89\xf8\x48\x8d\x04\x42')
   c.emit(b'\x66\xc7\x00'+struct.pack('<H',ord(char)))
-  # descriptor[count] = { unit address, unit length, IOC=0 }
-  c.emit(b'\x44\x89\xd0\x48\xc1\xe0\x04\x4c\x01\xe8')
+  # descriptor[edi] = { unit address, unit length, IOC=0 }
+  c.emit(b'\x89\xf8\x48\xc1\xe0\x04\x4c\x01\xe8')
   c.emit(b'\x49\x8d\x95'+struct.pack('<i',PCM_OFF+unit_off))
   c.emit(b'\x48\x89\x10')
   c.emit(b'\xc7\x40\x08'+struct.pack('<I',unit_len))
   c.emit(b'\xc7\x40\x0c\x00\x00\x00\x00')
-  c.emit(b'\x41\xff\xc2')
-  c.emit(b'\x41\x81\xc3'+struct.pack('<I',unit_len))
+  c.emit(b'\xff\xc7')
+  c.emit(b'\x81\xc6'+struct.pack('<I',unit_len))
   c.rel32(b'\xe9','read_key')
 
  for char,name in (('a','a'),('e','e'),('i','i'),('o','o'),('u','u')):
   emit_append(name,char)
 
  c.label('text_commit')
- c.emit(b'\x45\x85\xd2'); c.rel32(b'\x0f\x84','fail_key')
+ c.emit(b'\x85\xff'); c.rel32(b'\x0f\x84','fail_key')
  # NUL-terminate the UTF-16 text buffer.
  c.lea_rdx_data(L['textbuf'])
  c.emit(b'\x44\x89\xd0\x48\x8d\x04\x42\x66\xc7\x00\x00\x00')
  # Set IOC on the final descriptor.
- c.emit(b'\x44\x89\xd0\xff\xc8\x48\xc1\xe0\x04\x4c\x01\xe8')
+ c.emit(b'\x89\xf8\xff\xc8\x48\xc1\xe0\x04\x4c\x01\xe8')
  c.emit(b'\xc7\x40\x0c\x01\x00\x00\x00')
- # Convert (count,total) to the common (CBL,LVI) register contract.
- c.emit(b'\x44\x89\xd0\xff\xc8')  # eax = count-1
- c.emit(b'\x45\x89\xda')            # r10d = total bytes
+ # Convert preserved (edi=count, esi=total) to the common (CBL,LVI) register contract.
+ c.emit(b'\x89\xf8\xff\xc8')        # eax = count-1
+ c.emit(b'\x41\x89\xf2')            # r10d = total bytes from nonvolatile esi
  c.emit(b'\x41\x89\xc3')            # r11d = LVI
  serial('text_ready')
  c.emit(b'\x0f\x09')
