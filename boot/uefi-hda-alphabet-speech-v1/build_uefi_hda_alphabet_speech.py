@@ -15,9 +15,7 @@ PCM_OFF=0x1000
 
 MARKS={
  'start': b'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\nSTATE=START\r\nSYNTH=ALLOPHONE_BDL_RUNTIME_V1\r\nMODE=KEYBOARD_ALPHABET_AUTOROUTE\r\nTRANSPORT=HDA_NATIVE_DMA\r\nEND\r\n',
- 'wait': b'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\nEVENT=WAIT_KEY\r\nKEY_1=AIDE\r\nKEY_2=ERREUR\r\nEND\r\n',
- 'selected_aide': b'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\nEVENT=WORD_SELECTED\r\nWORD=AIDE\r\nUNITS=e,d\r\nEND\r\n',
- 'selected_erreur': b'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\nEVENT=WORD_SELECTED\r\nWORD=ERREUR\r\nUNITS=e,r,eu,r\r\nEND\r\n',
+ 'wait': b'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\nEVENT=WAIT_KEY\r\nKEY_RANGE=A-Z,a-z\r\nEND\r\n',
  'controller': b'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\nHDA_CONTROLLER_CODEC=PASS\r\nEND\r\n',
  'topology': b'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\nAFG_RUNTIME_DISCOVERY=PASS\r\nAUTO_DAC_WIDGET=PASS\r\nAUTO_OUTPUT_PIN_WIDGET=PASS\r\nAUTO_PIN_TO_DAC_DIRECT_ROUTE=PASS\r\nNO_FIXED_WIDGET_NIDS=PASS\r\nEND\r\n',
  'policy': b'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\nPIN_CONFIG_DEFAULT=PASS\r\nPIN_CAPABILITIES_QUERY=PASS\r\nEAPD_IF_SUPPORTED=PASS\r\nDAC_OUTPUT_AMP_VERIFY=PASS\r\nEND\r\n',
@@ -35,18 +33,6 @@ MARKS={
  'topology_fail': b'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=AUTO_OUTPUT_ROUTE_DISCOVERY_FAILED\r\nEND\r\n',
  'policy_fail': b'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=OUTPUT_POLICY_FAILED\r\nEND\r\n',
 }
-
-# Build-time marker table for every Latin letter. Runtime still chooses the
-# sequence from the real EFI key event; no full-word or full-letter-name PCM
-# asset is embedded.
-for _ch,_seq in LETTER_UNITS.items():
- MARKS[f'selected_{_ch}']=(
-  'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\n'
-  'EVENT=CHAR_SELECTED\r\n'
-  f'CHAR={_ch.upper()}\r\n'
-  f'UNITS={",".join(_seq)}\r\n'
-  'END\r\n'
- ).encode('ascii')
 
 ROOT=Path(__file__).resolve().parents[2]
 SPEECH_BUILDER=ROOT/'boot'/'uefi-native-speech-v1'/'build_uefi_native_speech.py'
@@ -78,6 +64,18 @@ LETTER_UNITS={
  'y':('i','g','r','e','k'),
  'z':('z','e','d'),
 }
+# Build-time marker table for every Latin letter. Runtime still chooses the
+# sequence from the real EFI key event; no full-word or full-letter-name PCM
+# asset is embedded.
+for _ch,_seq in LETTER_UNITS.items():
+ MARKS[f'selected_{_ch}']=(
+  'QEVARYNOX-UEFI-HDA-ALPHABET-SPEECH-V1\r\n'
+  'EVENT=CHAR_SELECTED\r\n'
+  f'CHAR={_ch.upper()}\r\n'
+  f'UNITS={",".join(_seq)}\r\n'
+  'END\r\n'
+ ).encode('ascii')
+
 UNIT_LAYOUT: dict[str, tuple[int,int]] = {}
 
 def load_module(name: str, path: Path):
