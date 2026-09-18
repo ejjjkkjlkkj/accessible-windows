@@ -101,6 +101,9 @@ jobs:
               "c.lea_rax_data(L['resolve_mode']); c.emit(b'\\xc6\\x00\\x01')",
               "L['option_strings_ptr']",
               "CURRENT_OPTION_VALUE_MATCH=PASS",
+              "CURRENT_OPTION_LANGUAGE_BINDING=PASS",
+              "Once resolving the selected option",
+              "c.lea_rax_data(L['resolve_mode']); c.emit(b'\x80\x38\x01'); c.rel32(b'\x0f\x84','prompt_next')",
               "CURRENT_OPTION_TEXT=",
               "CURRENT_OPTION_STRING=PASS",
               "CURRENT_OPTION_RESOLUTION=PASS",
@@ -176,6 +179,7 @@ jobs:
               b'CURRENT_VALUE_READ=PASS\r\n',
               b'ONE_OF_SCOPE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_VALUE_MATCH=PASS\r\n',
+              b'CURRENT_OPTION_LANGUAGE_BINDING=PASS\r\n',
               b'CURRENT_OPTION_FLAGS_HEX=',
               b'CURRENT_OPTION_TYPE_HEX=',
               b'CURRENT_OPTION_WIDTH_HEX=',
@@ -249,6 +253,7 @@ jobs:
               b'CURRENT_VALUE_READ=PASS\r\n',
               b'ONE_OF_SCOPE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_VALUE_MATCH=PASS\r\n',
+              b'CURRENT_OPTION_LANGUAGE_BINDING=PASS\r\n',
               b'CURRENT_OPTION_METADATA=PASS\r\n',
               b'CURRENT_OPTION_STRING=PASS\r\n',
               b'CURRENT_OPTION_RESOLUTION=PASS\r\n',
@@ -416,6 +421,7 @@ jobs:
               "proof-live-current-value-match = PASS\n"
               "proof-same-package-option-string-resolution = PASS\n"
               "proof-same-language-option-string-resolution = PASS\n"
+              "proof-current-option-language-binding = PASS\n"
               f"proof-question-text = {safe_q}\n"
               f"proof-current-width = {vals['current-width']}\n"
               f"proof-current-value-unsigned = {vals['current-value-unsigned']}\n"
