@@ -19,7 +19,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld qemu-system-x86 ovmf
+          sudo apt-get install -y clang lld qemu-system-x86 ovmf dosfstools mtools
 
       - name: Generate first-party dynamic unit bank
         run: |
@@ -92,11 +92,15 @@ jobs:
           source boot/uefi-hii-graph-prompt-speech-v1/ovmf.env
           root=boot/uefi-hii-graph-prompt-speech-v1
           cp "$VARS" "$root/vars.fd"
-          rm -rf "$root/esp"
-          mkdir -p "$root/esp/EFI/BOOT"
-          cp "$root/BOOTX64.EFI" "$root/esp/EFI/BOOT/BOOTX64.EFI"
+          rm -f "$root/esp.img" "$root/runtime-boot-media-proof.txt"
+          truncate -s 64M "$root/esp.img"
+          mkfs.vfat -F 16 "$root/esp.img"
+          mmd -i "$root/esp.img" ::/EFI
+          mmd -i "$root/esp.img" ::/EFI/BOOT
+          mcopy -i "$root/esp.img" "$root/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+          mdir -i "$root/esp.img" ::/EFI/BOOT
           rm -f "$root/runtime.serial" "$root/runtime.wav"
-          qemu-system-x86_64             -machine q35,accel=tcg -m 192M             -drive if=pflash,format=raw,readonly=on,file="$CODE"             -drive if=pflash,format=raw,file="$root/vars.fd"             -drive format=raw,file=fat:rw:"$root/esp"             -audiodev wav,id=aud,path="$root/runtime.wav",out.frequency=48000,out.channels=2             -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0             -device hda-duplex,bus=hda0.0,cad=0,audiodev=aud             -display none -monitor none             -serial file:"$root/runtime.serial"             -parallel none -net none -no-reboot -no-shutdown &
+          qemu-system-x86_64             -machine q35,accel=tcg -m 192M             -drive if=pflash,format=raw,readonly=on,file="$CODE"             -drive if=pflash,format=raw,file="$root/vars.fd"             -drive format=raw,file="$root/esp.img"             -audiodev wav,id=aud,path="$root/runtime.wav",out.frequency=48000,out.channels=2             -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0             -device hda-duplex,bus=hda0.0,cad=0,audiodev=aud             -display none -monitor none             -serial file:"$root/runtime.serial"             -parallel none -net none -no-reboot -no-shutdown &
           qpid=$!
           trap 'kill $qpid 2>/dev/null || true' EXIT
           python - <<'PY'
@@ -142,7 +146,9 @@ jobs:
         run: |
           set -euo pipefail
           root=boot/uefi-hii-graph-prompt-speech-v1
-          proof="$root/esp/QEVARYNOX-PHYSICAL-PROOF.TXT"
+          proof="$root/runtime-boot-media-proof.txt"
+          mdir -i "$root/esp.img" ::/
+          mcopy -i "$root/esp.img" ::/QEVARYNOX-PHYSICAL-PROOF.TXT "$proof"
           test -s "$proof"
           grep -F 'QEVARYNOX-UEFI-PHYSICAL-BOOT-PROOF-V1' "$proof"
           grep -F 'STATUS=PASS' "$proof"
@@ -154,7 +160,6 @@ jobs:
           grep -F 'HII_GRAPH_SPEECH_DMA=PASS' "$proof"
           grep -F 'LPIB_PROGRESS=PASS' "$proof"
           grep -F 'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$proof"
-          cp "$proof" "$root/runtime-boot-media-proof.txt"
           echo HII_GRAPH_BOOT_MEDIA_PERSISTENT_PROOF=PASS
 
       - name: Validate waveform
