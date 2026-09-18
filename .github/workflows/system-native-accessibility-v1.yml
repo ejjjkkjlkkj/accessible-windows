@@ -62,6 +62,15 @@ jobs:
           Add-Type -AssemblyName System.Windows.Forms
           Add-Type -AssemblyName UIAutomationClient
           Add-Type -AssemblyName UIAutomationTypes
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class NativeAccessibilityWin32 {
+              [DllImport("user32.dll")]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              public static extern bool SetForegroundWindow(IntPtr hWnd);
+          }
+          '@
 
           $exe=Join-Path $PWD 'accessibility-runtime/native-accessibility-v1.exe'
           $table=Join-Path $PWD 'lab21/relation-compose0'
@@ -115,11 +124,35 @@ jobs:
             }
             if (-not $identity) { throw 'UIA invoke did not expose identity state' }
 
+            $hwnd=[IntPtr]::new($window.Current.NativeWindowHandle)
+            [void][NativeAccessibilityWin32]::SetForegroundWindow($hwnd)
             $button.SetFocus()
             Start-Sleep -Milliseconds 300
             if (-not $button.Current.HasKeyboardFocus) { throw 'UIA button did not receive keyboard focus' }
-            [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-            Start-Sleep -Milliseconds 500
+
+            $ws=New-Object -ComObject WScript.Shell
+            [void]$ws.AppActivate([int]$p.Id)
+            Start-Sleep -Milliseconds 200
+            $ws.SendKeys('{ENTER}')
+
+            $keyboardActivated=$false
+            for($i=0;$i -lt 30 -and -not $keyboardActivated;$i++) {
+              Start-Sleep -Milliseconds 100
+              if (Test-Path $trace) {
+                $keyboardActivated=[bool](Get-Content $trace | Where-Object { $_ -eq 'activation=2;role=identity' })
+              }
+            }
+
+            if (-not $keyboardActivated) {
+              [void][NativeAccessibilityWin32]::SetForegroundWindow($hwnd)
+              $button.SetFocus()
+              [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+              for($i=0;$i -lt 20 -and -not $keyboardActivated;$i++) {
+                Start-Sleep -Milliseconds 100
+                $keyboardActivated=[bool](Get-Content $trace | Where-Object { $_ -eq 'activation=2;role=identity' })
+              }
+            }
+            if (-not $keyboardActivated) { throw 'keyboard Enter did not invoke native action' }
 
             $identity2=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$identityCond)
             if (-not $identity2) { throw 'keyboard Enter lost identity state' }
