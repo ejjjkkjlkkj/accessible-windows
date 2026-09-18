@@ -29,6 +29,7 @@ MARKS={
  'suffix': b'\r\nHII_QUESTION_STRING=PASS\r\nEND\r\n',
  'opt_scope': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nONE_OF_SCOPE_MATCH=PASS\r\nEND\r\n',
  'opt_match': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_VALUE_MATCH=PASS\r\nEND\r\n',
+ 'opt_language': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_LANGUAGE_BINDING=PASS\r\nEND\r\n',
  'opt_flags': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-V1\r\nCURRENT_OPTION_FLAGS_HEX=',
  'opt_type': b'\r\nCURRENT_OPTION_TYPE_HEX=',
  'opt_width': b'\r\nCURRENT_OPTION_WIDTH_HEX=',
@@ -411,6 +412,7 @@ def build():
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\xc6\x00\x01')
  c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x8b\x02')
  c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x02')
+ serial('opt_language')
  c.rel32(b'\xe9','resolve_string_package')
 
  c.label('selected_scsu_found')
@@ -434,6 +436,7 @@ def build():
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\xc6\x00\x01')
  c.lea_rdx_data(L['option_strings_ptr']); c.emit(b'\x48\x8b\x02')
  c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x02')
+ serial('opt_language')
  c.rel32(b'\xe9','resolve_string_package')
 
  c.label('selected_ucs_found')
@@ -455,8 +458,11 @@ def build():
  c.label('fail_ifr'); serial('ifr_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_language'); serial('lang_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_string')
- # Try every sibling Strings package (typically alternate languages) before
- # abandoning this Prompt StringId.
+ # Once resolving the selected option, the exact Strings package/language that
+ # resolved the question is mandatory: never fall through to a sibling language.
+ c.lea_rax_data(L['resolve_mode']); c.emit(b'\x80\x38\x01'); c.rel32(b'\x0f\x84','prompt_next')
+ # During phase 0 only, try sibling Strings packages to find a language that
+ # resolves the question prompt.
  c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x8b\x32')
  c.emit(b'\x8b\x06\x25\xff\xff\xff\x00')
  c.emit(b'\x83\xf8\x04'); c.rel32(b'\x0f\x82','prompt_next')
@@ -902,6 +908,7 @@ def validate(image):
   b'CURRENT_VALUE_RAW8_HEX=',
   b'ONE_OF_SCOPE_MATCH=PASS',
   b'CURRENT_OPTION_VALUE_MATCH=PASS',
+  b'CURRENT_OPTION_LANGUAGE_BINDING=PASS',
   b'CURRENT_OPTION_FLAGS_HEX=',
   b'CURRENT_OPTION_TYPE_HEX=',
   b'CURRENT_OPTION_WIDTH_HEX=',
