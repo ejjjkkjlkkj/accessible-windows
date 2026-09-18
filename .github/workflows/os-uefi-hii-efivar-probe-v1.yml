@@ -1,12 +1,6 @@
 name: os-uefi-hii-efivar-probe-v1
 
 on:
-  push:
-    branches: [os]
-    paths:
-      - 'boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py'
-      - 'boot/uefi-hii-efivar-probe-v1/os-uefi-hii-efivar-probe-v1.labproof'
-      - '.github/workflows/os-uefi-hii-efivar-probe-v1.yml'
   workflow_dispatch:
 
 permissions:
