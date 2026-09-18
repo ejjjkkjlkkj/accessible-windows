@@ -96,6 +96,29 @@ public static class NativeMemoryV1
         return d;
     }
 
+    private static void RequireDistinctHistories(string root, int streams)
+    {
+        var histories = new byte[streams][];
+        for (int i = 0; i < streams; i++)
+            histories[i] = File.ReadAllBytes(Path.Combine(root, "stream-" + i.ToString("D2") + ".qmem"));
+
+        for (int i = 0; i < streams; i++)
+        for (int j = i + 1; j < streams; j++)
+        {
+            if (histories[i].Length != histories[j].Length) continue;
+            bool same = true;
+            for (int k = 0; k < histories[i].Length; k++)
+            {
+                if (histories[i][k] != histories[j][k])
+                {
+                    same = false;
+                    break;
+                }
+            }
+            if (same) throw new Exception("memory histories are not distinct: " + i + " and " + j);
+        }
+    }
+
     public static string Write(string tablePath, string root, int streams, int eventsPerStream)
     {
         if (streams <= 0 || eventsPerStream < 4) throw new ArgumentOutOfRangeException();
@@ -117,7 +140,7 @@ public static class NativeMemoryV1
 
             for (int i = 0; i < eventsPerStream; i++)
             {
-                byte action = (((i * 5) + (stream * 7) + (i / 11)) % 7 < 3) ? exchange : identity;
+                byte action = (((i * (stream + 3)) + (stream * 11) + (i / 17)) % 31 < 13) ? exchange : identity;
                 journal[i] = action;
                 if (action == exchange) exchangeEvents++;
                 state = Compose(table, states, state, action);
@@ -146,12 +169,14 @@ public static class NativeMemoryV1
         header.Add("exchange-carrier-label=" + exchange);
         header.AddRange(manifest);
         File.WriteAllLines(Path.Combine(root, "manifest.txt"), header.ToArray());
+        RequireDistinctHistories(root, streams);
 
         long total = (long)streams * eventsPerStream;
         return "NATIVE_MEMORY_V1_WRITE=PASS"
             + ";STREAMS=" + streams
             + ";EVENTS_PER_STREAM=" + eventsPerStream
-            + ";TOTAL_EVENTS=" + total;
+            + ";TOTAL_EVENTS=" + total
+            + ";DISTINCT_HISTORIES=" + streams;
     }
 
     public static string ReadAndValidate(string tablePath, string root)
@@ -212,6 +237,7 @@ public static class NativeMemoryV1
                 throw new Exception("global label exchange changed memory semantics");
         });
 
+        RequireDistinctHistories(root, streams);
         validatedEvents = (long)streams * eventsPerStream;
         recoveredPrefixes = streams * Cuts(eventsPerStream).Length;
 
@@ -221,6 +247,7 @@ public static class NativeMemoryV1
             + ";VALIDATED_EVENTS=" + validatedEvents
             + ";RECOVERED_PREFIXES=" + recoveredPrefixes
             + ";REVERSE_RECOVERY=PASS"
-            + ";GLOBAL_LABEL_EXCHANGE_INVARIANCE=PASS";
+            + ";GLOBAL_LABEL_EXCHANGE_INVARIANCE=PASS"
+            + ";DISTINCT_HISTORIES=" + streams;
     }
 }

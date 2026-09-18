@@ -151,11 +151,13 @@ jobs:
 
           total=0
           prefixes=0
+          journals=[]
           for stream in range(streams):
               fields=dict(part.split('=',1) for part in lines[5+stream].split(';'))
               assert int(fields['stream'])==stream
               journal=(root/f'stream-{stream:02d}.qmem').read_bytes()
               assert len(journal)==n
+              journals.append(journal)
               final=fold(table,states,identity,journal)
               assert final==int(fields['final'])
 
@@ -176,5 +178,6 @@ jobs:
 
           assert total==2097152
           assert prefixes==96
-          print(f'NATIVE_MEMORY_V1_LINUX_REPLAY=PASS;EVENTS={total};PREFIXES={prefixes}')
+          assert len(set(journals))==16
+          print(f'NATIVE_MEMORY_V1_LINUX_REPLAY=PASS;EVENTS={total};PREFIXES={prefixes};DISTINCT_HISTORIES={len(set(journals))}')
           PY
