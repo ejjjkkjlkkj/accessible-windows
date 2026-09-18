@@ -415,7 +415,7 @@ def build():
  # accidentally reusing the original question Prompt StringId.
  c.lea_rsi_data(L['option_token']); c.emit(b'\xb9\x02\x00\x00\x00')
  serial('opt_token_pre')
- c.label('current_option_pre_token_hex_loop'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','current_option_pre_token_hex_loop')
+ c.label('current_option_pre_token_hex_loop_scsu'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','current_option_pre_token_hex_loop_scsu')
  c.lea_rax_data(L['option_token']); c.emit(b'\x0f\xb7\x00')
  c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\xc6\x00\x01')
@@ -442,7 +442,7 @@ def build():
  c.rel32(b'\xe8','resolve_current_option'); c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','prompt_next')
  c.lea_rsi_data(L['option_token']); c.emit(b'\xb9\x02\x00\x00\x00')
  serial('opt_token_pre')
- c.label('current_option_pre_token_hex_loop'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','current_option_pre_token_hex_loop')
+ c.label('current_option_pre_token_hex_loop_ucs'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','current_option_pre_token_hex_loop_ucs')
  c.lea_rax_data(L['option_token']); c.emit(b'\x0f\xb7\x00')
  c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  c.lea_rax_data(L['resolve_mode']); c.emit(b'\xc6\x00\x01')
