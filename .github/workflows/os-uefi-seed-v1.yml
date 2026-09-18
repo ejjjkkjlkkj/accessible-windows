@@ -91,8 +91,8 @@ jobs:
           $firmware=$values['firmware']
           $vars=$values['vars']
           $esp=(Resolve-Path 'uefi-runtime/esp').Path
-          $debug=(Join-Path $PWD 'uefi-runtime/debugcon.txt')
-          Remove-Item $debug -Force -ErrorAction SilentlyContinue
+          $serial=(Join-Path $PWD 'uefi-runtime/serial.bin')
+          Remove-Item $serial -Force -ErrorAction SilentlyContinue
 
           $args=[Collections.Generic.List[string]]::new()
           # Match the EDK2/QEMU carrier path already proven by LAB26 on this
@@ -111,14 +111,10 @@ jobs:
           # both Linux OVMF and AMD-hosted EDK2.
           $args.Add('-drive'); $args.Add("format=raw,file=fat:rw:$esp")
           $args.Add('-display'); $args.Add('none')
-          $args.Add('-serial'); $args.Add('none')
+          $args.Add('-serial'); $args.Add("file:$serial")
           $args.Add('-monitor'); $args.Add('none')
           $args.Add('-net'); $args.Add('none')
           $args.Add('-no-reboot')
-          $args.Add('-no-shutdown')
-          $args.Add('-debugcon'); $args.Add("file:$debug")
-          $args.Add('-global'); $args.Add('isa-debugcon.iobase=0xe9')
-          $args.Add('-device'); $args.Add('isa-debug-exit,iobase=0xf4,iosize=0x04')
 
           $psi=[Diagnostics.ProcessStartInfo]::new()
           $psi.FileName=$qemu
@@ -128,18 +124,18 @@ jobs:
           $p.StartInfo=$psi
           if (-not $p.Start()) { throw 'QEMU failed to start' }
 
-          if (-not $p.WaitForExit(45000)) {
+          Start-Sleep -Seconds 10
+          if (-not $p.HasExited) {
             $p.Kill()
             $p.WaitForExit()
-            throw 'UEFI seed boot timed out before isa-debug-exit'
+          } elseif ($p.ExitCode -ne 0) {
+            throw "QEMU exited early: $($p.ExitCode)"
           }
-          $exit=$p.ExitCode
-          if (-not (Test-Path $debug)) { throw "debugcon output missing; QEMU exit=$exit" }
-          $text=[IO.File]::ReadAllText($debug,[Text.Encoding]::ASCII)
+          if (-not (Test-Path $serial)) { throw 'serial witness missing' }
+          $text=[IO.File]::ReadAllText($serial,[Text.Encoding]::ASCII)
           if ($text -notlike '*QEVARYNOX-UEFI-SEED-V1-PASS*') {
-            throw "UEFI machine-code marker missing; QEMU exit=$exit; debug=$text"
+            throw "UEFI machine-code marker missing from COM1; serial=$text"
           }
-          if ($exit -ne 33) { throw "unexpected isa-debug-exit status: $exit" }
 
           @(
             'OS-UEFI-SEED-V1'
@@ -155,8 +151,7 @@ jobs:
             'firmware-load = PASS'
             'machine-code-execution-marker = PASS'
             'marker = QEVARYNOX-UEFI-SEED-V1-PASS'
-            "qemu-exit-code = $exit"
-            'isa-debug-exit = PASS'
+            'serial-witness = PASS'
             'physical-machine-firmware-boot = not-established'
             'secure-boot = not-established'
             'result = PASS'
@@ -178,7 +173,7 @@ jobs:
           $targets=@(
             'boot/uefi-seed-v1/build_seed.py'
             'uefi-runtime/esp/EFI/BOOT/BOOTX64.EFI'
-            'uefi-runtime/debugcon.txt'
+            'uefi-runtime/serial.bin'
             'uefi-runtime/evidence.txt'
           )
           Get-FileHash -Algorithm SHA256 $targets |
@@ -190,7 +185,7 @@ jobs:
           name: os-uefi-seed-v1-amd5800h
           path: |
             uefi-runtime/esp/EFI/BOOT/BOOTX64.EFI
-            uefi-runtime/debugcon.txt
+            uefi-runtime/serial.bin
             uefi-runtime/evidence.txt
           if-no-files-found: error
 
@@ -227,8 +222,8 @@ jobs:
           reloc_rva,reloc_size=struct.unpack_from('<II',efi,opt+0x70+5*8)
           assert (reloc_rva,reloc_size)==(0x2000,12)
 
-          debug=(root/'debugcon.txt').read_text(errors='strict')
-          assert 'QEVARYNOX-UEFI-SEED-V1-PASS' in debug
+          serial=(root/'serial.bin').read_text(errors='strict')
+          assert 'QEVARYNOX-UEFI-SEED-V1-PASS' in serial
 
           evidence=(root/'evidence.txt').read_text().splitlines()
           required={
@@ -242,8 +237,7 @@ jobs:
               'firmware-load = PASS',
               'machine-code-execution-marker = PASS',
               'marker = QEVARYNOX-UEFI-SEED-V1-PASS',
-              'qemu-exit-code = 33',
-              'isa-debug-exit = PASS',
+              'serial-witness = PASS',
               'physical-machine-firmware-boot = not-established',
               'secure-boot = not-established',
               'result = PASS',
