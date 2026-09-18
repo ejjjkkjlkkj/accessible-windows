@@ -10,8 +10,9 @@ expected-controller = PCI_VEN_1022_DEV_15E3
 expected-codec = HDAUDIO_VEN_10EC_DEV_0256
 expected-controller-selection = PREFERRED_AMD_1022_15E3
 expected-proof-file = QEVARYNOX-PHYSICAL-PROOF.TXT
-physical-control = press R to repeat current HII prompt
-proof-interaction = HII_GRAPH_REPEAT_KEY=PASS
+physical-controls = Up previous prompt; Down next prompt; R repeat; Esc exit and persist proof
+proof-navigation = HII_GRAPH_NAV_UP=PASS + HII_GRAPH_NAV_DOWN=PASS + HII_GRAPH_NAV_REPEAT=PASS + HII_GRAPH_NAV_EXIT=PASS
+proof-navigation-speech-events = at least 3
 proof-DMA = HII_GRAPH_SPEECH_DMA=PASS + LPIB_PROGRESS=PASS
 proof-DMA-reuse = HII_GRAPH_SPEECH_DMA_REUSE=PASS
 audible-speaker-proof = human confirmation remains required
