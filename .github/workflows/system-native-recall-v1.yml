@@ -190,30 +190,28 @@ jobs:
             $invokeNext.Invoke()
             Wait-TraceCount 4
 
-            $previous=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$previousCond)
-            if (-not $previous) { throw 'fresh previous control not found at episode4' }
-            $invokePrev=[System.Windows.Automation.InvokePattern]$previous.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-            $invokePrev.Invoke()
+            $window=$root.FindFirst([System.Windows.Automation.TreeScope]::Children,$procCond)
+            if (-not $window) { throw 'native recall window disappeared before keyboard previous' }
+            [void][NativeRecallWin32]::SetForegroundWindow([IntPtr]::new($window.Current.NativeWindowHandle))
+            [void]$ws.AppActivate([int]$p.Id)
+            Start-Sleep -Milliseconds 200
+            $focused=[System.Windows.Automation.AutomationElement]::FocusedElement
+            if (-not $focused -or $focused.Current.ProcessId -ne $p.Id) { throw 'recall window does not own keyboard focus before P shortcut' }
+            $ws.SendKeys('p')
             Wait-TraceCount 5
 
             $window=$root.FindFirst([System.Windows.Automation.TreeScope]::Children,$procCond)
-            if (-not $window) { throw 'native recall window disappeared before keyboard previous' }
+            if (-not $window) { throw 'native recall window disappeared before first assistive previous' }
             $previous=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$previousCond)
-            if (-not $previous) { throw 'fresh previous native episode control not found' }
-            $next=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$nextCond)
-            if (-not $next) { throw 'fresh next native episode control not found before left navigation' }
-            [void][NativeRecallWin32]::SetForegroundWindow([IntPtr]::new($window.Current.NativeWindowHandle))
-            $next.SetFocus()
-            Start-Sleep -Milliseconds 250
-            if (-not $next.Current.HasKeyboardFocus) { throw 'fresh recall next control keyboard focus failed before left navigation' }
-            [void]$ws.AppActivate([int]$p.Id)
-            Start-Sleep -Milliseconds 200
-            if (-not $next.Current.HasKeyboardFocus) { throw 'fresh recall next control lost keyboard focus before left navigation' }
-            $ws.SendKeys('p')
+            if (-not $previous) { throw 'fresh first assistive previous control not found' }
+            $invokePrev=[System.Windows.Automation.InvokePattern]$previous.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            $invokePrev.Invoke()
             Wait-TraceCount 6
 
+            $window=$root.FindFirst([System.Windows.Automation.TreeScope]::Children,$procCond)
+            if (-not $window) { throw 'native recall window disappeared before second assistive previous' }
             $previous=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$previousCond)
-            if (-not $previous) { throw 'fresh assistive previous control not found' }
+            if (-not $previous) { throw 'fresh second assistive previous control not found' }
             $invokePrev=[System.Windows.Automation.InvokePattern]$previous.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
             $invokePrev.Invoke()
             Wait-TraceCount 7
@@ -237,8 +235,8 @@ jobs:
             @{carrier='assistive-next';index='1';msg='Episode 2 of 4: current exchange, goal identity, target identity, result identity'},
             @{carrier='keyboard-n';index='2';msg='Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'},
             @{carrier='assistive-next';index='3';msg='Episode 4 of 4: current identity, goal exchange, target identity, result identity'},
-            @{carrier='assistive-previous';index='2';msg='Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'},
-            @{carrier='keyboard-p';index='1';msg='Episode 2 of 4: current exchange, goal identity, target identity, result identity'},
+            @{carrier='keyboard-p';index='2';msg='Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'},
+            @{carrier='assistive-previous';index='1';msg='Episode 2 of 4: current exchange, goal identity, target identity, result identity'},
             @{carrier='assistive-previous';index='0';msg='Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'}
           )
 
@@ -350,8 +348,8 @@ jobs:
               ('assistive-next',1,'Episode 2 of 4: current exchange, goal identity, target identity, result identity'),
               ('keyboard-n',2,'Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'),
               ('assistive-next',3,'Episode 4 of 4: current identity, goal exchange, target identity, result identity'),
-              ('assistive-previous',2,'Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'),
-              ('keyboard-p',1,'Episode 2 of 4: current exchange, goal identity, target identity, result identity'),
+              ('keyboard-p',2,'Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'),
+              ('assistive-previous',1,'Episode 2 of 4: current exchange, goal identity, target identity, result identity'),
               ('assistive-previous',0,'Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'),
           ]
           for event,(carrier,index,message) in zip(events,expected):
