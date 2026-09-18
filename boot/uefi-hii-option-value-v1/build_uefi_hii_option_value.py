@@ -29,6 +29,7 @@ MARKS={
  'suffix': b'\r\nHII_OPTION_STRING=PASS\r\nSTATUS=PASS\r\nEND\r\n',
  'opt_flags': b'QEVARYNOX-UEFI-HII-OPTION-VALUE-V1\r\nOPTION_FLAGS_HEX=',
  'opt_type': b'\r\nOPTION_TYPE_HEX=',
+ 'opt_width': b'\r\nOPTION_VALUE_WIDTH_HEX=',
  'opt_value': b'\r\nOPTION_VALUE_RAW8_HEX=',
  'opt_done': b'\r\nOPTION_VALUE_READ=PASS\r\nEND\r\n',
  'no_protocol': b'QEVARYNOX-UEFI-HII-OPTION-VALUE-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_PROTOCOL_NOT_FOUND\r\nEND\r\n',
@@ -84,7 +85,7 @@ def build():
   'token':112,'temp_handle':120,'handle_cursor':128,'handles_remaining':136,
   'forms_ptr':144,'strings_ptr':152,'list_len':160,'ifr_next_ptr':168,'ifr_next_remaining':176,
   'strings_first':184,'list_start':192,'global_remaining':200,
-  'option_flags':208,'option_type':209,'option_value':216,
+  'option_flags':208,'option_type':209,'option_width':210,'option_value':216,
   'handles_static':0x100,'pkg_static':0x1100,
  }
  struct.pack_into('<IHH8B',data,L['db_guid'],
@@ -212,15 +213,28 @@ def build():
  c.rel32(b'\xe9','ifr_loop')
 
  c.label('ifr_option')
- # EFI_IFR_ONE_OF_OPTION is packed: Header(2), Option(2), Flags(1), Type(1),
- # EFI_IFR_TYPE_VALUE union (8 bytes). Require the complete typed value.
- c.emit(b'\x83\xf9\x0e'); c.rel32(b'\x0f\x82','ifr_next')
+ # EFI_IFR_ONE_OF_OPTION is variable length: Header(2), Option(2), Flags(1),
+ # Type(1), then the value encoded at its real type width.  Numeric types
+ # 0/1/2/3 are UINT8/16/32/64, so valid lengths are 7/8/10/14 bytes.
+ c.emit(b'\x83\xf9\x07'); c.rel32(b'\x0f\x82','ifr_next')
  c.emit(b'\x41\x0f\xb7\x41\x02')
  c.emit(b'\x66\x85\xc0'); c.rel32(b'\x0f\x84','ifr_next')
  c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  c.emit(b'\x41\x0f\xb6\x41\x04'); c.lea_rdx_data(L['option_flags']); c.emit(b'\x88\x02')
  c.emit(b'\x41\x0f\xb6\x41\x05'); c.lea_rdx_data(L['option_type']); c.emit(b'\x88\x02')
- c.emit(b'\x49\x8b\x41\x06'); c.lea_rdx_data(L['option_value']); c.emit(b'\x48\x89\x02')
+ # Only numeric ONE_OF values participate in numeric current-value matching.
+ c.emit(b'\x3c\x03'); c.rel32(b'\x0f\x87','ifr_next')
+ # width = 1 << Type; require opcode Length >= 6 + width.
+ c.emit(b'\x0f\xb6\xc8\xba\x01\x00\x00\x00\xd3\xe2')
+ c.emit(b'\x8d\x42\x06\x39\xc1'); c.rel32(b'\x0f\x87','ifr_next')
+ c.lea_rax_data(L['option_width']); c.emit(b'\x88\x10')
+ # Zero-pad destination then copy exactly the typed value width from +6.
+ c.lea_rdx_data(L['option_value']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00\xc7\x42\x04\x00\x00\x00\x00')
+ c.emit(b'\x49\x8d\x71\x06\x89\xd1')
+ c.label('option_value_copy_loop')
+ c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','option_value_copy_done')
+ c.emit(b'\x8a\x06\x88\x02\x48\xff\xc6\x48\xff\xc2\xff\xc9'); c.rel32(b'\xe9','option_value_copy_loop')
+ c.label('option_value_copy_done')
  # Preserve the next IFR opcode so an unresolved Option StringId does not
  # terminate discovery; real firmware can contain sparse language strings.
  c.emit(b'\x4c\x89\xc8\x48\x01\xc8')
@@ -420,6 +434,7 @@ def build():
  c.label('emit_option_meta')
  serial('opt_flags'); c.lea_rax_data(L['option_flags']); c.emit(b'\x8a\x00'); c.rel32(b'\xe8','hex8_emit')
  serial('opt_type'); c.lea_rax_data(L['option_type']); c.emit(b'\x8a\x00'); c.rel32(b'\xe8','hex8_emit')
+ serial('opt_width'); c.lea_rax_data(L['option_width']); c.emit(b'\x8a\x00'); c.rel32(b'\xe8','hex8_emit')
  serial('opt_value'); c.lea_rsi_data(L['option_value']); c.emit(b'\xb9\x08\x00\x00\x00')
  c.label('option_value_hex_loop'); c.emit(b'\x8a\x06'); c.rel32(b'\xe8','hex8_emit'); c.emit(b'\x48\xff\xc6\xff\xc9'); c.rel32(b'\x0f\x85','option_value_hex_loop')
  serial('opt_done'); c.emit(b'\xc3')
@@ -486,6 +501,7 @@ def validate(image):
   b'IFR_OPTION_STRING_ID=PASS',
   b'OPTION_FLAGS_HEX=',
   b'OPTION_TYPE_HEX=',
+  b'OPTION_VALUE_WIDTH_HEX=',
   b'OPTION_VALUE_RAW8_HEX=',
   b'OPTION_VALUE_READ=PASS',
   b'OPTION_TEXT=',
