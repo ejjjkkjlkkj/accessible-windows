@@ -413,4 +413,15 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add "$proof"
           git commit -m "Record native UEFI selected label proof [skip ci]"
-          git push origin os
+
+          # The os branch is intentionally active. Rebase the proof-only commit
+          # over unrelated concurrent pushes while preserving revision binding.
+          for attempt in 1 2 3; do
+            if git push origin os; then exit 0; fi
+            git fetch origin os
+            [[ "$tested_builder" == "$(git rev-parse "origin/os:$builder")" ]] || { echo HII_SELECTED_LABEL_STALE_BUILDER=SKIP; exit 0; }
+            [[ "$tested_workflow" == "$(git rev-parse "origin/os:$workflow")" ]] || { echo HII_SELECTED_LABEL_STALE_WORKFLOW=SKIP; exit 0; }
+            git rebase origin/os || { git rebase --abort || true; exit 1; }
+          done
+          echo HII_SELECTED_LABEL_PROOF_PUSH=FAILED
+          exit 1
