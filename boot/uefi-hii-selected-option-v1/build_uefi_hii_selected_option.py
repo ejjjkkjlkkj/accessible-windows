@@ -675,8 +675,9 @@ def build():
 
  c.label('resolve_selected_option')
  # Match the live current ONE_OF value to a direct EFI_IFR_ONE_OF_OPTION child.
- # This parser is read-only: it walks the already exported Forms package and
- # compares the option's typed value with CURRENT_VALUE_RAW8.
+ # EFI_IFR_ONE_OF_OPTION is variable length: 7/8/10/14 bytes for
+ # UINT8/16/32/64.  Read and compare exactly the Type width, never a fixed
+ # eight-byte union, so the parser stays inside the verified IFR opcode.
  c.lea_rax_data(L['question_ptr']); c.emit(b'\x48\x8b\x00\x48\x85\xc0'); c.rel32(b'\x0f\x84','selected_option_not_found')
  # A ONE_OF owns a scoped child list; reject malformed/unscoped candidates.
  c.emit(b'\xf6\x40\x01\x80'); c.rel32(b'\x0f\x84','selected_option_not_found')
@@ -692,14 +693,23 @@ def build():
  c.emit(b'\x3c\x29'); c.rel32(b'\x0f\x84','selected_option_end')
  c.emit(b'\x3c\x09'); c.rel32(b'\x0f\x85','selected_option_scope_advance')
  c.emit(b'\x41\x83\xfb\x01'); c.rel32(b'\x0f\x85','selected_option_scope_advance')
- c.emit(b'\x83\xf9\x0e'); c.rel32(b'\x0f\x82','selected_option_advance')
- # EFI_IFR_ONE_OF_OPTION.Type must agree with ONE_OF numeric size 8/16/32/64.
- c.lea_rdx_data(L['oneof_flags']); c.emit(b'\x0f\xb6\x12\x83\xe2\x03')
- c.emit(b'\x41\x0f\xb6\x41\x05\x39\xd0'); c.rel32(b'\x0f\x85','selected_option_advance')
- c.emit(b'\x83\xfa\x00'); c.rel32(b'\x0f\x84','selected_cmp8')
- c.emit(b'\x83\xfa\x01'); c.rel32(b'\x0f\x84','selected_cmp16')
- c.emit(b'\x83\xfa\x02'); c.rel32(b'\x0f\x84','selected_cmp32')
+ c.emit(b'\x83\xf9\x07'); c.rel32(b'\x0f\x82','selected_option_advance')
+ c.emit(b'\x41\x89\xc8') # r8d = exact opcode Length
+
+ # Type at +5 is numeric 0/1/2/3 => width 1/2/4/8. It must agree with the
+ # parent ONE_OF numeric size, and Header.Length must cover 6 + width bytes.
+ c.emit(b'\x41\x0f\xb6\x41\x05')
+ c.emit(b'\x3c\x03'); c.rel32(b'\x0f\x87','selected_option_advance')
+ c.lea_rdx_data(L['oneof_flags']); c.emit(b'\x0f\xb6\x12\x83\xe2\x03\x39\xd0'); c.rel32(b'\x0f\x85','selected_option_advance')
+ c.emit(b'\x89\xc1\xba\x01\x00\x00\x00\xd3\xe2') # edx = 1 << Type
+ c.emit(b'\x8d\x42\x06\x41\x39\xc0'); c.rel32(b'\x0f\x82','selected_option_restore_advance')
+ c.emit(b'\x44\x89\xc1') # restore ecx = opcode Length for scan advance
+ c.emit(b'\x3c\x00'); c.rel32(b'\x0f\x84','selected_cmp8')
+ c.emit(b'\x3c\x01'); c.rel32(b'\x0f\x84','selected_cmp16')
+ c.emit(b'\x3c\x02'); c.rel32(b'\x0f\x84','selected_cmp32')
  c.rel32(b'\xe9','selected_cmp64')
+ c.label('selected_option_restore_advance'); c.emit(b'\x44\x89\xc1'); c.rel32(b'\xe9','selected_option_advance')
+
  c.label('selected_cmp8')
  c.lea_rax_data(L['current_raw']); c.emit(b'\x8a\x00\x41\x3a\x41\x06'); c.rel32(b'\x0f\x85','selected_option_advance'); c.rel32(b'\xe9','selected_option_match')
  c.label('selected_cmp16')
@@ -708,11 +718,19 @@ def build():
  c.lea_rax_data(L['current_raw']); c.emit(b'\x8b\x00\x41\x3b\x41\x06'); c.rel32(b'\x0f\x85','selected_option_advance'); c.rel32(b'\xe9','selected_option_match')
  c.label('selected_cmp64')
  c.lea_rax_data(L['current_raw']); c.emit(b'\x48\x8b\x00\x49\x3b\x41\x06'); c.rel32(b'\x0f\x85','selected_option_advance')
+
  c.label('selected_option_match')
  c.emit(b'\x41\x0f\xb7\x41\x02'); c.lea_rdx_data(L['selected_option_token']); c.emit(b'\x66\x89\x02')
  c.emit(b'\x41\x0f\xb6\x41\x05'); c.lea_rdx_data(L['selected_option_type']); c.emit(b'\x88\x02')
- c.emit(b'\x49\x8b\x41\x06'); c.lea_rdx_data(L['selected_option_raw']); c.emit(b'\x48\x89\x02')
- c.emit(b'\x31\xc0\xc3')
+ # Zero-pad the persisted raw option value, then copy exactly its typed width.
+ c.lea_rdx_data(L['selected_option_raw']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00\xc7\x42\x04\x00\x00\x00\x00')
+ c.emit(b'\x41\x0f\xb6\x49\x05\xba\x01\x00\x00\x00\xd3\xe2')
+ c.emit(b'\x49\x8d\x71\x06'); c.lea_rdi_data(L['selected_option_raw']); c.emit(b'\x89\xd1')
+ c.label('selected_option_copy_loop')
+ c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','selected_option_copy_done')
+ c.emit(b'\x8a\x06\x88\x07\x48\xff\xc6\x48\xff\xc7\xff\xc9'); c.rel32(b'\xe9','selected_option_copy_loop')
+ c.label('selected_option_copy_done'); c.emit(b'\x31\xc0\xc3')
+
  c.label('selected_option_end')
  c.emit(b'\x41\xff\xcb\x41\x83\xfb\x00'); c.rel32(b'\x0f\x84','selected_option_not_found')
  c.rel32(b'\xe9','selected_option_advance')
