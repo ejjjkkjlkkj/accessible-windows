@@ -59,7 +59,12 @@ jobs:
               "verb_data(L['dac_nid'],0x00070610)",
               "verb_data(L['dac_nid'],0x00020011)",
               "verb_data(L['pin_nid'],0x00070740)",
+              "verb_data(L['pin_nid'],0x000f000c)",
+              "verb_data(L['pin_nid'],0x00070c02)",
+              "verb_data(L['pin_nid'],0x000f0c00)",
               "NO_FIXED_WIDGET_NIDS=PASS",
+              "PIN_CAPABILITIES_QUERY=PASS",
+              "EAPD_IF_SUPPORTED=PASS",
               "DAC_OUTPUT_AMP_VERIFY=PASS",
               "RUNTIME_WORD_SELECTION_HDA=PASS",
               "OS_UEFI_HDA_INTERACTIVE_SPEECH_BUILD=PASS",
@@ -128,6 +133,8 @@ jobs:
               b'AUTO_OUTPUT_PIN_WIDGET=PASS\r\n',
               b'AUTO_PIN_TO_DAC_DIRECT_ROUTE=PASS\r\n',
               b'PIN_CONFIG_DEFAULT=PASS\r\n',
+              b'PIN_CAPABILITIES_QUERY=PASS\r\n',
+              b'EAPD_IF_SUPPORTED=PASS\r\n',
               b'DAC_OUTPUT_AMP_VERIFY=PASS\r\n',
               b'EVENT=WAIT_KEY\r\n',
               b'WORD=AIDE\r\n',
@@ -212,6 +219,8 @@ jobs:
               b'AUTO_PIN_TO_DAC_DIRECT_ROUTE=PASS\r\n',
               b'NO_FIXED_WIDGET_NIDS=PASS\r\n',
               b'PIN_CONFIG_DEFAULT=PASS\r\n',
+              b'PIN_CAPABILITIES_QUERY=PASS\r\n',
+              b'EAPD_IF_SUPPORTED=PASS\r\n',
               b'DAC_OUTPUT_AMP_VERIFY=PASS\r\n',
               b'EVENT=WAIT_KEY\r\n',
           ]
@@ -367,6 +376,8 @@ jobs:
               "proof-auto-output-pin = PASS\n"
               "proof-auto-direct-route = PASS\n"
               "proof-output-policy = PASS\n"
+              "proof-pin-capabilities-query = PASS\n"
+              "proof-EAPD-if-supported = PASS\n"
               "proof-widget-NIDs-hardcoded = false\n"
               "proof-runtime-word-selection = PASS\n"
               "proof-distinct-waveforms = PASS\n"
