@@ -1166,7 +1166,7 @@ def build():
  c.lea_rax_data(L['block_size']); c.emit(b'\x48\x8b\x00')
  c.lea_rdx_data(L['varstore_info']); c.emit(b'\x0f\xb7\x12')
  c.lea_rcx_data(L['current_width']); c.emit(b'\x0f\xb6\x09\x48\x01\xca')
- c.emit(b'\x48\x39\xd0'); c.rel32(b'\x0f\x82','buffer_export_exhausted')
+ # ConfigToBlock success returns the largest modified byte index, not a byte count.\n c.emit(b'\x48\xff\xc0\x48\x39\xd0'); c.rel32(b'\x0f\x82','buffer_export_exhausted')
  c.lea_rsi_data(L['current_data']); c.lea_rax_data(L['varstore_info']); c.emit(b'\x0f\xb7\x00\x48\x01\xc6')
  c.lea_rdx_data(L['current_raw']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00\xc7\x42\x04\x00\x00\x00\x00')
  c.lea_rax_data(L['current_width']); c.emit(b'\x0f\xb6\x08')
