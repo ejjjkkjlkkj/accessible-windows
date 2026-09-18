@@ -451,24 +451,17 @@ def build():
  verb_data(L['pin_nid'],0x00070740)
  serial('codec')
 
- # Clear stale BCIS, program stream number 1, enable IOC interrupt status,
- # and RUN. Poll BCIS so success means the final IOC descriptor completed.
- c.emit(bytes.fromhex('c643041c'))             # SDSTS W1C: BCIS/FIFOE/DESE
- c.emit(bytes.fromhex('c6430210'))             # stream tag 1
- c.emit(bytes.fromhex('804b0220'))             # IOCE
- c.emit(bytes.fromhex('800b02'))               # RUN
- c.emit(bytes.fromhex('b900002000'))           # bounded final-IOC poll
- c.label('bcis_poll')
- c.emit(bytes.fromhex('f6430404'))
- c.rel32(bytes.fromhex('0f85'),'bcis_done')
- c.emit(bytes.fromhex('ffc9'))
- c.rel32(bytes.fromhex('0f85'),'bcis_poll')
- c.rel32(bytes.fromhex('e9'),'fail_stream')
- c.label('bcis_done')
- c.emit(bytes.fromhex('8b430485c0')); c.rel32(bytes.fromhex('0f84'),'fail_stream')
+ # Clear stale SDSTS, program stream number 1, enable IOC status and RUN.
+ c.emit(b'\xc6\x43\x03\x1c\xc6\x43\x02\x10\xc6\x03\x06')
+ # Allow the captured spelling sequence to reach its final IOC descriptor.
+ c.emit(b'\xb9\x00\x12\x7a\x00\x49\x8b\x87\xf8\x00\x00\x00\xff\xd0')
+ # LPIB must move and BCIS at SDSTS+3 must prove final IOC completion.
+ c.emit(b'\x8b\x43\x04\x85\xc0'); c.rel32(b'\x0f\x84','fail_stream')
+ c.emit(b'\xf6\x43\x03\x04'); c.rel32(b'\x0f\x84','fail_stream')
  serial('progress')
- # Stop stream and acknowledge final BCIS.
- c.emit(bytes.fromhex('8003fdc6430404'))
+ c.emit(b'\xc6\x43\x03\x04')
+ # Stop stream.
+ c.emit(b'\x8a\x03\x24\xfd\x88\x03')
  serial('done')
  c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
 
