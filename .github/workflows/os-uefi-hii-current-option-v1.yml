@@ -7,6 +7,7 @@ on:
       - 'boot/uefi-hii-current-option-v1/build_uefi_hii_current_option.py'
       - 'boot/uefi-hii-current-option-v1/os-uefi-hii-current-option-v1.labproof'
       - 'boot/uefi-hii-selected-option-v1/os-uefi-hii-selected-option-v1.labproof'
+      - 'boot/uefi-hii-option-value-v1/os-uefi-hii-option-value-v1.labproof'
       - 'boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof'
       - '.github/workflows/os-uefi-hii-current-option-v1.yml'
   workflow_dispatch:
@@ -51,6 +52,19 @@ jobs:
           ]:
               assert line in selected,('selected-option',line)
 
+          typed=set(Path('boot/uefi-hii-option-value-v1/os-uefi-hii-option-value-v1.labproof').read_text().splitlines())
+          for line in [
+              'proof = PASS',
+              'proof-option-value-binding = PASS',
+              'proof-option-identity-match = PASS',
+              'proof-option-type-hex = 00',
+              'proof-option-width = 1',
+              'proof-option-value-unsigned = 0',
+              'proof-current-option-selection = false',
+              'proof-setting-mutation = false',
+          ]:
+              assert line in typed,('option-value',line)
+
           fixture=set(Path('boot/uefi-hii-iscsi-fixture-v1/os-uefi-hii-iscsi-fixture-v1.labproof').read_text().splitlines())
           for line in [
               'proof = PASS',
@@ -79,7 +93,9 @@ jobs:
               "c.label('resolve_current_option')",
               "c.label('current_option_candidate')",
               "c.label('current_option_scope_and_advance')",
+              "c.emit(b'\\x41\\xf6\\x41\\x01\\x80')",
               "c.lea_rax_data(L['option_scope_depth']); c.emit(b'\\x83\\x38\\x01')",
+              "Keep r11d untouched",
               "c.lea_rax_data(L['option_width']); c.emit(b'\\x88\\x10')",
               "c.lea_rax_data(L['option_width']); c.emit(b'\\x0f\\xb6\\x08')",
               "c.lea_rax_data(L['resolve_mode']); c.emit(b'\\xc6\\x00\\x01')",
@@ -100,6 +116,10 @@ jobs:
 
           proof=set((root/'os-uefi-hii-current-option-v1.labproof').read_text().splitlines())
           for line in [
+              'depends-on = OS-UEFI-HII-SELECTED-OPTION-V1',
+              'depends-on = OS-UEFI-HII-OPTION-VALUE-V1',
+              'depends-on = OS-UEFI-HII-ISCSI-FIXTURE-V1',
+              'parent-one-of-scope-required = true',
               'scope-policy = scan only the scope opened by the exact live ONE_OF; nested scopes are tracked and excluded from direct-child selection',
               'option-text-language-binding = exact same EFI_HII_PACKAGE_STRINGS package that successfully resolved QUESTION_TEXT',
               'numeric-option-layout = fixed prefix 6 bytes plus typed Value width 1 2 4 or 8 bytes',
