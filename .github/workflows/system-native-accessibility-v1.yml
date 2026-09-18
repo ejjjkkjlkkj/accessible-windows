@@ -48,10 +48,8 @@ jobs:
             [System.Windows.Forms.Form].Assembly.Location,
             [System.Drawing.Point].Assembly.Location
           )
-          $out=Join-Path $PWD 'accessibility-runtime/native-accessibility-v1.exe'
-          Add-Type -TypeDefinition (Get-Content 'system/native-accessibility-v1/NativeAccessibilityApp.cs' -Raw) -Language CSharp -ReferencedAssemblies $refs -OutputAssembly $out -OutputType WindowsApplication
-          if (-not (Test-Path $out)) { throw 'human-facing adapter executable missing' }
-          "NATIVE_ACCESSIBILITY_BUILD=PASS;EXE=$out"
+          Add-Type -TypeDefinition (Get-Content 'system/native-accessibility-v1/NativeAccessibilityApp.cs' -Raw) -Language CSharp -ReferencedAssemblies $refs
+          'NATIVE_ACCESSIBILITY_BUILD=PASS;TYPE=NativeAccessibilityApp'
 
       - name: Prove UIA semantics assistive invocation and keyboard-only operation
         shell: pwsh
@@ -61,10 +59,24 @@ jobs:
           Add-Type -AssemblyName UIAutomationClient
           Add-Type -AssemblyName UIAutomationTypes
 
-          $exe=Join-Path $PWD 'accessibility-runtime/native-accessibility-v1.exe'
           $table=Join-Path $PWD 'lab21/relation-compose0'
           $trace=Join-Path $PWD 'accessibility-runtime/semantic-trace.txt'
-          $p=Start-Process -FilePath $exe -ArgumentList @($table,$trace) -PassThru
+          $hostScript=Join-Path $PWD 'accessibility-runtime/host.ps1'
+          @'
+          param([string]$Table,[string]$Trace)
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          $refs=@(
+            [System.Windows.Forms.Form].Assembly.Location,
+            [System.Drawing.Point].Assembly.Location
+          )
+          Add-Type -TypeDefinition (Get-Content (Join-Path $PSScriptRoot '../system/native-accessibility-v1/NativeAccessibilityApp.cs') -Raw) -Language CSharp -ReferencedAssemblies $refs
+          [NativeAccessibilityApp]::Main([string[]]@($Table,$Trace))
+          '@ | Set-Content $hostScript -Encoding utf8
+
+          $powershell=(Get-Command powershell.exe).Source
+          $p=Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-STA','-File',$hostScript,'-Table',$table,'-Trace',$trace) -PassThru
 
           try {
             $root=[System.Windows.Automation.AutomationElement]::RootElement
