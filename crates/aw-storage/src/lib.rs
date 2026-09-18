@@ -1,9 +1,9 @@
 #![no_std]
 //! From-zero native persistent-storage foundations.
 //!
-//! This crate defines only structural contracts. It does not claim that the
-//! final filesystem, authenticated storage, encryption or crash recovery are
-//! complete.
+//! This crate defines structural and publication contracts. It does not claim
+//! that the final filesystem, authenticated storage, encryption or physical
+//! crash durability are complete.
 
 /// On-disk magic for the native storage format.
 pub const STORAGE_MAGIC: u64 = 0x4157_5354_4F52_4531;
@@ -241,12 +241,85 @@ impl TransactionRecordV1 {
     }
 }
 
+/// Error returned while deriving an anchor that could publish a prepared transaction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublicationError {
+    /// The currently active anchor is structurally invalid.
+    CurrentAnchorInvalid(SuperblockError),
+    /// The transaction descriptor violates version-1 structural rules.
+    InvalidTransaction,
+    /// Only a prepared transaction may be published.
+    TransactionNotPrepared,
+    /// The transaction does not advance exactly from the current generation.
+    GenerationMismatch,
+}
+
+/// Derives the next durable anchor without mutating the current known-good anchor.
+///
+/// This function models publication only. It deliberately performs no physical
+/// writes and makes no durability claim. The returned anchor preserves the
+/// current committed root as its explicit recovery root.
+pub fn prepare_publication(
+    current: &SuperblockV1,
+    transaction: &TransactionRecordV1,
+) -> Result<SuperblockV1, PublicationError> {
+    current
+        .validate_structure()
+        .map_err(PublicationError::CurrentAnchorInvalid)?;
+
+    if !transaction.is_structurally_valid() {
+        return Err(PublicationError::InvalidTransaction);
+    }
+    if transaction.phase != TransactionPhase::Prepared {
+        return Err(PublicationError::TransactionNotPrepared);
+    }
+
+    let expected_next = current
+        .generation
+        .checked_add(1)
+        .ok_or(PublicationError::GenerationMismatch)?;
+    if transaction.base_generation != current.generation
+        || transaction.next_generation != expected_next
+    {
+        return Err(PublicationError::GenerationMismatch);
+    }
+
+    Ok(SuperblockV1::new(
+        transaction.next_generation,
+        transaction.new_root,
+        current.committed_root,
+        transaction.new_integrity_root,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const ID_A: ObjectId = ObjectId::new([0xA5; OBJECT_ID_BYTES]);
     const ID_B: ObjectId = ObjectId::new([0x5A; OBJECT_ID_BYTES]);
+    const TX_ID: ObjectId = ObjectId::new([0xC3; OBJECT_ID_BYTES]);
+
+    fn anchor(generation: u64, root: u64, previous: u64, id: ObjectId) -> SuperblockV1 {
+        SuperblockV1::new(
+            generation,
+            BlockAddress::new(root),
+            BlockAddress::new(previous),
+            id,
+        )
+    }
+
+    fn prepared_transaction(base: u64, next: u64, root: u64) -> TransactionRecordV1 {
+        TransactionRecordV1 {
+            transaction_id: TX_ID,
+            base_generation: base,
+            next_generation: next,
+            new_root: BlockAddress::new(root),
+            new_integrity_root: ID_B,
+            phase: TransactionPhase::Prepared,
+            reserved: 0,
+        }
+    }
 
     #[test]
     fn block_offset_rejects_overflow() {
@@ -255,33 +328,25 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_older_anchor_when_newer_is_structurally_corrupt() {
-        let old = SuperblockV1::new(41, BlockAddress::new(100), BlockAddress::new(90), ID_A);
-        let mut torn = SuperblockV1::new(42, BlockAddress::new(120), BlockAddress::new(100), ID_B);
+    fn recovery_falls_back_when_newer_anchor_is_structurally_corrupt() {
+        let old = anchor(41, 100, 90, ID_A);
+        let mut torn = anchor(42, 120, 100, ID_B);
         torn.magic = 0;
 
         assert_eq!(newest_structurally_valid(&old, &torn), Some(&old));
     }
 
     #[test]
-    fn selects_newest_valid_generation() {
-        let a = SuperblockV1::new(41, BlockAddress::new(100), BlockAddress::new(90), ID_A);
-        let b = SuperblockV1::new(42, BlockAddress::new(120), BlockAddress::new(100), ID_B);
+    fn recovery_selects_newest_valid_generation() {
+        let a = anchor(41, 100, 90, ID_A);
+        let b = anchor(42, 120, 100, ID_B);
 
         assert_eq!(newest_structurally_valid(&a, &b), Some(&b));
     }
 
     #[test]
     fn transaction_generation_must_advance_exactly_once() {
-        let valid = TransactionRecordV1 {
-            transaction_id: ID_A,
-            base_generation: 7,
-            next_generation: 8,
-            new_root: BlockAddress::new(200),
-            new_integrity_root: ID_B,
-            phase: TransactionPhase::Prepared,
-            reserved: 0,
-        };
+        let valid = prepared_transaction(7, 8, 200);
         assert!(valid.is_structurally_valid());
 
         let invalid = TransactionRecordV1 {
@@ -289,5 +354,61 @@ mod tests {
             ..valid
         };
         assert!(!invalid.is_structurally_valid());
+    }
+
+    #[test]
+    fn publication_preserves_previous_known_good_root() {
+        let current = anchor(41, 100, 90, ID_A);
+        let transaction = prepared_transaction(41, 42, 120);
+
+        let next = prepare_publication(&current, &transaction).expect("valid publication");
+        assert_eq!(next.generation, 42);
+        assert_eq!(next.committed_root, BlockAddress::new(120));
+        assert_eq!(next.previous_root, current.committed_root);
+        assert_eq!(next.integrity_root, ID_B);
+    }
+
+    #[test]
+    fn publication_rejects_stale_transaction() {
+        let current = anchor(42, 120, 100, ID_B);
+        let stale = prepared_transaction(41, 42, 130);
+
+        assert_eq!(
+            prepare_publication(&current, &stale),
+            Err(PublicationError::GenerationMismatch)
+        );
+    }
+
+    #[test]
+    fn publication_rejects_non_prepared_transaction() {
+        let current = anchor(41, 100, 90, ID_A);
+        let transaction = TransactionRecordV1 {
+            phase: TransactionPhase::Committed,
+            ..prepared_transaction(41, 42, 120)
+        };
+
+        assert_eq!(
+            prepare_publication(&current, &transaction),
+            Err(PublicationError::TransactionNotPrepared)
+        );
+    }
+
+    #[test]
+    fn recovery_changes_generation_only_after_valid_anchor_publication() {
+        let stable = anchor(41, 100, 90, ID_A);
+        let transaction = prepared_transaction(41, 42, 120);
+
+        let mut unpublished_slot = prepare_publication(&stable, &transaction).expect("candidate");
+        unpublished_slot.magic = 0;
+        assert_eq!(
+            newest_structurally_valid(&stable, &unpublished_slot),
+            Some(&stable)
+        );
+
+        let published = prepare_publication(&stable, &transaction).expect("published candidate");
+        assert_eq!(
+            newest_structurally_valid(&stable, &published),
+            Some(&published)
+        );
     }
 }

@@ -59,6 +59,23 @@ jobs:
       - name: Clippy
         run: cargo +1.98.1 clippy --workspace --exclude aw-uefi --all-targets -- -D warnings
 
+  storage-recovery-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Publication model
+        run: cargo +1.98.1 test -p aw-storage publication -- --nocapture
+      - name: Recovery model
+        run: cargo +1.98.1 test -p aw-storage recovery -- --nocapture
+
   bare-metal-contracts:
     runs-on: ubuntu-24.04
     steps:
