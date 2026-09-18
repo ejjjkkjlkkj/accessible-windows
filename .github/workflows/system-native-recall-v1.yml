@@ -179,7 +179,7 @@ jobs:
             [void]$ws.AppActivate([int]$p.Id)
             Start-Sleep -Milliseconds 200
             if (-not $next.Current.HasKeyboardFocus) { throw 'recall next control lost keyboard focus before right navigation' }
-            $ws.SendKeys('{RIGHT}')
+            $ws.SendKeys('n')
             Wait-TraceCount 3
 
             $window=$root.FindFirst([System.Windows.Automation.TreeScope]::Children,$procCond)
@@ -209,7 +209,7 @@ jobs:
             [void]$ws.AppActivate([int]$p.Id)
             Start-Sleep -Milliseconds 200
             if (-not $next.Current.HasKeyboardFocus) { throw 'fresh recall next control lost keyboard focus before left navigation' }
-            $ws.SendKeys('{LEFT}')
+            $ws.SendKeys('p')
             Wait-TraceCount 6
 
             $previous=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$previousCond)
@@ -235,10 +235,10 @@ jobs:
           $expected=@(
             @{carrier='startup';index='0';msg='Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'},
             @{carrier='assistive-next';index='1';msg='Episode 2 of 4: current exchange, goal identity, target identity, result identity'},
-            @{carrier='keyboard-right';index='2';msg='Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'},
+            @{carrier='keyboard-n';index='2';msg='Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'},
             @{carrier='assistive-next';index='3';msg='Episode 4 of 4: current identity, goal exchange, target identity, result identity'},
             @{carrier='assistive-previous';index='2';msg='Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'},
-            @{carrier='keyboard-left';index='1';msg='Episode 2 of 4: current exchange, goal identity, target identity, result identity'},
+            @{carrier='keyboard-p';index='1';msg='Episode 2 of 4: current exchange, goal identity, target identity, result identity'},
             @{carrier='assistive-previous';index='0';msg='Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'}
           )
 
@@ -266,8 +266,8 @@ jobs:
             'episodes-recalled = 4'
             'assistive-next = PASS'
             'assistive-previous = PASS'
-            'keyboard-next = PASS'
-            'keyboard-previous = PASS'
+            'keyboard-n = PASS'
+            'keyboard-p = PASS'
             'visible-uia-speech-braille-equivalence = PASS'
             'read-only-history = PASS'
             "history-before-sha256 = $before"
@@ -348,10 +348,10 @@ jobs:
           expected=[
               ('startup',0,'Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'),
               ('assistive-next',1,'Episode 2 of 4: current exchange, goal identity, target identity, result identity'),
-              ('keyboard-right',2,'Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'),
+              ('keyboard-n',2,'Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'),
               ('assistive-next',3,'Episode 4 of 4: current identity, goal exchange, target identity, result identity'),
               ('assistive-previous',2,'Episode 3 of 4: current exchange, goal identity, target exchange, result exchange'),
-              ('keyboard-left',1,'Episode 2 of 4: current exchange, goal identity, target identity, result identity'),
+              ('keyboard-p',1,'Episode 2 of 4: current exchange, goal identity, target identity, result identity'),
               ('assistive-previous',0,'Episode 1 of 4: current identity, goal exchange, target exchange, result exchange'),
           ]
           for event,(carrier,index,message) in zip(events,expected):
@@ -369,8 +369,8 @@ jobs:
           assert values['episodes-recalled']=='4'
           assert values['assistive-next']=='PASS'
           assert values['assistive-previous']=='PASS'
-          assert values['keyboard-next']=='PASS'
-          assert values['keyboard-previous']=='PASS'
+          assert values['keyboard-n']=='PASS'
+          assert values['keyboard-p']=='PASS'
           assert values['visible-uia-speech-braille-equivalence']=='PASS'
           assert values['read-only-history']=='PASS'
           assert values['history-before-sha256']==digest
