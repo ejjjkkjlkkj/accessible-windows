@@ -12,6 +12,7 @@ WAIT_UP_PROBE=False
 WAIT_UP_SPEAK=False
 WAIT_DOWN_COMMIT=False
 WAIT_DOWN_CANCEL=False
+EFI_VARSTORE_ONLY=False
 
 ROOT=Path(__file__).resolve().parents[2]
 SPEECH_BUILDER=ROOT/'boot'/'uefi-hii-option-speech-v1'/'build_uefi_hii_option_speech.py'
@@ -67,6 +68,8 @@ MARKS={
  'vs_match': b'\r\nVARSTORE_DEFINITION_MATCH=PASS\r\nEND\r\n',
  'vs_name_match': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nVARSTORE_NAME_CONFIG_MATCH=PASS\r\nEND\r\n',
  'routing': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_CONFIG_ROUTING_PROTOCOL=PASS\r\nEND\r\n',
+ 'efi_var_name': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nEFI_VARSTORE_NAME_UTF16=PASS\r\nEND\r\n',
+ 'efi_var_get': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nEFI_VARSTORE_GET_VARIABLE=PASS\r\nEND\r\n',
  'handle_list': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_HANDLE_LIST=PASS\r\nEND\r\n',
  'cfg_access': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nHII_CONFIG_ROUTING_EXTERNAL_CALLER=PASS\r\nEND\r\n',
  'extract': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nCONFIG_ROUTING_EXPORT_CONFIG=PASS\r\nEND\r\n',
@@ -207,7 +210,8 @@ def build():
   'selected_option_ptr':464,'nav_option_token':472,'nav_option_type':474,'nav_option_raw':480,
   'prev_option_ptr':488,'prev_wrap_flag':496,'conin_ptr':504,
   'commit_config':512,'commit_progress':520,'commit_done':528,
-  'commit_request_buf':0x212000,
+  'rt_ptr':536,'efi_var_size':544,
+  'efi_name_utf16':0x210000,'commit_request_buf':0x212000,
   'handles_static':0x400,'pkg_static':0x1400,'match_pkg_static':0x101400,
   'current_data':0x201400,
  }
@@ -229,11 +233,10 @@ def build():
  c=Code()
  c.emit(b'\x53\x55\x56\x57\x41\x54\x41\x55\x41\x56\x41\x57')
  c.emit(b'\x4c\x8b\x7a\x60')  # r15=BootServices
- if WAIT_REPEAT_KEY or WAIT_DOWN_PROBE or WAIT_DOWN_SPEAK or WAIT_UP_PROBE or WAIT_UP_SPEAK or WAIT_DOWN_COMMIT or WAIT_DOWN_CANCEL:
-  # Persist ConIn in bridge-owned data. RBP is intentionally used as scratch by
-  # later machine-code paths, so keeping ConIn in RBP can corrupt ReadKeyStroke.
-  c.emit(b'\x48\x8b\x42\x30')
-  c.lea_rdx_data(L['conin_ptr']); c.emit(b'\x48\x89\x02')
+ # Persist RuntimeServices and ConIn before RDX is repurposed as scratch.
+ c.emit(b'\x48\x8b\x42\x58\x48\x8b\x4a\x30')
+ c.lea_rdx_data(L['rt_ptr']); c.emit(b'\x48\x89\x02')
+ c.lea_rdx_data(L['conin_ptr']); c.emit(b'\x48\x89\x0a')
  c.emit(b'\x48\x83\xec\x68\xfc')
 
  for p,v in ((0x3f9,0),(0x3fb,0x80),(0x3f8,3),(0x3f9,0),(0x3fb,3),(0x3fa,0xc7),(0x3fc,0x0b)):
@@ -1003,7 +1006,7 @@ def build():
  c.rel32(b'\xe9','varstore_found')
 
  c.label('varstore_efi')
- c.emit(b'\x83\xf9\x1a'); c.rel32(b'\x0f\x82','varstore_next')
+ c.emit(b'\x83\xf9\x1b'); c.rel32(b'\x0f\x82','varstore_next')
  c.emit(b'\x41\x0f\xb7\x41\x02')
  c.lea_rdx_data(L['varstore_id']); c.emit(b'\x66\x3b\x02'); c.rel32(b'\x0f\x85','varstore_next')
  c.lea_rdx_data(L['varstore_opcode']); c.emit(b'\xc6\x02\x26')
@@ -1011,15 +1014,23 @@ def build():
  c.emit(b'\x41\x8b\x41\x14'); c.lea_rdx_data(L['varstore_attrs']); c.emit(b'\x89\x02')
  c.emit(b'\x49\x8b\x41\x04'); c.lea_rdx_data(L['varstore_guid']); c.emit(b'\x48\x89\x02')
  c.emit(b'\x49\x8b\x41\x0c'); c.lea_rdx_data(L['varstore_guid']+8); c.emit(b'\x48\x89\x02')
+ # EFI_IFR_VARSTORE_EFI.Name is the trailing NUL-terminated ASCII name at +0x1a.
+ c.emit(b'\x49\x8d\x41\x1a'); c.lea_rdx_data(L['varstore_name_ptr']); c.emit(b'\x48\x89\x02')
+ c.emit(b'\x89\xc8\x83\xe8\x1a'); c.lea_rdx_data(L['varstore_name_remaining']); c.emit(b'\x89\x02')
 
  c.label('varstore_found'); c.emit(b'\x31\xc0\xc3')
  c.label('varstore_not_found'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
 
  c.label('read_buffer_current')
- # Buffer Storage (0x24) is read through EFI_HII_CONFIG_ROUTING_PROTOCOL.
- # UEFI requires external applications to use Config Routing rather than
- # invoking a driver's ConfigAccess interface directly.
- c.lea_rax_data(L['varstore_opcode']); c.emit(b'\x80\x38\x24'); c.rel32(b'\x0f\x85','buffer_current_not_found')
+ # Storage backends are intentionally separated. Existing proofs keep using
+ # Buffer Storage (0x24). EFI_VARSTORE_ONLY probes only EFI variable storage
+ # (0x26), which the UEFI browser itself services through RuntimeServices.
+ c.lea_rax_data(L['varstore_opcode'])
+ if EFI_VARSTORE_ONLY:
+  c.emit(b'\x80\x38\x26'); c.rel32(b'\x0f\x85','buffer_current_not_found')
+  c.rel32(b'\xe9','efi_var_current')
+ else:
+  c.emit(b'\x80\x38\x24'); c.rel32(b'\x0f\x85','buffer_current_not_found')
  # ONE_OF numeric width: Flags&3 => 1/2/4/8.
  c.lea_rax_data(L['oneof_flags']); c.emit(b'\x0f\xb6\x00\x83\xe0\x03\x89\xc1')
  c.emit(b'\xb8\x01\x00\x00\x00\xd3\xe0')
@@ -1157,6 +1168,41 @@ def build():
  c.label('buffer_export_exhausted')
  c.lea_rax_data(L['results']); c.emit(b'\x48\x8b\x08\x48\x85\xc9'); c.rel32(b'\x0f\x84','buffer_current_not_found')
  c.emit(b'\x41\xff\x57\x48')
+ c.label('efi_var_current')
+ # ONE_OF numeric width: Flags&3 => 1/2/4/8 and declared VarStore bounds.
+ c.lea_rax_data(L['oneof_flags']); c.emit(b'\x0f\xb6\x00\x83\xe0\x03\x89\xc1')
+ c.emit(b'\xb8\x01\x00\x00\x00\xd3\xe0')
+ c.lea_rdx_data(L['current_width']); c.emit(b'\x88\x02')
+ c.lea_rdx_data(L['varstore_info']); c.emit(b'\x0f\xb7\x12\x01\xc2')
+ c.lea_rax_data(L['varstore_size']); c.emit(b'\x0f\xb7\x00\x39\xc2'); c.rel32(b'\x0f\x87','buffer_current_not_found')
+
+ # Convert the IFR ASCII variable name to the CHAR16 name required by GetVariable.
+ c.lea_rax_data(L['varstore_name_ptr']); c.emit(b'\x48\x8b\x30\x48\x85\xf6'); c.rel32(b'\x0f\x84','buffer_current_not_found')
+ c.lea_rax_data(L['varstore_name_remaining']); c.emit(b'\x8b\x08\x85\xc9'); c.rel32(b'\x0f\x84','buffer_current_not_found')
+ c.lea_rdi_data(L['efi_name_utf16'])
+ c.label('efi_name_copy')
+ c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','buffer_current_not_found')
+ c.emit(b'\x0f\xb6\x06\x84\xc0'); c.rel32(b'\x0f\x84','efi_name_done')
+ c.emit(b'\x66\x89\x07\x48\xff\xc6\x48\x83\xc7\x02\xff\xc9'); c.rel32(b'\xe9','efi_name_copy')
+ c.label('efi_name_done'); c.emit(b'\x66\xc7\x07\x00\x00'); serial('efi_var_name')
+
+ # GetVariable(Name,Guid,NULL,&DataSize,current_data) from EFI Runtime Services.
+ c.lea_rax_data(L['varstore_size']); c.emit(b'\x0f\xb7\x00')
+ c.lea_rdx_data(L['efi_var_size']); c.emit(b'\x48\x89\x02')
+ c.lea_rcx_data(L['efi_name_utf16']); c.lea_rdx_data(L['varstore_guid']); c.emit(b'\x45\x31\xc0'); c.lea_r9_data(L['efi_var_size'])
+ c.lea_rax_data(L['current_data']); c.emit(b'\x48\x89\x44\x24\x20')
+ c.lea_rax_data(L['rt_ptr']); c.emit(b'\x48\x8b\x00\x48\x85\xc0'); c.rel32(b'\x0f\x84','buffer_current_not_found')
+ c.emit(b'\x48\x8b\x40\x48\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','buffer_current_not_found')
+ serial('efi_var_get')
+
+ # Copy only the selected question bytes to current_raw, preserving zero padding.
+ c.lea_rdx_data(L['current_raw']); c.emit(b'\x48\xc7\x02\x00\x00\x00\x00')
+ c.lea_rsi_data(L['current_data']); c.lea_rax_data(L['varstore_info']); c.emit(b'\x0f\xb7\x00\x48\x01\xc6')
+ c.lea_rdi_data(L['current_raw']); c.lea_rax_data(L['current_width']); c.emit(b'\x0f\xb6\x08')
+ c.label('efi_current_copy'); c.emit(b'\x85\xc9'); c.rel32(b'\x0f\x84','efi_current_done')
+ c.emit(b'\x8a\x06\x88\x07\x48\xff\xc6\x48\xff\xc7\xff\xc9'); c.rel32(b'\xe9','efi_current_copy')
+ c.label('efi_current_done'); c.emit(b'\x31\xc0\xc3')
+
  c.label('buffer_current_not_found'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
 
  c.label('resolve_selected_option')
@@ -1649,8 +1695,8 @@ def validate(image,pcm):
   assert token in image,token
 
 def main():
- global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE, WAIT_DOWN_SPEAK, WAIT_UP_PROBE, WAIT_UP_SPEAK, WAIT_DOWN_COMMIT, WAIT_DOWN_CANCEL
- if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak|--wait-up-probe|--wait-up-speak|--wait-down-repeat-speak|--wait-down-commit|--wait-down-cancel]')
+ global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE, WAIT_DOWN_SPEAK, WAIT_UP_PROBE, WAIT_UP_SPEAK, WAIT_DOWN_COMMIT, WAIT_DOWN_CANCEL, EFI_VARSTORE_ONLY
+ if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak|--wait-up-probe|--wait-up-speak|--wait-down-repeat-speak|--wait-down-commit|--wait-down-cancel|--efivar-probe]')
  if len(sys.argv)==3:
   if sys.argv[2]=='--wait-repeat': WAIT_REPEAT_KEY=True
   elif sys.argv[2]=='--wait-down-probe': WAIT_DOWN_PROBE=True
@@ -1660,6 +1706,7 @@ def main():
   elif sys.argv[2]=='--wait-down-repeat-speak': WAIT_DOWN_SPEAK=True; WAIT_REPEAT_KEY=True
   elif sys.argv[2]=='--wait-down-commit': WAIT_DOWN_COMMIT=True
   elif sys.argv[2]=='--wait-down-cancel': WAIT_DOWN_CANCEL=True
+  elif sys.argv[2]=='--efivar-probe': EFI_VARSTORE_ONLY=True
   else: raise SystemExit('unknown mode: '+sys.argv[2])
  image,pcm=build(); validate(image,pcm)
  p=Path(sys.argv[1]); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(image)
@@ -1671,6 +1718,7 @@ def main():
  print('hii-down-probe=' + ('enabled' if WAIT_DOWN_PROBE else 'disabled'))
  print('hii-down-speak=' + ('enabled' if WAIT_DOWN_SPEAK else 'disabled'))
  print('hii-up-probe=' + ('enabled' if WAIT_UP_PROBE else 'disabled'))
+ print('efi-varstore-only=' + ('enabled' if EFI_VARSTORE_ONLY else 'disabled'))
  print('hii-up-speak=' + ('enabled' if WAIT_UP_SPEAK else 'disabled'))
  print('hii-down-repeat-speak=' + ('enabled' if (WAIT_DOWN_SPEAK and WAIT_REPEAT_KEY) else 'disabled'))
  print('hii-down-commit=' + ('enabled' if WAIT_DOWN_COMMIT else 'disabled'))
