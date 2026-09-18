@@ -64,6 +64,8 @@ jobs:
           clang $hiiflags -c "$hiiroot/speech_units.c" -o "$hiiroot/units.obj"
           lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$hiiroot/hii-graph.EFI" "$hiiroot/main.obj" "$hiiroot/units.obj"
           test -s "$hiiroot/hii-graph.EFI"
+          grep -aF 'HDA_CODEC_SELECTION=REALTEK_10EC_0256' "$hiiroot/hii-graph.EFI"
+          grep -aF 'HDA_CODEC_SELECTION=GENERIC_RUNTIME' "$hiiroot/hii-graph.EFI"
           clang $hiiflags -c "$hiiroot/hii_graph_prompt_speech_uefi.c" -o "$hiiroot/main-2.obj"
           clang $hiiflags -c "$hiiroot/speech_units.c" -o "$hiiroot/units-2.obj"
           lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$hiiroot/hii-graph-2.EFI" "$hiiroot/main-2.obj" "$hiiroot/units-2.obj"
@@ -656,6 +658,7 @@ jobs:
             'HII_PROMPT_TEXT=',
             'HII_PROMPT_SOURCE=PASS',
             'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403',
+            'HDA_CODEC_SELECTION=GENERIC_RUNTIME',
             'HDA_MULTIHOP_EFI_SELFTEST=PASS',
             'HDA_RANGE_AND_SELECTOR_ENGINE=PASS',
             'NO_FIXED_WIDGET_NIDS=PASS',
@@ -675,6 +678,7 @@ jobs:
             if($raw -notmatch [regex]::Escape($m)){ throw "VMware integrated HII->HDA evidence missing $m : $raw" }
           }
           if($raw -notmatch 'HII_PROMPT_TEXT=[a-z]{1,8}'){ throw "VMware integrated HII prompt text missing or invalid: $raw" }
+          if($raw -notmatch 'HDA_CODEC_VENDOR_DEVICE=0x[0-9A-Fa-f]{8}'){ throw "VMware integrated HDA codec identity missing: $raw" }
           if($raw -notmatch 'HDA_ROUTE_DEPTH=0x[0-9A-Fa-f]{2}'){ throw "VMware integrated HDA route depth missing: $raw" }
           @(
             'VMWARE_WORKSTATION=PASS'
@@ -683,6 +687,7 @@ jobs:
             'VMWARE_HII_STRING_PROTOCOL=PASS'
             'VMWARE_LIVE_HII_PROMPT_SOURCE=PASS'
             'VMWARE_HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403'
+            'VMWARE_HDA_CODEC_SELECTION=GENERIC_RUNTIME'
             'VMWARE_HDA_GRAPH_ROUTE=PASS'
             'VMWARE_HDA_DMA_PROGRESS=PASS'
             'VMWARE_GRAPH_HDA_SPEECH=PASS'
@@ -717,6 +722,7 @@ jobs:
             'QEMU_HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403'
             'PHYSICAL_TARGET_HDA_CONTROLLER=PCI_VEN_1022_DEV_15E3'
             'PHYSICAL_TARGET_CODEC=HDAUDIO_VEN_10EC_DEV_0256'
+            'PHYSICAL_TARGET_CODEC_VERIFICATION=NATIVE_HDA_GET_PARAMETER_00'
             'PHYSICAL_HOST_REBOOT=false'
             'PHYSICAL_HOST_FIRMWARE_MUTATION=false'
           ) | Set-Content "$root/final-result.txt" -Encoding ascii
@@ -757,12 +763,14 @@ jobs:
           $vmSpeech='NOT_ESTABLISHED'
           $vmIntegrated='NOT_ESTABLISHED'
           $vmControllerSelection='NOT_ESTABLISHED'
+          $vmCodecSelection='NOT_ESTABLISHED'
           if(Test-Path "$root/evidence/vmware-result.txt"){
             $vr=Get-Content "$root/evidence/vmware-result.txt" -Raw
             if($vr -match 'VMWARE_WORKSTATION=PASS'){ $vm='PASS' }
             if($vr -match 'VMWARE_FULL_HDA_SPEECH=PASS'){ $vmSpeech='PASS' }
             if($vr -match 'VMWARE_INTEGRATED_HII_HDA_SPEECH=PASS'){ $vmIntegrated='PASS' }
             if($vr -match 'VMWARE_HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403'){ $vmControllerSelection='GENERIC_CLASS_0403' }
+            if($vr -match 'VMWARE_HDA_CODEC_SELECTION=GENERIC_RUNTIME'){ $vmCodecSelection='GENERIC_RUNTIME' }
           }
           $sha=(Get-FileHash "$root/evidence/downspeech.EFI" -Algorithm SHA256).Hash.ToLowerInvariant()
           $manifest=(Get-FileHash "$root/evidence/manifest.sha256" -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -790,6 +798,7 @@ jobs:
           $lines += "proof-vmware-hda-graph-speech = $vmSpeech"
           $lines += "proof-vmware-integrated-hii-hda-speech = $vmIntegrated"
           $lines += "proof-vmware-hda-controller-selection = $vmControllerSelection"
+          $lines += "proof-vmware-hda-codec-selection = $vmCodecSelection"
           $lines += 'proof-vmware-hii-source = live-integrated-hii-graph-prompt'
           $lines += 'proof-physical-host-reboot = false'
           $lines += 'proof-physical-host-firmware-mutation = false'
