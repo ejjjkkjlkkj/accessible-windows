@@ -61,12 +61,14 @@ jobs:
               "IFR_OPTION_STRING_ID=PASS",
               "OPTION_FLAGS_HEX=",
               "OPTION_TYPE_HEX=",
+              "OPTION_VALUE_WIDTH_HEX=",
               "OPTION_VALUE_RAW8_HEX=",
               "OPTION_VALUE_READ=PASS",
               "OPTION_TEXT=",
               "c.emit(b'\\x3c\\x09')",
-              "c.emit(b'\\x83\\xf9\\x0e')",
-              "c.emit(b'\\x49\\x8b\\x41\\x06')",
+              "c.emit(b'\\x3c\\x03')",
+              "c.emit(b'\\x0f\\xb6\\xc8\\xba\\x01\\x00\\x00\\x00\\xd3\\xe2')",
+              "option_value_copy_loop",
               "EFI_HII_SIBT_STRING_UCS2",
               "EFI_HII_SIBT_STRING_SCSU",
           ]
@@ -74,11 +76,14 @@ jobs:
               assert token in src,token
           proof=set((root/'os-uefi-hii-option-value-v1.labproof').read_text().splitlines())
           for line in [
-              'minimum-option-length = 14 bytes',
+              'minimum-option-length = 7 bytes for UINT8',
+              'numeric-option-length-map = type 0 to 7 bytes, type 1 to 8 bytes, type 2 to 10 bytes, type 3 to 14 bytes',
               'option-type-source = same live EFI_IFR_ONE_OF_OPTION opcode offset plus 5',
               'option-value-source = same live EFI_IFR_ONE_OF_OPTION opcode offset plus 6',
-              'option-value-raw-width = 8 bytes',
-              'option-identity-binding = label Type Flags and raw Value are captured from one exact live EFI_IFR_ONE_OF_OPTION before string resolution',
+              'option-value-width-source = 1 shifted left by numeric Type',
+              'option-value-read = exactly the type width at opcode offset plus 6, zero-padded to 8 bytes',
+              'option-value-raw-width = 8-byte zero-padded output',
+              'option-identity-binding = label Type Flags typed width and zero-padded raw Value are captured from one exact live EFI_IFR_ONE_OF_OPTION before string resolution',
               'current-option-selection = not-established',
               'firmware-setting-mutation = forbidden',
               'speech-output = not-established-in-this-stage',
@@ -127,6 +132,7 @@ jobs:
               b'HII_LANGUAGE=PASS\r\n',
               b'OPTION_FLAGS_HEX=',
               b'OPTION_TYPE_HEX=',
+              b'OPTION_VALUE_WIDTH_HEX=',
               b'OPTION_VALUE_RAW8_HEX=',
               b'OPTION_VALUE_READ=PASS\r\n',
               b'OPTION_TEXT=',
@@ -191,8 +197,9 @@ jobs:
               m=re.search(br'OPTION_TEXT=([^\r\n]+)',raw)
               flags=re.search(br'OPTION_FLAGS_HEX=([0-9A-F]{2})',raw)
               typ=re.search(br'OPTION_TYPE_HEX=([0-9A-F]{2})',raw)
+              width_m=re.search(br'OPTION_VALUE_WIDTH_HEX=([0-9A-F]{2})',raw)
               value=re.search(br'OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
-              if m and flags and typ and value and all(x in raw for x in required):
+              if m and flags and typ and width_m and value and all(x in raw for x in required):
                   option=m.group(1).decode('ascii','replace').strip()
                   if not option:
                       raise SystemExit('resolved option is empty')
@@ -200,6 +207,8 @@ jobs:
                   if type_v not in {0,1,2,3}:
                       raise SystemExit('first resolved ONE_OF_OPTION is not numeric: type='+str(type_v))
                   width={0:1,1:2,2:4,3:8}[type_v]
+                  emitted_width=int(width_m.group(1),16)
+                  assert emitted_width==width,(emitted_width,width,type_v)
                   raw8=value.group(1).decode()
                   unsigned=int.from_bytes(bytes.fromhex(raw8)[:width],'little')
                   Path('boot/uefi-hii-option-value-v1/option.txt').write_text(
