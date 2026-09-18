@@ -65,7 +65,7 @@ rule = no-human-facing-state-is-created-by-this-machine-primitive
 
 ::proof-state
 A = PASS
-B = UNPROVEN
+B = PASS
 C = UNPROVEN
 D = PASS
 accessibility-A = PASS
@@ -75,5 +75,7 @@ accessibility-B = UNPROVEN
 ::claim
 rule = this-is-not-a-hash-security-or-cryptographic-primitive
 rule = this-is-not-a-kernel-bootloader-filesystem-process-or-application-model
-rule = runtime-B-stays-UNPROVEN-until-independent-Linux-and-Windows-witnesses-pass
+rule = runtime-B-passed-on-independent-Linux-and-Windows-witnesses
 ::end
+witness-run = 35340965680
+witness-commit = ca285e0cd721d9dc34aa9cb9ac0156c4e38d37c5
