@@ -105,8 +105,9 @@ jobs:
           } else {
             $args.Add('-bios'); $args.Add($firmware)
           }
-          $args.Add('-drive'); $args.Add("format=raw,file=fat:rw:$esp")
-          $args.Add('-boot'); $args.Add('order=c')
+          $args.Add('-drive'); $args.Add("if=none,id=esp,format=raw,file=fat:rw:$esp")
+          $args.Add('-device'); $args.Add('virtio-blk-pci,drive=esp,bootindex=1')
+          $args.Add('-boot'); $args.Add('order=c,strict=off')
           $args.Add('-display'); $args.Add('none')
           $args.Add('-serial'); $args.Add('none')
           $args.Add('-monitor'); $args.Add('none')
