@@ -513,5 +513,4 @@ mod tests {
         assert_eq!(model.recovered_generation(), Some(42));
         assert_crash_recovers(model, 42);
     }
-
 }
