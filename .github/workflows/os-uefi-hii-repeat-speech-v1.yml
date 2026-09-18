@@ -392,7 +392,7 @@ jobs:
               f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
               "proof-repeat-key-event = PASS\n"
               "proof-pre-key-hda-speech = false\n"
-              f"proof-current-raw8 = {vals['current-raw8']}\n"
+              f"proof-current-value = {vals['current-value']}\n"
               f"proof-current-option-label = {vals['current-option-label']}\n"
               f"proof-repeat-spoken-prefix = {vals['repeat-spoken-prefix']}\n"
               f"proof-repeat-spoken-graphemes = {vals['repeat-spoken-graphemes']}\n"
