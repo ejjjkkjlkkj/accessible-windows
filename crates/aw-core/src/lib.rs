@@ -63,7 +63,6 @@ impl SystemState {
     }
 }
 
-
 /// Native runtime identity for a semantic object.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
