@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   amd5800h-audio-inventory:
-    runs-on: [self-hosted, Windows, X64]
+    runs-on: self-hosted
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
