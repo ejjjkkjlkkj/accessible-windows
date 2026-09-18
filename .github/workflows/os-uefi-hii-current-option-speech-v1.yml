@@ -86,10 +86,13 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import ast
+          import ast,re
           root=Path('boot/uefi-hii-current-option-speech-v1')
           src=(root/'build_uefi_hii_current_option_speech.py').read_text()
           ast.parse(src)
+          labels=re.findall(r"c\.label\('([^']+)'\)",src)
+          duplicates=sorted({x for x in labels if labels.count(x)>1})
+          assert not duplicates,duplicates
           required=[
               "speech.make_pcm()",
               "c.label('resolve_selected_option')",
