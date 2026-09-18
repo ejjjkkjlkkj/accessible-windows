@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
 using System.Threading.Tasks;
@@ -39,19 +40,26 @@ public static class Lab13Witness
         return Encoding.ASCII.GetString(bytes.ToArray()).Trim('\0', ' ');
     }
 
-    public static string Snapshot()
+    public static string StableSnapshot()
     {
         var zero = X86Base.CpuId(0, 0);
         var one = X86Base.CpuId(1, 0);
         var ext = X86Base.CpuId(unchecked((int)0x80000000u), 0);
+        uint leaf1EbxStable = unchecked((uint)one.Item2) & 0x00ffffffu;
         return "VENDOR=" + Vendor()
             + ";BRAND=" + Brand()
             + ";MAX_BASIC=0x" + unchecked((uint)zero.Item1).ToString("x8")
             + ";MAX_EXT=0x" + unchecked((uint)ext.Item1).ToString("x8")
             + ";LEAF1_EAX=0x" + unchecked((uint)one.Item1).ToString("x8")
-            + ";LEAF1_EBX=0x" + unchecked((uint)one.Item2).ToString("x8")
+            + ";LEAF1_EBX_LOW24=0x" + leaf1EbxStable.ToString("x6")
             + ";LEAF1_ECX=0x" + unchecked((uint)one.Item3).ToString("x8")
             + ";LEAF1_EDX=0x" + unchecked((uint)one.Item4).ToString("x8");
+    }
+
+    public static byte ApicId()
+    {
+        var one = X86Base.CpuId(1, 0);
+        return (byte)(unchecked((uint)one.Item2) >> 24);
     }
 
     public static string Run(int workers, int repeatsPerWorker)
@@ -62,15 +70,24 @@ public static class Lab13Witness
         if (vendor != "AuthenticAMD") throw new Exception("unexpected vendor: " + vendor);
         if (brand.IndexOf("5800H", StringComparison.OrdinalIgnoreCase) < 0) throw new Exception("unexpected brand: " + brand);
 
-        string reference = Snapshot();
+        string reference = StableSnapshot();
+        var apicIds = new ConcurrentDictionary<byte, byte>();
+
         Parallel.For(0, workers, _ =>
         {
             for (int i = 0; i < repeatsPerWorker; i++)
             {
-                if (Snapshot() != reference) throw new Exception("CPUID snapshot changed during run");
+                if (StableSnapshot() != reference) throw new Exception("stable CPUID identity changed during run");
+                byte apic = ApicId();
+                apicIds.TryAdd(apic, apic);
             }
         });
 
-        return "LAB13_CPUID=PASS;WORKERS=" + workers + ";REPEATS_PER_WORKER=" + repeatsPerWorker + ";" + reference;
+        var ids = new List<byte>(apicIds.Keys);
+        ids.Sort();
+        return "LAB13_CPUID=PASS;WORKERS=" + workers
+            + ";REPEATS_PER_WORKER=" + repeatsPerWorker
+            + ";OBSERVED_APIC_IDS=" + string.Join(",", ids)
+            + ";" + reference;
     }
 }
