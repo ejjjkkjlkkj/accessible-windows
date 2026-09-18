@@ -122,7 +122,7 @@ jobs:
               'set-variable-call = forbidden',
               'varstore-write = forbidden',
               'firmware-setting-mutation = forbidden',
-              'runtime-varstore-identity = same-execution VarStore id offset size and raw GUID must equal the independent EDK II iSCSI fixture oracle',
+              'runtime-varstore-identity = same-execution live HII question plus VarStore id offset size and raw GUID; no fixture-specific label or value oracle',
               'physical-ASUS-current-option-speech = not-established',
           ]:
               assert line in proof,line
