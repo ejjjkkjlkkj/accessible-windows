@@ -12,6 +12,7 @@ external-audio-driver-required = false
 AudioDxe-required = false
 question-source = live read-only HII package export, EFI_IFR_ONE_OF Prompt StringId plus native Strings-package decoder
 question-selection-policy = first resolvable EFI_IFR_ONE_OF with nonzero VarStoreId
+question-identity-binding = runtime QuestionId plus VarStoreId plus VarStoreInfo plus QuestionFlags plus OneOfFlags must match OS-UEFI-HII-STORED-QUESTION-V1 proof
 question-source-hardcoded = false
 question-string-protocol-required = false
 question-package-export = atomic global HII database snapshot
