@@ -1,3 +1,4 @@
+# Refresh EFI_VARSTORE_EFI discovery for final UEFI commit target.
 name: os-uefi-hii-efi-var-current-v1
 
 on:
