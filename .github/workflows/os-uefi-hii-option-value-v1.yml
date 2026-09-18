@@ -43,7 +43,10 @@ jobs:
               'proof-setting-mutation = false',
           ]:
               assert line in lines,line
+          resolved=[x.split(' = ',1)[1] for x in lines if x.startswith('proof-resolved-option = ')]
+          assert len(resolved)==1 and resolved[0],resolved
           print('HII_OPTION_VALUE_DEPENDENCY=PASS')
+          print('HII_OPTION_VALUE_EXPECTED_LABEL='+resolved[0])
 
       - name: Audit HII option source contract
         shell: python
@@ -178,6 +181,9 @@ jobs:
           from pathlib import Path
           import re,time
           p=Path('boot/uefi-hii-option-value-v1/option.serial')
+          option_proof=Path('boot/uefi-hii-option-v1/os-uefi-hii-option-v1.labproof').read_text().splitlines()
+          expected=[x.split(' = ',1)[1] for x in option_proof if x.startswith('proof-resolved-option = ')]
+          assert len(expected)==1 and expected[0],expected
           required=[
               b'HII_DATABASE_PROTOCOL=PASS\r\n',
               b'HII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\n',
@@ -203,6 +209,7 @@ jobs:
                   option=m.group(1).decode('ascii','replace').strip()
                   if not option:
                       raise SystemExit('resolved option is empty')
+                  assert option==expected[0],(option,expected[0])
                   type_v=int(typ.group(1),16)
                   if type_v not in {0,1,2,3}:
                       raise SystemExit('first resolved ONE_OF_OPTION is not numeric: type='+str(type_v))
@@ -210,7 +217,9 @@ jobs:
                   emitted_width=int(width_m.group(1),16)
                   assert emitted_width==width,(emitted_width,width,type_v)
                   raw8=value.group(1).decode()
-                  unsigned=int.from_bytes(bytes.fromhex(raw8)[:width],'little')
+                  raw_bytes=bytes.fromhex(raw8)
+                  assert all(x==0 for x in raw_bytes[width:]),raw8
+                  unsigned=int.from_bytes(raw_bytes[:width],'little')
                   Path('boot/uefi-hii-option-value-v1/option.txt').write_text(
                       f'option-text = {option}\n'
                       f'option-flags-hex = {flags.group(1).decode()}\n'
@@ -219,6 +228,7 @@ jobs:
                       f'option-value-raw8-hex = {raw8}\n'
                       f'option-value-unsigned = {unsigned}\n'
                   )
+                  print('HII_OPTION_VALUE_IDENTITY_MATCH=PASS')
                   print('HII_RESOLVED_OPTION='+option)
                   print('HII_OPTION_TYPE='+str(type_v))
                   print('HII_OPTION_VALUE='+str(unsigned))
@@ -321,6 +331,7 @@ jobs:
               "proof-direct-string-decoder = PASS\n"
               "proof-option-resolution = PASS\n"
               "proof-option-value-binding = PASS\n"
+              "proof-option-identity-match = PASS\n"
               f"proof-resolved-option = {safe}\n"
               f"proof-option-flags-hex = {vals['option-flags-hex']}\n"
               f"proof-option-type-hex = {vals['option-type-hex']}\n"
