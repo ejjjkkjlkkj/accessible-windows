@@ -667,9 +667,9 @@ def build():
  c.emit(b'\xb9'+struct.pack('<I',len(pcm))+b'\xf3\xa4')
  # Native HII title input was decoded into textbuf before HDA setup.
  c.lea_rdx_data(L['text_count']); c.emit(bytes.fromhex('8b3a'))
- c.emit(bytes.fromhex('85ff')); c.rel32(bytes.fromhex('0f84'),'fail_key')
+ c.emit(bytes.fromhex('85ff')); c.rel32(bytes.fromhex('0f84'),'fail_speech_text')
  c.label('text_commit')
- c.emit(bytes.fromhex('85ff')); c.rel32(bytes.fromhex('0f84'),'fail_key')
+ c.emit(bytes.fromhex('85ff')); c.rel32(bytes.fromhex('0f84'),'fail_speech_text')
  c.lea_rdx_data(L['textbuf'])
  c.emit(bytes.fromhex('89f8488d044266c7000000'))
  c.emit(bytes.fromhex('31f6'))      # esi = character index
@@ -681,7 +681,7 @@ def build():
  for ch in LETTER_UNITS:
   c.emit(bytes.fromhex('663d')+struct.pack('<H',ord(ch)))
   c.rel32(bytes.fromhex('0f84'),'expand_'+ch)
- c.rel32(bytes.fromhex('e9'),'fail_key')
+ c.rel32(bytes.fromhex('e9'),'fail_speech_text')
 
  def emit_unit_descriptor(name):
   unit_off,unit_len=UNIT_LAYOUT[name]
@@ -706,7 +706,7 @@ def build():
  c.emit(bytes.fromhex('ffc6'))
  c.emit(bytes.fromhex('39fe'))
  c.rel32(bytes.fromhex('0f82'),'expand_char')
- c.emit(bytes.fromhex('85db')); c.rel32(bytes.fromhex('0f84'),'fail_key')
+ c.emit(bytes.fromhex('85db')); c.rel32(bytes.fromhex('0f84'),'fail_speech_text')
  c.emit(bytes.fromhex('89d8ffc848c1e0044c01e8'))
  c.emit(bytes.fromhex('c7400c01000000'))
  c.emit(bytes.fromhex('4189db41ffcb'))
