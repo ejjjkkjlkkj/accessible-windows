@@ -305,7 +305,6 @@ impl SemanticEdgeV1 {
     }
 }
 
-
 /// Native identity for a cognitive-memory record.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -507,10 +506,7 @@ mod tests {
             900_000,
         );
 
-        assert_eq!(
-            record.validate(),
-            Err(MemoryRecordError::MissingProvenance)
-        );
+        assert_eq!(record.validate(), Err(MemoryRecordError::MissingProvenance));
     }
 
     #[test]
@@ -525,10 +521,7 @@ mod tests {
             1_000_001,
         );
 
-        assert_eq!(
-            record.validate(),
-            Err(MemoryRecordError::InvalidConfidence)
-        );
+        assert_eq!(record.validate(), Err(MemoryRecordError::InvalidConfidence));
     }
 
     #[test]
