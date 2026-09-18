@@ -41,10 +41,44 @@ static u8 g_route_index[MAX_NID];
 
 static volatile u8 *g_hda;
 static u8 g_cad;
+static u8 g_controller_preferred;
 static stall_fn g_stall;
 static allocate_pages_fn g_allocate_pages;
 
 typedef u64 (*locate_protocol_fn)(const void *protocol, void *registration, void **interface_out);
+typedef u64 (*handle_protocol_fn)(void *handle, const void *protocol, void **interface_out);
+typedef u64 (*file_open_fn)(void *self, void **new_handle, const u16 *name, u64 open_mode, u64 attributes);
+typedef u64 (*file_close_fn)(void *self);
+typedef u64 (*file_write_fn)(void *self, usize *buffer_size, void *buffer);
+typedef u64 (*file_flush_fn)(void *self);
+
+typedef struct {
+    u32 revision;
+    u32 reserved;
+    void *parent_handle;
+    void *system_table;
+    void *device_handle;
+} loaded_image_protocol_head;
+
+typedef struct file_protocol {
+    u64 revision;
+    file_open_fn open;
+    file_close_fn close;
+    void *delete_file;
+    void *read;
+    file_write_fn write;
+    void *get_position;
+    void *set_position;
+    void *get_info;
+    void *set_info;
+    file_flush_fn flush;
+} file_protocol;
+
+typedef u64 (*open_volume_fn)(void *self, file_protocol **root);
+typedef struct {
+    u64 revision;
+    open_volume_fn open_volume;
+} simple_fs_protocol;
 typedef u64 (*hii_list_fn)(const void *self, u8 package_type, const void *package_guid, usize *handle_bytes, void **handles);
 typedef u64 (*hii_export_fn)(const void *self, void *handle, usize *buffer_size, void *buffer);
 typedef u64 (*hii_get_string_fn)(const void *self, const char *language, void *handle, u16 string_id, u16 *string, usize *string_size, void **font_info);
@@ -76,6 +110,10 @@ static const efi_guid g_hii_database_guid =
     {0xef9fc172u,0xa1b2u,0x4693u,{0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42}};
 static const efi_guid g_hii_string_guid =
     {0x0fd96974u,0x23aau,0x4cdcu,{0xb9,0xcb,0x98,0xd1,0x77,0x50,0x32,0x2a}};
+static const efi_guid g_loaded_image_guid =
+    {0x5b1b31a1u,0x9562u,0x11d2u,{0x8e,0x3f,0x00,0xa0,0xc9,0x69,0x72,0x3b}};
+static const efi_guid g_simple_fs_guid =
+    {0x964e5b22u,0x6459u,0x11d2u,{0x8e,0x39,0x00,0xa0,0xc9,0x69,0x72,0x3b}};
 
 static u8 g_hii_package[1024u * 1024u];
 static void *g_hii_handles[256];
@@ -127,6 +165,71 @@ static void serial_hex8(u8 value) {
 static void marker(const char *s) {
     serial_puts(s);
     serial_puts("\r\n");
+}
+
+static void proof_puts(char *buf, usize cap, usize *n, const char *s) {
+    while (*s && *n + 1u < cap) buf[(*n)++] = *s++;
+}
+static void proof_hex8(char *buf, usize cap, usize *n, u8 value) {
+    static const char h[] = "0123456789ABCDEF";
+    if (*n + 2u < cap) {
+        buf[(*n)++] = h[(value >> 4) & 0xf];
+        buf[(*n)++] = h[value & 0xf];
+    }
+}
+static int persist_boot_proof(void *image_handle, void *boot_services,
+                              u8 pin, u8 dac, u8 selectors, u8 applied) {
+    static const u16 filename[] = {
+        '\\','Q','E','V','A','R','Y','N','O','X','-','P','H','Y','S','I','C','A','L',
+        '-','P','R','O','O','F','.','T','X','T',0
+    };
+    char proof[1024];
+    usize n = 0;
+    loaded_image_protocol_head *loaded = 0;
+    simple_fs_protocol *fs = 0;
+    file_protocol *root = 0;
+    file_protocol *file = 0;
+    if (!boot_services || !image_handle) return 0;
+    handle_protocol_fn handle_protocol =
+        *(handle_protocol_fn *)((u8 *)boot_services + 0x98);
+    if (!handle_protocol) return 0;
+    if (handle_protocol(image_handle, &g_loaded_image_guid, (void **)&loaded) != 0 ||
+        !loaded || !loaded->device_handle) return 0;
+    if (handle_protocol(loaded->device_handle, &g_simple_fs_guid, (void **)&fs) != 0 ||
+        !fs || !fs->open_volume) return 0;
+    if (fs->open_volume(fs, &root) != 0 || !root || !root->open) return 0;
+
+    const u64 open_mode = 0x8000000000000000ull | 0x2ull | 0x1ull;
+    if (root->open(root, (void **)&file, filename, open_mode, 0) != 0 ||
+        !file || !file->write) {
+        if (root->close) root->close(root);
+        return 0;
+    }
+
+    proof_puts(proof,sizeof(proof),&n,"QEVARYNOX-UEFI-PHYSICAL-BOOT-PROOF-V1\r\n");
+    proof_puts(proof,sizeof(proof),&n,"STATUS=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_PROMPT_SOURCE=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_CONTROLLER_SELECTION=");
+    proof_puts(proof,sizeof(proof),&n,
+        g_controller_preferred ? "PREFERRED_AMD_1022_15E3\r\n" : "GENERIC_CLASS_0403\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_GRAPH_SEARCH_LIVE=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_SELECTOR_APPLY_LIVE=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_OUTPUT_PATH_CONFIGURATION=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_PIN_NID=0x"); proof_hex8(proof,sizeof(proof),&n,pin); proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_DAC_NID=0x"); proof_hex8(proof,sizeof(proof),&n,dac); proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_ROUTE_DEPTH=0x"); proof_hex8(proof,sizeof(proof),&n,g_depth[dac]); proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_SELECTOR_WRITES_REQUIRED=0x"); proof_hex8(proof,sizeof(proof),&n,selectors); proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_SELECTOR_WRITES_APPLIED=0x"); proof_hex8(proof,sizeof(proof),&n,applied); proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_SPEECH_DMA=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"LPIB_PROGRESS=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION\r\n");
+
+    usize bytes = n;
+    u64 st = file->write(file, &bytes, proof);
+    if (st == 0 && file->flush) st = file->flush(file);
+    if (file->close) file->close(file);
+    if (root->close) root->close(root);
+    return st == 0 && bytes == n;
 }
 
 static u32 pci_read32(u32 cfg) {
@@ -607,6 +710,7 @@ static int discover_controller(void) {
             if (pass == 0 && vd != 0x15e31022u) continue;
             cfg = base;
             found = 1;
+            g_controller_preferred = (u8)(pass == 0);
             if (pass == 0) marker("HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3");
             else marker("HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403");
             break;
@@ -707,7 +811,6 @@ static int discover_live_graph(u8 *pin_out, u8 *dac_out, u8 *selectors_out) {
 }
 
 __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
-    (void)image_handle;
     serial_init();
     marker("QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V1");
     marker("STATE=START");
@@ -780,6 +883,11 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("HII_GRAPH_SPEECH_DMA=PASS");
     marker("HII_PROMPT_SPEECH_HDA=PASS");
     marker("LPIB_PROGRESS=PASS");
+    if (persist_boot_proof(image_handle, boot_services, pin, dac, selectors, applied)) {
+        marker("BOOT_MEDIA_PERSISTENT_PROOF=PASS");
+    } else {
+        marker("BOOT_MEDIA_PERSISTENT_PROOF=NOT_ESTABLISHED");
+    }
     marker("PHYSICAL_ASUS_M1603QA_SPEECH=NOT_ESTABLISHED");
     marker("STATUS=PASS");
     return 0;
