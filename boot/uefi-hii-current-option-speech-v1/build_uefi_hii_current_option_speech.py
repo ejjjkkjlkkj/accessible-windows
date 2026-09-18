@@ -1247,7 +1247,10 @@ def build():
  c.label('cancel_read_key')
  c.lea_rax_data(L['conin_ptr']); c.emit(b'\x48\x8b\x08'); c.lea_rdx_data(L['keybuf'])
  c.emit(b'\x48\x8b\x41\x08\xff\xd0\x48\x85\xc0'); c.rel32(b'\x0f\x85','cancel_read_key')
- c.lea_rdx_data(L['keybuf']); c.emit(b'\x0f\xb7\x42\x02\x66\x83\xf8\x1b'); c.rel32(b'\x0f\x85','cancel_read_key')
+ # Native UEFI keyboards report Escape as SCAN_ESC (0x0017); also accept a Unicode ESC fallback.
+ c.lea_rdx_data(L['keybuf']); c.emit(b'\x66\x83\x3a\x17'); c.rel32(b'\x0f\x84','cancel_key_ok')
+ c.emit(b'\x0f\xb7\x42\x02\x66\x83\xf8\x1b'); c.rel32(b'\x0f\x85','cancel_read_key')
+ c.label('cancel_key_ok')
  serial('cancel_accept'); c.emit(b'\x31\xc0\xc3')
 
  c.label('write_hex16_4')

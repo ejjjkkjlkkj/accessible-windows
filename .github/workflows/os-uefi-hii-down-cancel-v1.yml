@@ -37,7 +37,7 @@ jobs:
               assert line in down,line
           proof=set(Path('boot/uefi-hii-down-cancel-v1/os-uefi-hii-down-cancel-v1.labproof').read_text().splitlines())
           for line in [
-              'cancel-key = Unicode ESC 0x001B',
+              'cancel-key = native SCAN_ESC 0x0017 with Unicode ESC 0x001B fallback',
               'cancel-effect = return success without configuration routing',
               'block-to-config-after-cancel = forbidden',
               'route-config-after-cancel = forbidden',
@@ -65,6 +65,7 @@ jobs:
               'HII_CANCEL_KEY=PASS',
               'HII_CANCEL_NO_ROUTE=PASS',
               "c.label('wait_cancel_key')",
+              "c.label('cancel_key_ok')",
           ]:
               assert token in src,token
           print('DOWN_CANCEL_SOURCE=PASS')
