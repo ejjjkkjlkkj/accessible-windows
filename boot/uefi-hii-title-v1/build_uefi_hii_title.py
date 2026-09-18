@@ -126,7 +126,19 @@ def build():
  c.lea_r9_data(L['handles_size'])
  c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
+ c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x84','list_fetch_ready')
+ # EFI_BUFFER_TOO_SMALL may legitimately recur if the HII database grows
+ # between sizing and fetch.  Retry once with the newly reported size.
+ c.emit(b'\x83\xf8\x05'); c.rel32(b'\x0f\x85','fail_list_fetch')
+ c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x1a')
+ c.emit(b'\x48\x83\xfb\x08'); c.rel32(b'\x0f\x82','fail_list_fetch')
+ alloc(True,L['handles_ptr'])
+ c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')
+ c.lea_r9_data(L['handles_size'])
+ c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02\x48\x89\x44\x24\x20')
+ c.emit(b'\x41\xff\x54\x24\x18')
  c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_list_fetch')
+ c.label('list_fetch_ready')
 
  # Persist cursor and byte count because protocol calls may clobber volatile regs.
  c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02')
