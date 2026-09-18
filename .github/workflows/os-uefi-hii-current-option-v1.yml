@@ -127,6 +127,7 @@ jobs:
               'option-text-language-binding = exact same EFI_HII_PACKAGE_STRINGS package that successfully resolved QUESTION_TEXT',
               'numeric-option-layout = fixed prefix 6 bytes plus typed Value width 1 2 4 or 8 bytes',
               'numeric-option-lengths = 7 8 10 14 bytes for UINT8 UINT16 UINT32 UINT64',
+              'runtime-varstore-identity = live question VarStore id offset size and raw GUID must equal the independent fixture oracle',
               'route-config-call = forbidden',
               'runtime-variable-read = forbidden',
               'set-variable-call = forbidden',
@@ -177,6 +178,10 @@ jobs:
               b'HII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\n',
               b'QUESTION_TEXT=',
               b'CURRENT_VALUE_READ=PASS\r\n',
+              b'VARSTORE_ID_LE_HEX=',
+              b'VARSTORE_INFO_LE_HEX=',
+              b'VARSTORE_SIZE_LE_HEX=',
+              b'VARSTORE_GUID_RAW_HEX=',
               b'ONE_OF_SCOPE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_VALUE_MATCH=PASS\r\n',
               b'CURRENT_OPTION_LANGUAGE_BINDING=PASS\r\n',
@@ -248,6 +253,7 @@ jobs:
               b'HII_CONFIG_ROUTING_PROTOCOL=PASS\r\n',
               b'HII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\n',
               b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\r\n',
+              b'VARSTORE_DEFINITION_MATCH=PASS\r\n',
               b'VARSTORE_NAME_CONFIG_MATCH=PASS\r\n',
               b'CONFIG_TO_BLOCK=PASS\r\n',
               b'CURRENT_VALUE_READ=PASS\r\n',
@@ -267,6 +273,10 @@ jobs:
                   raise SystemExit('integrated current-option resolver blocked: '+repr(raw[-16384:]))
 
               q=re.search(br'QUESTION_TEXT=([^\r\n]+)',raw)
+              vsid=re.search(br'VARSTORE_ID_LE_HEX=([0-9A-F]{4})',raw)
+              vinfo=re.search(br'VARSTORE_INFO_LE_HEX=([0-9A-F]{4})',raw)
+              vssize=re.search(br'VARSTORE_SIZE_LE_HEX=([0-9A-F]{4})',raw)
+              vsguid=re.search(br'VARSTORE_GUID_RAW_HEX=([0-9A-F]{32})',raw)
               cw=re.search(br'CURRENT_VALUE_BYTES_HEX=([0-9A-F]{2})',raw)
               cr=re.search(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
               of=re.search(br'CURRENT_OPTION_FLAGS_HEX=([0-9A-F]{2})',raw)
@@ -275,7 +285,7 @@ jobs:
               ov=re.search(br'CURRENT_OPTION_RAW8_HEX=([0-9A-F]{16})',raw)
               text=re.search(br'CURRENT_OPTION_TEXT=([^\r\n]+)',raw)
 
-              if all([q,cw,cr,of,ot,ow,ov,text]) and all(x in raw for x in required):
+              if all([q,vsid,vinfo,vssize,vsguid,cw,cr,of,ot,ow,ov,text]) and all(x in raw for x in required):
                   question=q.group(1).decode('ascii','replace').strip()
                   option_text=text.group(1).decode('ascii','replace').strip()
                   current_width=int(cw.group(1),16)
@@ -302,11 +312,25 @@ jobs:
                       int(fixture['option-enabled-value']):fixture['option-enabled-label'],
                       int(fixture['option-enabled-for-mpio-value']):fixture['option-enabled-for-mpio-label'],
                   }
+                  def le16(match):
+                      return int.from_bytes(bytes.fromhex(match.group(1).decode()),'little')
+                  varstore_id=le16(vsid)
+                  varstore_offset=le16(vinfo)
+                  varstore_size=le16(vssize)
+                  varstore_guid=vsguid.group(1).decode()
+                  assert varstore_id==int(fixture['varstore-id']),(varstore_id,fixture['varstore-id'])
+                  assert varstore_offset==int(fixture['varstore-offset']),(varstore_offset,fixture['varstore-offset'])
+                  assert varstore_size==int(fixture['varstore-size']),(varstore_size,fixture['varstore-size'])
+                  assert varstore_guid==fixture['varstore-guid-raw-hex'],(varstore_guid,fixture['varstore-guid-raw-hex'])
                   assert current in value_to_label,(current,value_to_label)
                   assert option_text==value_to_label[current],(option_text,value_to_label[current])
 
                   root.joinpath('current-option.txt').write_text(
                       f'question-text = {question}\n'
+                      f'varstore-id = {varstore_id}\n'
+                      f'varstore-offset = {varstore_offset}\n'
+                      f'varstore-size = {varstore_size}\n'
+                      f'varstore-guid-raw-hex = {varstore_guid}\n'
                       f'current-width = {current_width}\n'
                       f'current-raw8-hex = {current_raw}\n'
                       f'current-value-unsigned = {current}\n'
@@ -319,6 +343,7 @@ jobs:
                   )
 
                   print('HII_CURRENT_OPTION_DIRECT_CHILD=PASS')
+                  print('HII_CURRENT_OPTION_VARSTORE_IDENTITY=PASS')
                   print('HII_CURRENT_OPTION_VALUE_MATCH=PASS')
                   print('HII_CURRENT_OPTION_TEXT='+option_text)
                   print('UEFI_HII_CURRENT_OPTION_RUNTIME=PASS')
@@ -418,11 +443,16 @@ jobs:
               f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
               "proof-integrated-current-option-resolution = PASS\n"
               "proof-direct-child-scope = PASS\n"
+              "proof-runtime-varstore-identity = PASS\n"
               "proof-live-current-value-match = PASS\n"
               "proof-same-package-option-string-resolution = PASS\n"
               "proof-same-language-option-string-resolution = PASS\n"
               "proof-current-option-language-binding = PASS\n"
               f"proof-question-text = {safe_q}\n"
+              f"proof-varstore-id = {vals['varstore-id']}\n"
+              f"proof-varstore-offset = {vals['varstore-offset']}\n"
+              f"proof-varstore-size = {vals['varstore-size']}\n"
+              f"proof-varstore-guid-raw-hex = {vals['varstore-guid-raw-hex']}\n"
               f"proof-current-width = {vals['current-width']}\n"
               f"proof-current-value-unsigned = {vals['current-value-unsigned']}\n"
               f"proof-current-option-flags-hex = {vals['current-option-flags-hex']}\n"
