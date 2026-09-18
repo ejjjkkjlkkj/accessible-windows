@@ -88,7 +88,7 @@ jobs:
           root=Path('boot/uefi-hii-current-option-v1')
           src=(root/'build_uefi_hii_current_option.py').read_text()
           ast.parse(src)
-          labels=re.findall(r"c\\.label\\('([^']+)'\\)",src)
+          labels=re.findall(r"c\.label\('([^']+)'\)",src)
           duplicates=sorted({name for name in labels if labels.count(name)>1})
           assert not duplicates,('duplicate-code-labels',duplicates)
 
