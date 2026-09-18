@@ -2,6 +2,9 @@ name: lab2-relation-witness
 on:
   push:
     branches: [os]
+    paths:
+      - 'lab0/mark0'
+      - 'lab2/relation0'
   workflow_dispatch:
 
 permissions:
