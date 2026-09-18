@@ -27,6 +27,9 @@ MARKS={
  'hii_protocol_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_PROTOCOL_NOT_FOUND\r\nEND\r\n',
  'hii_list_size_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_SIZE_QUERY_FAILED\r\nEND\r\n',
  'hii_list_fetch_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_FAILED\r\nEND\r\n',
+ 'hii_list_fetch_invalid': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_EFI_INVALID_PARAMETER\r\nEND\r\n',
+ 'hii_list_fetch_not_found': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_EFI_NOT_FOUND\r\nEND\r\n',
+ 'hii_list_static_small': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_STATIC_BUFFER_TOO_SMALL\r\nEND\r\n',
  'hii_handle_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_FORMS_HANDLE_NOT_FOUND\r\nEND\r\n',
  'hii_alloc_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_POOL_ALLOC_FAILED\r\nEND\r\n',
  'hii_export_fail': b'QEVARYNOX-UEFI-HII-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_EXPORT_FAILED\r\nEND\r\n',
@@ -143,8 +146,8 @@ def make_pcm():
  return bytes(bank)
 def build():
  pcm=make_pcm()
- data=bytearray(0x100)
- L={'maxaddr':0,'keybuf':8,'dac_nid':16,'pin_nid':20,'textbuf':32,'db_guid':64,'str_guid':80,'dbptr':96,'strptr':104,'handles_size':112,'handles_ptr':120,'pkg_size':128,'pkg_ptr':136,'langs_size':144,'langs_ptr':152,'string_size':160,'string_ptr':168,'token':176,'temp_handle':184,'handle_cursor':192,'handles_remaining':200}
+ data=bytearray(0x1100)
+ L={'maxaddr':0,'keybuf':8,'dac_nid':16,'pin_nid':20,'textbuf':32,'db_guid':64,'str_guid':80,'dbptr':96,'strptr':104,'handles_size':112,'handles_ptr':120,'pkg_size':128,'pkg_ptr':136,'langs_size':144,'langs_ptr':152,'string_size':160,'string_ptr':168,'token':176,'temp_handle':184,'handle_cursor':192,'handles_remaining':200,'handles_static':0x100}
  struct.pack_into('<Q',data,0,0xffffffff)
  struct.pack_into('<IHH8B',data,L['db_guid'],0xef9fc172,0xa1b2,0x4693,0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42)
  struct.pack_into('<IHH8B',data,L['str_guid'],0x0fd96974,0x23aa,0x4cdc,0xb9,0xcb,0x98,0xd1,0x77,0x50,0x32,0x2a)
@@ -200,41 +203,21 @@ def build():
  c.emit(b'\x4d\x85\xed'); c.rel32(b'\x0f\x84','fail_hii_protocol')
  serial('string_protocol')
 
- # List every active HII package-list handle.  Some firmware exposes Forms
- # through ExportPackageLists while a type-filtered ListPackageLists(FORMS)
- # sizing query is not usable here, so selection is verified by inspecting
- # each exported package list for an actual EFI_HII_PACKAGE_FORMS package.
- zero_qword(L['handles_size'])
- zero_qword(L['temp_handle'])
- c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')  # PackageType=ALL, Guid=NULL
- c.lea_r9_data(L['handles_size'])
- c.lea_rax_data(L['temp_handle']); c.emit(b'\x48\x89\x44\x24\x20')
- c.emit(b'\x41\xff\x54\x24\x18')
- c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x08'); c.rel32(b'\x0f\x82','fail_hii_list_size')
-
- # Allocate handle array and list all active HII handles.
- alloc(True,L['handles_ptr'])
+ # Take one atomic snapshot of every active HII handle into bridge-owned
+ # storage. Avoid the observed sizing/fetch race before native HDA work.
+ c.lea_rdx_data(L['handles_size'])
+ c.emit(b'\x48\xc7\x02'+struct.pack('<I',0x1000))
  c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')
  c.lea_r9_data(L['handles_size'])
- c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02\x48\x89\x44\x24\x20')
+ c.lea_rax_data(L['handles_static']); c.emit(b'\x48\x89\x44\x24\x20')
  c.emit(b'\x41\xff\x54\x24\x18')
  c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x84','list_fetch_ready')
- # EFI_BUFFER_TOO_SMALL may recur if HII grows between sizing and fetch.
- # Retry once with the newly reported handle-buffer size.
- c.emit(b'\x83\xf8\x05'); c.rel32(b'\x0f\x85','fail_hii_list_fetch')
- c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x08'); c.rel32(b'\x0f\x82','fail_hii_list_fetch')
- alloc(True,L['handles_ptr'])
- c.emit(b'\x4c\x89\xe1\x31\xd2\x45\x31\xc0')
- c.lea_r9_data(L['handles_size'])
- c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02\x48\x89\x44\x24\x20')
- c.emit(b'\x41\xff\x54\x24\x18')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_hii_list_fetch')
+ c.emit(b'\x83\xf8\x02'); c.rel32(b'\x0f\x84','fail_hii_list_fetch_invalid')
+ c.emit(b'\x83\xf8\x0e'); c.rel32(b'\x0f\x84','fail_hii_list_fetch_not_found')
+ c.emit(b'\x83\xf8\x05'); c.rel32(b'\x0f\x84','fail_hii_list_static_small')
+ c.rel32(b'\xe9','fail_hii_list_fetch')
  c.label('list_fetch_ready')
-
- # Persist cursor and byte count because protocol calls may clobber volatile regs.
- c.lea_rdx_data(L['handles_ptr']); c.emit(b'\x48\x8b\x02')
+ c.lea_rax_data(L['handles_static'])
  c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x89\x02')
  c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x02')
  c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x89\x02')
@@ -623,6 +606,9 @@ def build():
  c.label('fail_hii_protocol'); serial('hii_protocol_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_list_size'); serial('hii_list_size_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_list_fetch'); serial('hii_list_fetch_fail'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_hii_list_fetch_invalid'); serial('hii_list_fetch_invalid'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_hii_list_fetch_not_found'); serial('hii_list_fetch_not_found'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_hii_list_static_small'); serial('hii_list_static_small'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_handle'); serial('hii_handle_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_alloc'); serial('hii_alloc_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_hii_export'); serial('hii_export_fail'); c.rel32(b'\xe9','return_fail')
