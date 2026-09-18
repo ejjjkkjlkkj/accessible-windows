@@ -1512,13 +1512,14 @@ def validate(image,pcm):
 
 def main():
  global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE, WAIT_DOWN_SPEAK, WAIT_UP_PROBE, WAIT_UP_SPEAK
- if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak|--wait-up-probe|--wait-up-speak]')
+ if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak|--wait-up-probe|--wait-up-speak|--wait-down-repeat-speak]')
  if len(sys.argv)==3:
   if sys.argv[2]=='--wait-repeat': WAIT_REPEAT_KEY=True
   elif sys.argv[2]=='--wait-down-probe': WAIT_DOWN_PROBE=True
   elif sys.argv[2]=='--wait-down-speak': WAIT_DOWN_SPEAK=True
   elif sys.argv[2]=='--wait-up-probe': WAIT_UP_PROBE=True
   elif sys.argv[2]=='--wait-up-speak': WAIT_UP_SPEAK=True
+  elif sys.argv[2]=='--wait-down-repeat-speak': WAIT_DOWN_SPEAK=True; WAIT_REPEAT_KEY=True
   else: raise SystemExit('unknown mode: '+sys.argv[2])
  image,pcm=build(); validate(image,pcm)
  p=Path(sys.argv[1]); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(image)
@@ -1531,6 +1532,7 @@ def main():
  print('hii-down-speak=' + ('enabled' if WAIT_DOWN_SPEAK else 'disabled'))
  print('hii-up-probe=' + ('enabled' if WAIT_UP_PROBE else 'disabled'))
  print('hii-up-speak=' + ('enabled' if WAIT_UP_SPEAK else 'disabled'))
+ print('hii-down-repeat-speak=' + ('enabled' if (WAIT_DOWN_SPEAK and WAIT_REPEAT_KEY) else 'disabled'))
  print('pcm-bytes='+str(len(pcm)))
  print('pcm-sha256='+hashlib.sha256(pcm).hexdigest())
  print('sha256='+hashlib.sha256(image).hexdigest())
