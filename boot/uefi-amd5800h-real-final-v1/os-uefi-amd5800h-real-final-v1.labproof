@@ -1,0 +1,15 @@
+OS-UEFI-AMD5800H-REAL-FINAL-V1
+role = final native UEFI screen-reader validation on AMD-5800H-REAL
+runner = AMD-5800H-REAL
+host-model = ASUS M1603QA
+host-cpu = AMD Ryzen 7 5800H
+execution = self-hosted Windows x64
+qemu-ovmf = required
+vmware-workstation = tested when installed on runner
+physical-host-firmware-mutation = forbidden
+physical-host-reboot = forbidden
+physical-host-uefi-variable-write = forbidden
+claim = QEMU full speech proof is virtual pre-OS execution hosted on the physical AMD-5800H-REAL machine
+claim = VMware proof establishes independent UEFI loader execution and protocol discovery when VMware Workstation is present
+claim = physical speaker output before Windows boot remains a separate physical-boot proof unless explicitly established
+proof = PENDING_CI
