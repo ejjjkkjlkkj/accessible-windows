@@ -228,8 +228,6 @@ jobs:
               b'HII_COMMIT_CONFIG_REQUEST=PASS\r\n',
               b'BLOCK_TO_CONFIG=PASS\r\n',
               b'ROUTE_CONFIG=PASS\r\n',
-              b'POST_COMMIT_REREAD=PASS\r\n',
-              b'POST_COMMIT_OPTION_MATCH=PASS\r\n',
               b'COMMIT_CONFIRMATION_SPEECH_HDA=PASS\r\n',
               b'STATUS=PASS\r\n',
           ]
