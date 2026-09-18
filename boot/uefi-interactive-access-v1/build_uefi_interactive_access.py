@@ -150,7 +150,8 @@ def build_code() -> tuple[bytes, dict[str, int]]:
     c.rel32(b"\x0f\x85", "read")     # retry on EFI_NOT_READY/nonzero
 
     # EFI_INPUT_KEY = UINT16 ScanCode + CHAR16 UnicodeChar.
-    c.emit(b"\x0f\xb7\x05" + struct.pack("<i", DATA_RVA + 2 - (TEXT_RVA + c.pos() + 4)))
+    # MOVZX AX,[RIP+disp32] is 7 bytes: displacement is relative to the next instruction.
+    c.emit(b"\x0f\xb7\x05" + struct.pack("<i", DATA_RVA + 2 - (TEXT_RVA + c.pos() + 7)))
     c.emit(b"\x66\x3d\x31\x00")      # cmp ax,'1'
     c.rel32(b"\x0f\x84", "continue")
     c.emit(b"\x66\x3d\x32\x00")      # cmp ax,'2'
