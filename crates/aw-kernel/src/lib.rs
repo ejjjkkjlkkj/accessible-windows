@@ -9,7 +9,10 @@ pub enum BringUpError {
     /// The boot handoff does not match ABI v1.
     InvalidBootInfo,
     /// Mandatory accessibility capabilities were not present.
-    AccessibilityContractUnsatisfied { missing: u64 },
+    AccessibilityContractUnsatisfied {
+        /// Bitmask of required capabilities that were missing.
+        missing: u64,
+    },
 }
 
 /// Minimal kernel foundation state.
