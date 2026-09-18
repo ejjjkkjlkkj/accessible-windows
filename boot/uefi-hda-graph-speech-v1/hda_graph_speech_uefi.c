@@ -427,14 +427,22 @@ static int graph_selftest(void) {
 static int discover_controller(void) {
     u32 cfg = 0;
     int found = 0;
-    for (u32 bdf = 0; bdf < 0x10000; ++bdf) {
-        u32 base = 0x80000000u | (bdf << 8);
-        u32 vd = pci_read32(base);
-        if ((vd & 0xffff) == 0xffff) continue;
-        u32 classreg = pci_read32(base | 0x08);
-        if (((classreg >> 16) & 0xffff) == 0x0403) {
+
+    /* Prefer the ASUS M1603QA analog HDA function (AMD 1022:15E3).
+       Its sibling 1002:1637 is HDMI audio.  A second pass keeps the
+       freestanding reader portable on QEMU, VMware and other machines. */
+    for (u32 pass = 0; pass < 2 && !found; ++pass) {
+        for (u32 bdf = 0; bdf < 0x10000; ++bdf) {
+            u32 base = 0x80000000u | (bdf << 8);
+            u32 vd = pci_read32(base);
+            if ((vd & 0xffff) == 0xffff) continue;
+            u32 classreg = pci_read32(base | 0x08);
+            if (((classreg >> 16) & 0xffff) != 0x0403) continue;
+            if (pass == 0 && vd != 0x15e31022u) continue;
             cfg = base;
             found = 1;
+            if (pass == 0) marker("HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3");
+            else marker("HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403");
             break;
         }
     }
