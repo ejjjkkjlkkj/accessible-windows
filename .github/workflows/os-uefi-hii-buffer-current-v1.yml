@@ -257,14 +257,14 @@ jobs:
                   ]:
                       assert line in foundation,line
                   chain=[
-                      b'VARSTORE_DEFINITION_MATCH=PASS\\r\\n',
-                      b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\\r\\n',
-                      b'CONFIG_TO_BLOCK=PASS\\r\\n',
-                      b'BUFFER_VARSTORE_MATCH=PASS\\r\\nCURRENT_VALUE_READ=PASS\\r\\n',
-                      b'QUESTION_METADATA=PASS\\r\\n',
-                      b'VARSTORE_OPCODE_HEX='+op_s.encode()+b'\\r\\n',
-                      b'CURRENT_VALUE_RAW8_HEX='+raw8.encode()+b'\\r\\n',
-                      b'QUESTION_TEXT='+label.group(1)+b'\\r\\n',
+                      b'VARSTORE_DEFINITION_MATCH=PASS\r\n',
+                      b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\r\n',
+                      b'CONFIG_TO_BLOCK=PASS\r\n',
+                      b'BUFFER_VARSTORE_MATCH=PASS\r\nCURRENT_VALUE_READ=PASS\r\n',
+                      b'QUESTION_METADATA=PASS\r\n',
+                      b'VARSTORE_OPCODE_HEX='+op_s.encode()+b'\r\n',
+                      b'CURRENT_VALUE_RAW8_HEX='+raw8.encode()+b'\r\n',
+                      b'QUESTION_TEXT='+label.group(1)+b'\r\n',
                   ]
                   positions=[raw.rfind(marker) for marker in chain]
                   assert all(p >= 0 for p in positions),positions
