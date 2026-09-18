@@ -108,6 +108,8 @@ MARKS={
  'nav_raw': b'\r\nNAV_NEXT_OPTION_VALUE_RAW8_HEX=',
  'nav_done': b'\r\nNAV_NEXT_OPTION_DIRECT_CHILD=PASS\r\nEND\r\n',
  'nav_focus_activate': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_FOCUS_OPTION_TOKEN_ACTIVATED=PASS\r\nEND\r\n',
+ 'nav_focus_text_prefix': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_FOCUS_OPTION_TEXT=',
+ 'nav_focus_text_done': b'\r\nNAV_FOCUS_OPTION_STRING=PASS\r\nNAV_FOCUS_LABEL_BINDING=PASS\r\nEND\r\n',
  'nav_speech_hii': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nNAV_FOCUS_SOURCE=LIVE_DIRECT_SIBLING_HII_LABEL\r\nNAV_FOCUS_SOURCE=PASS\r\nEND\r\n',
  'nav_speech_char': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nEVENT=NAV_FOCUS_GRAPHEME_ACCEPTED\r\nEND\r\n',
  'nav_text_ready': b'QEVARYNOX-UEFI-HII-CURRENT-OPTION-SPEECH-V1\r\nEVENT=NAV_FOCUS_TEXT_COMMIT\r\nTEXT_BUFFER=PASS\r\nBDL_RUNTIME_TEXT_SCHEDULE=PASS\r\nEND\r\n',
@@ -517,9 +519,9 @@ def build():
  c.label('selected_scsu_found')
  c.emit(b'\x80\x3e\x00'); c.rel32(b'\x0f\x84','fail_selected_string')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x89\x32')
- serial('selected_text_prefix'); c.rel32(b'\xe8','serial_scsu_ascii')
+ serial('nav_focus_text_prefix' if WAIT_DOWN_SPEAK else 'selected_text_prefix'); c.rel32(b'\xe8','serial_scsu_ascii')
  c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_selected_string')
- serial('selected_text_done')
+ serial('nav_focus_text_done' if WAIT_DOWN_SPEAK else 'selected_text_done')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x8b\x32')
  c.emit(b'\x31\xff')
  c.label('capture_scsu_loop')
@@ -535,8 +537,8 @@ def build():
  c.label('selected_ucs_found')
  c.emit(b'\x66\x83\x3e\x00'); c.rel32(b'\x0f\x84','fail_selected_string')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x89\x32')
- serial('selected_text_prefix'); c.rel32(b'\xe8','serial_utf16')
- serial('selected_text_done')
+ serial('nav_focus_text_prefix' if WAIT_DOWN_SPEAK else 'selected_text_prefix'); c.rel32(b'\xe8','serial_utf16')
+ serial('nav_focus_text_done' if WAIT_DOWN_SPEAK else 'selected_text_done')
  c.lea_rdx_data(L['speech_text_source']); c.emit(b'\x48\x8b\x32')
  c.emit(b'\x31\xff')
  c.label('capture_ucs_loop')
@@ -1383,6 +1385,12 @@ def validate(image,pcm):
   b'CURRENT_OPTION_SOURCE=PASS',
   b'CURRENT_OPTION_SPOKEN_PREFIX=',
   b'CURRENT_OPTION_SPOKEN_PREFIX=PASS',
+  b'NAV_FOCUS_OPTION_TEXT=',
+  b'NAV_FOCUS_OPTION_STRING=PASS',
+  b'NAV_FOCUS_LABEL_BINDING=PASS',
+  b'NAV_FOCUS_SOURCE=PASS',
+  b'NAV_FOCUS_SPOKEN_PREFIX=PASS',
+  b'NAV_FOCUS_SPEECH_HDA=PASS',
   b'HDA_CONTROLLER_CODEC=PASS',
   b'AFG_RUNTIME_DISCOVERY=PASS',
   b'BDL_RUNTIME_TEXT_SCHEDULE=PASS',
