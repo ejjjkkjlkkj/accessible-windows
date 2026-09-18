@@ -1,0 +1,31 @@
+QEVARYNOX_MANIFEST_0
+version = 0
+identity = QEVARYNOX.CODE.ORIGIN.G0
+status = ACTIVE
+proof = D
+meaning = repository-authorship-and-no-imported-third-party-source
+worldwide-code-uniqueness = NOT-CLAIMED
+sovereign/access0/format.qevspec0|project-specification|external-source=none|D=PASS
+sovereign/access0/registry.qevaccess0|project-specification|external-source=none|D=PASS
+sovereign/catalog0/system.qevcatalog0|project-specification|external-source=none|D=PASS
+sovereign/formats0/registry.qevformats0|project-specification|external-source=none|D=PASS
+sovereign/integrity0/bootstrap.qevhash0|project-specification|external-source=none|D=PASS
+sovereign/lang0/foundation.qevsource0|project-specification|external-source=none|D=PASS
+sovereign/lang0/language.qevspec0|project-specification|external-source=none|D=PASS
+sovereign/namespace0/identity.qevspec0|project-specification|external-source=none|D=PASS
+sovereign/object0/object.qevspec0|project-specification|external-source=none|D=PASS
+sovereign/origin0/code-origin.qevmanifest0|project-specification|external-source=none|D=PASS
+sovereign/origin0/origin.qevmanifest0|project-specification|external-source=none|D=PASS
+sovereign/prior0/policy.qevspec0|project-specification|external-source=none|D=PASS
+sovereign/seed0/seed.qevspec0|project-specification|external-source=none|D=PASS
+sovereign/tools0/registry.qevtools0|project-specification|external-source=none|D=PASS
+sovereign/tools0/src/qevaccess0.qevsource0|project-specification|external-source=none|D=PASS
+sovereign/tools0/src/qevbuild0.qevsource0|project-specification|external-source=none|D=PASS
+sovereign/tools0/src/qevcompile0.qevsource0|project-specification|external-source=none|D=PASS
+sovereign/tools0/src/qevencode0.qevsource0|project-specification|external-source=none|D=PASS
+sovereign/tools0/src/qevfuzz0.qevsource0|project-specification|external-source=none|D=PASS
+sovereign/tools0/src/qevlink0.qevsource0|project-specification|external-source=none|D=PASS
+sovereign/tools0/src/qevpack0.qevsource0|project-specification|external-source=none|D=PASS
+sovereign/tools0/src/qevprove0.qevsource0|project-specification|external-source=none|D=PASS
+sovereign/tools0/src/qevseed0.qevsource0|project-specification|external-source=none|D=PASS
+sovereign/tools0/src/qevtrace0.qevsource0|project-specification|external-source=none|D=PASS

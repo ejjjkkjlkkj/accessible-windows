@@ -1,6 +1,6 @@
-AW0SRC00
-cell AwLink0 {
-    identity tool.awlink0
+QEVARYNOX_SRC_0
+cell QevarynoxLinkTool0 {
+    identity tool.qevlink0
     generation system.current
 
     authority {
@@ -9,6 +9,8 @@ cell AwLink0 {
         deny kernel.authority
         deny genome.mutate
         deny capability.mint
+        deny security.floor.lower
+        deny accessibility.disable
     }
 
     memory {
@@ -17,18 +19,23 @@ cell AwLink0 {
     }
 
     human {
-        semantic tool.awlink0
+        semantic tool.qevlink0
         path keyboard | speech | braille
     }
 
     proof accessibility {
-        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        invariant QEVARYNOX.ACCESS.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
         evidence A structural
         evidence B required
     }
 
+    proof origin {
+        evidence D repository-origin
+        external-source none
+    }
+
     flow link(input : untrusted<object.set>) -> trusted<image.record> {
-        effects validate(input) | use(object.read) | use(image.emit)
-        body link_verified_objects(input)
+        effects validate(input)
+        body qevarynox_link_verified_objects(input)
     }
 }

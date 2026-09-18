@@ -1,0 +1,16 @@
+QEVARYNOX_MANIFEST_0
+version = 0
+identity = QEVARYNOX.SOVEREIGN.ORIGIN
+status = ACTIVE
+policy = ZERO-SOFTWARE-ANCESTRY
+namespace = QEVARYNOX
+language = QEVARYNOX-LANG-G0
+object-format = QEVARYNOX_OBJECT_0
+accessibility-proof = QEVARYNOX-ACCESS-G0
+seed = QEVARYNOX-SEED-G0
+foreign-software-base = FORBIDDEN
+third-party-source-in-sovereign-tree = FORBIDDEN
+third-party-compiler-as-final-bootstrap = FORBIDDEN
+accessibility-omission = FORBIDDEN
+evidence-required = A+B+C+D
+file-extension-policy = QEVARYNOX.FORMAT.NO-UNREGISTERED-SOVEREIGN-EXTENSION

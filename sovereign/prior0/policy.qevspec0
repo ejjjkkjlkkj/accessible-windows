@@ -1,0 +1,19 @@
+QEVARYNOX_SPEC_0
+kind = patent-prior-art-policy
+identity = QEVARYNOX.PROOF.C
+status = ACTIVE
+
+::proof-C
+meaning = patent-and-prior-art-risk-review
+PASS-requires = feature-definition + prior-art-search + patent-family-search + independent-claim-review + jurisdiction-status + documented-differences + design-around-if-required
+name-search-alone = insufficient
+web-search-alone = insufficient
+no-result-alone = insufficient
+missing-claim-chart = UNPROVEN
+::end
+
+::rule
+id = QEVARYNOX.C.NO-FOUNDATIONAL-MECHANISM-WITHOUT-REVIEW
+scope = bootstrap; language; compiler; kernel; security; regeneration; cognition; accessibility; storage; networking; update; model; training
+default = UNPROVEN
+::end

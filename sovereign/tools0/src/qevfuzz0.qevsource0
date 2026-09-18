@@ -1,6 +1,6 @@
-AW0SRC00
-cell AwFuzz0 {
-    identity tool.awfuzz0
+QEVARYNOX_SRC_0
+cell QevarynoxFuzzTool0 {
+    identity tool.qevfuzz0
     generation system.current
 
     authority {
@@ -10,6 +10,8 @@ cell AwFuzz0 {
         deny kernel.authority
         deny genome.mutate
         deny capability.mint
+        deny security.floor.lower
+        deny accessibility.disable
     }
 
     memory {
@@ -18,18 +20,23 @@ cell AwFuzz0 {
     }
 
     human {
-        semantic tool.awfuzz0
+        semantic tool.qevfuzz0
         path keyboard | speech | braille
     }
 
     proof accessibility {
-        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        invariant QEVARYNOX.ACCESS.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
         evidence A structural
         evidence B required
     }
 
+    proof origin {
+        evidence D repository-origin
+        external-source none
+    }
+
     flow attack(input : untrusted<attack.surface>) -> trusted<proof.record> {
-        effects validate(input) | use(surface.read) | use(case.emit) | use(proof.emit)
-        body generate_bounded_adversarial_cases(input)
+        effects validate(input)
+        body qevarynox_generate_bounded_adversarial_cases(input)
     }
 }

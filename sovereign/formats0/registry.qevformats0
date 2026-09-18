@@ -1,309 +1,310 @@
-AW0FMT00
+QEVARYNOX_FORMATS_0
 version = 0
-identity = AW0.FORMATS.G0
+identity = QEVARYNOX.FORMATS.G0
 status = ACTIVE
+namespace = Qevarynox
 
 ::format
-extension = .awsource0
-magic = AW0SRC00
-role = AWL0 source
+extension = .qevsource0
+magic = QEVARYNOX_SRC_0
+role = Qevarynox native-language source
 encoding = utf-8
 ::end
 
 ::format
-extension = .awobject0
-magic = AW0OBJ00
+extension = .qevobject0
+magic = QEVARYNOX_OBJECT_0
 role = compiled object container
 encoding = binary
 ::end
 
 ::format
-extension = .awspec0
-magic = AW0SPEC0
+extension = .qevspec0
+magic = QEVARYNOX_SPEC_0
 role = sovereign specification
 encoding = utf-8
 ::end
 
 ::format
-extension = .awmanifest0
-magic = AW0MAN00
-role = sovereign origin/build manifest
+extension = .qevmanifest0
+magic = QEVARYNOX_MANIFEST_0
+role = origin/build/provenance manifest
 encoding = utf-8
 ::end
 
 ::format
-extension = .awhash0
-magic = AW0HSH00
+extension = .qevhash0
+magic = QEVARYNOX_HASH_0
 role = integrity evidence ledger
 encoding = utf-8
 ::end
 
 ::format
-extension = .awa11y0
-magic = AW0A1100
+extension = .qevaccess0
+magic = QEVARYNOX_ACCESS_0
 role = accessibility A+B registry
 encoding = utf-8
 ::end
 
 ::format
-extension = .awformats0
-magic = AW0FMT00
+extension = .qevformats0
+magic = QEVARYNOX_FORMATS_0
 role = file-format registry
 encoding = utf-8
 ::end
 
 ::format
-extension = .awtools0
-magic = AW0TLS00
+extension = .qevtools0
+magic = QEVARYNOX_TOOLS_0
 role = project-owned tool registry
 encoding = utf-8
 ::end
 
 ::format
-extension = .awproof0
-magic = AW0PRF00
+extension = .qevproof0
+magic = QEVARYNOX_PROOF_0
 role = proof/evidence bundle
 encoding = binary-or-utf8
 ::end
 
 ::format
-extension = .awseed0
-magic = AW0SED00
+extension = .qevseed0
+magic = QEVARYNOX_SEED_0
 role = Seed-0 image
 encoding = binary
 ::end
 
 ::format
-extension = .awimage0
-magic = AW0IMG00
+extension = .qevimage0
+magic = QEVARYNOX_IMAGE_0
 role = sovereign system image
 encoding = binary
 ::end
 
 ::format
-extension = .awpackage0
-magic = AW0PKG00
+extension = .qevpackage0
+magic = QEVARYNOX_PACKAGE_0
 role = sovereign package/update unit
 encoding = binary
 ::end
 
-::invariant
-id = AW0.FORMAT.NO-UNREGISTERED-SOVEREIGN-EXTENSION
-rule = Every file under sovereign/ uses a registered AW0 extension.
-evidence = A+B
-::end
-
 ::format
-extension = .awcatalog0
-magic = AW0CAT00
+extension = .qevcatalog0
+magic = QEVARYNOX_CATALOG_0
 role = master completeness catalog
 encoding = utf-8
 ::end
 
 ::format
-extension = .awconfig0
-magic = AW0CFG00
+extension = .qevconfig0
+magic = QEVARYNOX_CONFIG_0
 role = native configuration
 encoding = utf-8-or-binary
 ::end
 
 ::format
-extension = .awtrace0
-magic = AW0TRC00
+extension = .qevtrace0
+magic = QEVARYNOX_TRACE_0
 role = semantic runtime trace
 encoding = binary-or-utf8
 ::end
 
 ::format
-extension = .awtest0
-magic = AW0TST00
+extension = .qevtest0
+magic = QEVARYNOX_TEST_0
 role = test definition/vector
 encoding = binary-or-utf8
 ::end
 
 ::format
-extension = .awcorpus0
-magic = AW0CRP00
+extension = .qevcorpus0
+magic = QEVARYNOX_CORPUS_0
 role = fuzz/adversarial corpus
 encoding = binary
 ::end
 
 ::format
-extension = .awbench0
-magic = AW0BNC00
+extension = .qevbench0
+magic = QEVARYNOX_BENCH_0
 role = benchmark definition/result
 encoding = binary-or-utf8
 ::end
 
 ::format
-extension = .awsymbol0
-magic = AW0SYM00
+extension = .qevsymbol0
+magic = QEVARYNOX_SYMBOL_0
 role = debug/symbol information
 encoding = binary
 ::end
 
 ::format
-extension = .awabi0
-magic = AW0ABI00
+extension = .qevabi0
+magic = QEVARYNOX_ABI_0
 role = native ABI/interface contract
 encoding = binary-or-utf8
 ::end
 
 ::format
-extension = .awschema0
-magic = AW0SCH00
+extension = .qevschema0
+magic = QEVARYNOX_SCHEMA_0
 role = schema/type/interface description
 encoding = binary-or-utf8
 ::end
 
 ::format
-extension = .awmessage0
-magic = AW0MSG00
+extension = .qevmessage0
+magic = QEVARYNOX_MESSAGE_0
 role = typed message/IPC schema or instance
 encoding = binary
 ::end
 
 ::format
-extension = .awcap0
-magic = AW0CAP00
+extension = .qevcap0
+magic = QEVARYNOX_CAP_0
 role = capability/authority description
 encoding = binary
 ::end
 
 ::format
-extension = .awgenome0
-magic = AW0GEN00
+extension = .qevgenome0
+magic = QEVARYNOX_GENOME_0
 role = regenerative genome description
 encoding = binary
 ::end
 
 ::format
-extension = .awmorph0
-magic = AW0MOR00
+extension = .qevmorph0
+magic = QEVARYNOX_MORPH_0
 role = morphogenetic topology description
 encoding = binary
 ::end
 
 ::format
-extension = .awmemory0
-magic = AW0MEM00
+extension = .qevmemory0
+magic = QEVARYNOX_MEMORY_0
 role = native cognitive-memory container
 encoding = binary
 ::end
 
 ::format
-extension = .awsemantic0
-magic = AW0SEM00
+extension = .qevsemantic0
+magic = QEVARYNOX_SEMANTIC_0
 role = native semantic graph/record
 encoding = binary
 ::end
 
 ::format
-extension = .awsnapshot0
-magic = AW0SNP00
+extension = .qevsnapshot0
+magic = QEVARYNOX_SNAPSHOT_0
 role = versioned snapshot description
 encoding = binary
 ::end
 
 ::format
-extension = .awupdate0
-magic = AW0UPD00
+extension = .qevupdate0
+magic = QEVARYNOX_UPDATE_0
 role = update transaction unit
 encoding = binary
 ::end
 
 ::format
-extension = .awdevice0
-magic = AW0DEV00
+extension = .qevdevice0
+magic = QEVARYNOX_DEVICE_0
 role = device identity/capability description
 encoding = binary
 ::end
 
 ::format
-extension = .awdriver0
-magic = AW0DRV00
+extension = .qevdriver0
+magic = QEVARYNOX_DRIVER_0
 role = native driver cell image
 encoding = binary
 ::end
 
 ::format
-extension = .awaudit0
-magic = AW0AUD00
+extension = .qevaudit0
+magic = QEVARYNOX_AUDIT_0
 role = security/provenance audit stream
 encoding = binary
 ::end
 
 ::format
-extension = .awcrash0
-magic = AW0CRS00
+extension = .qevcrash0
+magic = QEVARYNOX_CRASH_0
 role = structured crash/fault record
 encoding = binary
 ::end
 
 ::format
-extension = .awrecovery0
-magic = AW0RCV00
+extension = .qevrecovery0
+magic = QEVARYNOX_RECOVERY_0
 role = recovery plan/state
 encoding = binary
 ::end
 
 ::format
-extension = .awdoc0
-magic = AW0DOC00
+extension = .qevdoc0
+magic = QEVARYNOX_DOC_0
 role = native semantic documentation
 encoding = binary-or-utf8
 ::end
 
 ::format
-extension = .awreport0
-magic = AW0RPT00
+extension = .qevreport0
+magic = QEVARYNOX_REPORT_0
 role = structured verification/report output
 encoding = binary-or-utf8
 ::end
 
 ::format
-extension = .awlocale0
-magic = AW0LOC00
+extension = .qevlocale0
+magic = QEVARYNOX_LOCALE_0
 role = locale/language resources
 encoding = binary
 ::end
 
 ::format
-extension = .awfont0
-magic = AW0FNT00
+extension = .qevfont0
+magic = QEVARYNOX_FONT_0
 role = native font/glyph resource
 encoding = binary
 ::end
 
 ::format
-extension = .awspeech0
-magic = AW0SPK00
+extension = .qevspeech0
+magic = QEVARYNOX_SPEECH_0
 role = speech/voice resource or model descriptor
 encoding = binary
 ::end
 
 ::format
-extension = .awbraille0
-magic = AW0BRL00
+extension = .qevbraille0
+magic = QEVARYNOX_BRAILLE_0
 role = braille table/device semantic resource
 encoding = binary
 ::end
 
 ::format
-extension = .awkey0
-magic = AW0KEY00
+extension = .qevkey0
+magic = QEVARYNOX_KEY_0
 role = key material container descriptor
 encoding = binary
 ::end
 
 ::format
-extension = .awsig0
-magic = AW0SIG00
+extension = .qevsig0
+magic = QEVARYNOX_SIG_0
 role = signature/attestation record
 encoding = binary
 ::end
 
+::invariant
+id = QEVARYNOX.FORMAT.NO-UNREGISTERED-SOVEREIGN-EXTENSION
+rule = Every file under sovereign/ uses a registered Qevarynox extension.
+evidence = A+B
+::end
+
 ::completeness
 rule = New sovereign artifact classes must be registered before first use.
-rule = Format registration is specification only; implementation remains UNPROVEN until A+B.
+rule = Registration is specification only; implementation remains UNPROVEN until required proofs exist.
 ::end

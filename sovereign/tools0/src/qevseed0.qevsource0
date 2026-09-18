@@ -1,6 +1,6 @@
-AW0SRC00
-cell AwSeed0 {
-    identity tool.awseed0
+QEVARYNOX_SRC_0
+cell QevarynoxSeedTool0 {
+    identity tool.qevseed0
     generation system.current
 
     authority {
@@ -10,6 +10,8 @@ cell AwSeed0 {
         deny kernel.authority
         deny genome.mutate
         deny capability.mint
+        deny security.floor.lower
+        deny accessibility.disable
     }
 
     memory {
@@ -18,18 +20,23 @@ cell AwSeed0 {
     }
 
     human {
-        semantic tool.awseed0
+        semantic tool.qevseed0
         path keyboard | speech | braille
     }
 
     proof accessibility {
-        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        invariant QEVARYNOX.ACCESS.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
         evidence A structural
         evidence B required
     }
 
+    proof origin {
+        evidence D repository-origin
+        external-source none
+    }
+
     flow advance(input : untrusted<seed.image>) -> trusted<stage.record> {
-        effects validate(input) | use(proof.read) | use(stage.emit)
-        body verify_seed_then_emit_stage(input)
+        effects validate(input)
+        body qevarynox_verify_seed_then_emit_stage(input)
     }
 }

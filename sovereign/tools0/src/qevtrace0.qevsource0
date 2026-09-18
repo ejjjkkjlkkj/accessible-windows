@@ -1,6 +1,6 @@
-AW0SRC00
-cell AwTrace0 {
-    identity tool.awtrace0
+QEVARYNOX_SRC_0
+cell QevarynoxTraceTool0 {
+    identity tool.qevtrace0
     generation system.current
 
     authority {
@@ -9,6 +9,8 @@ cell AwTrace0 {
         deny kernel.authority
         deny genome.mutate
         deny capability.mint
+        deny security.floor.lower
+        deny accessibility.disable
     }
 
     memory {
@@ -17,18 +19,23 @@ cell AwTrace0 {
     }
 
     human {
-        semantic tool.awtrace0
+        semantic tool.qevtrace0
         path keyboard | speech | braille
     }
 
     proof accessibility {
-        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        invariant QEVARYNOX.ACCESS.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
         evidence A structural
         evidence B required
     }
 
+    proof origin {
+        evidence D repository-origin
+        external-source none
+    }
+
     flow trace(input : untrusted<semantic.event>) -> trusted<trace.record> {
-        effects validate(input) | use(semantic.read) | use(trace.emit)
-        body emit_semantic_diagnostic_trace(input)
+        effects validate(input)
+        body qevarynox_emit_semantic_diagnostic_trace(input)
     }
 }

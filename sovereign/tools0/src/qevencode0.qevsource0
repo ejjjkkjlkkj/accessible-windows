@@ -1,6 +1,6 @@
-AW0SRC00
-cell AwEncode0 {
-    identity tool.awencode0
+QEVARYNOX_SRC_0
+cell QevarynoxEncodeTool0 {
+    identity tool.qevencode0
     generation system.current
 
     authority {
@@ -9,6 +9,8 @@ cell AwEncode0 {
         deny kernel.authority
         deny genome.mutate
         deny capability.mint
+        deny security.floor.lower
+        deny accessibility.disable
     }
 
     memory {
@@ -17,18 +19,23 @@ cell AwEncode0 {
     }
 
     human {
-        semantic tool.awencode0
+        semantic tool.qevencode0
         path keyboard | speech | braille
     }
 
     proof accessibility {
-        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        invariant QEVARYNOX.ACCESS.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
         evidence A structural
         evidence B required
     }
 
+    proof origin {
+        evidence D repository-origin
+        external-source none
+    }
+
     flow encode(input : untrusted<source.record>) -> trusted<object.record> {
-        effects validate(input) | use(source.read) | use(object.emit)
-        body encode_verified_instruction_records(input)
+        effects validate(input)
+        body qevarynox_encode_verified_instruction_records(input)
     }
 }

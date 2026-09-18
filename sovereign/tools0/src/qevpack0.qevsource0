@@ -1,6 +1,6 @@
-AW0SRC00
-cell AwPack0 {
-    identity tool.awpack0
+QEVARYNOX_SRC_0
+cell QevarynoxPackTool0 {
+    identity tool.qevpack0
     generation system.current
 
     authority {
@@ -10,6 +10,8 @@ cell AwPack0 {
         deny kernel.authority
         deny genome.mutate
         deny capability.mint
+        deny security.floor.lower
+        deny accessibility.disable
     }
 
     memory {
@@ -18,18 +20,23 @@ cell AwPack0 {
     }
 
     human {
-        semantic tool.awpack0
+        semantic tool.qevpack0
         path keyboard | speech | braille
     }
 
     proof accessibility {
-        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        invariant QEVARYNOX.ACCESS.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
         evidence A structural
         evidence B required
     }
 
+    proof origin {
+        evidence D repository-origin
+        external-source none
+    }
+
     flow pack(input : untrusted<artifact.graph>) -> trusted<package.record> {
-        effects validate(input) | use(artifact.read) | use(proof.read) | use(package.emit)
-        body pack_verified_artifacts(input)
+        effects validate(input)
+        body qevarynox_pack_verified_artifacts(input)
     }
 }

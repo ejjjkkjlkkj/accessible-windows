@@ -1,7 +1,7 @@
-AW0SPEC0
+QEVARYNOX_SPEC_0
 kind = accessibility-proof-format
-identity = A11Y0
-status = SPECIFICATION-V1
+identity = QEVARYNOX-ACCESS-G0
+status = SPECIFICATION-V2
 
 ::record
 fields = path | class | A | B | invariant
@@ -12,7 +12,7 @@ default = none
 ::end
 
 ::invariant
-id = A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+id = QEVARYNOX.ACCESS.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
 interactive = semantic-source + keyboard + native-nonvisual-path
 noninteractive = structured-state-errors + no-hidden-visual-human-state
 omission = forbidden

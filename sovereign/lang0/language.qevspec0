@@ -1,8 +1,14 @@
-AW0SPEC0
+QEVARYNOX_SPEC_0
 kind = language-specification
-identity = AWL0
+identity = QEVARYNOX-LANG-G0
 generation = 0
 status = COMPILER-UNPROVEN
+
+::principle
+rule = language-is-not-a-wrapper-around-a-foreign-language
+rule = accessibility-security-cognition-memory-and-regeneration-are-language-level-semantics
+rule = foreign-runtime-dependency-is-forbidden-in-final-bootstrap
+::end
 
 ::cell
 property = stable-semantic-identity
@@ -12,6 +18,7 @@ property = explicit-authority
 property = explicit-effects
 property = explicit-regeneration
 property = mandatory-human-contract-if-interactive
+property = cognition-cannot-self-authorize
 ::end
 
 ::ambient
@@ -36,6 +43,9 @@ trusted = validated-with-provenance
 rule = effect requires declaration and matching capability
 rule = authority may narrow-transfer-consume-expire-revoke
 rule = authority never self-widens
+rule = cognition-cannot-mint-authority
+rule = cognition-cannot-lower-security-floor
+rule = no-code-can-disable-accessibility-obligation
 ::end
 
 ::human
@@ -47,8 +57,9 @@ rule = visual is never source-of-truth
 ::end
 
 ::proof
-A = grammar + ownership + authority + regeneration + human-completeness
-B = positive-execution + negative-rejection + deterministic-output + hostile-input
-without-A+B = UNPROVEN
-accessibility-opt-out = forbidden
+A = structural
+B = behavioral-independent
+C = patent-prior-art-claim-review
+D = code-origin-provenance
+without-required-proof = UNPROVEN
 ::end

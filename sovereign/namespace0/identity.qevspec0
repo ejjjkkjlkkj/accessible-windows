@@ -1,0 +1,25 @@
+QEVARYNOX_SPEC_0
+kind = namespace-identity
+identity = QEVARYNOX
+generation = 0
+status = SCREENED-NOT-LEGAL-CLEARANCE
+created = 2026-09-18
+
+::screening
+web-exact = no-result-observed
+github-exact = no-result-observed
+google-patents-name-exact = no-result-observed
+INPI-name-exact = no-result-observed
+EUIPO-name-exact = no-result-observed
+WIPO-name-exact = no-result-observed
+meaning = screening-only-not-worldwide-clearance
+::end
+
+::retired-identifiers
+identifier = AW0
+identifier = AWL0
+identifier = A11Y0
+identifier = awlink0
+reason = public-collision-detected
+rule = forbidden-in-active-sovereign-tree
+::end

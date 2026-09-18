@@ -1,20 +1,17 @@
-# Sovereign Accessible OS
+# Qevarynox Sovereign OS
 
-The active `sovereign/` tree uses project-owned AW0 artifact formats.
+The active `sovereign/` tree is the Qevarynox generation-zero software lineage.
 
-Current sovereign extensions:
-- `.awsource0`
-- `.awobject0`
-- `.awspec0`
-- `.awmanifest0`
-- `.awhash0`
-- `.awa11y0`
-- `.awformats0`
-- `.awtools0`
-- reserved: `.awproof0`, `.awseed0`, `.awimage0`, `.awpackage0`
+It is intentionally not based on another OS, kernel, compiler framework, language runtime, accessibility framework, AI framework, office suite or security product.
 
-Our language, tool names, file formats and extensions are defined inside the project.
+Qevarynox defines its own native language, source/object/image formats, toolchain identities, accessibility semantics, authority model, regeneration model, cognition/memory architecture and product-completeness catalog.
 
-Files under `.github/` are external CI witness configuration, not sovereign OS/toolchain artifacts.
+External CPU/device/firmware specifications and public standards are machine boundaries only. External CI is a temporary witness only.
 
-Accessibility A+B is mandatory for every sovereign artifact. Missing evidence stays `UNPROVEN`.
+Proof classes:
+- A: structural
+- B: independent behavioral/adversarial
+- C: patent/prior-art claim review
+- D: code-origin provenance
+
+Missing required evidence is `UNPROVEN`.

@@ -1,6 +1,6 @@
-AW0SRC00
-cell FoundationProbe {
-    identity semantic.foundation.probe
+QEVARYNOX_SRC_0
+cell QevarynoxOriginCell0 {
+    identity semantic.qevarynox.origin.probe
     generation system.current
 
     authority {
@@ -8,6 +8,8 @@ cell FoundationProbe {
         deny kernel.authority
         deny genome.mutate
         deny capability.mint
+        deny security.floor.lower
+        deny accessibility.disable
     }
 
     memory {
@@ -16,18 +18,23 @@ cell FoundationProbe {
     }
 
     human {
-        semantic tool.foundation.probe
+        semantic qevarynox.origin.probe
         path keyboard | speech | braille
     }
 
     proof accessibility {
-        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        invariant QEVARYNOX.ACCESS.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
         evidence A structural
         evidence B required
     }
 
+    proof origin {
+        evidence D repository-origin
+        external-source none
+    }
+
     flow inspect(input : untrusted<bytes>) -> trusted<semantic.record> {
         effects validate(input) | use(semantic.emit)
-        body validate_then_emit(input)
+        body qevarynox_validate_then_emit(input)
     }
 }

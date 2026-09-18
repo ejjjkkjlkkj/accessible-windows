@@ -1,6 +1,6 @@
-AW0SRC00
-cell AwBuild0 {
-    identity tool.awbuild0
+QEVARYNOX_SRC_0
+cell QevarynoxBuildTool0 {
+    identity tool.qevbuild0
     generation system.current
 
     authority {
@@ -10,6 +10,8 @@ cell AwBuild0 {
         deny kernel.authority
         deny genome.mutate
         deny capability.mint
+        deny security.floor.lower
+        deny accessibility.disable
     }
 
     memory {
@@ -18,18 +20,23 @@ cell AwBuild0 {
     }
 
     human {
-        semantic tool.awbuild0
+        semantic tool.qevbuild0
         path keyboard | speech | braille
     }
 
     proof accessibility {
-        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        invariant QEVARYNOX.ACCESS.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
         evidence A structural
         evidence B required
     }
 
+    proof origin {
+        evidence D repository-origin
+        external-source none
+    }
+
     flow build(input : untrusted<manifest.record>) -> trusted<artifact.graph> {
-        effects validate(input) | use(manifest.read) | use(proof.read) | use(artifact.emit)
-        body execute_deterministic_verified_graph(input)
+        effects validate(input)
+        body qevarynox_execute_deterministic_verified_graph(input)
     }
 }
