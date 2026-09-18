@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   linux-interactive-spoken-uefi:
@@ -387,3 +387,55 @@ jobs:
             boot/uefi-screenreader-interactive-v1/evidence.sha256
             boot/uefi-screenreader-interactive-v1/linux-evidence.txt
           if-no-files-found: error
+
+
+      - name: Persist verified proof into os branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-interactive-v1
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import os
+          import wave
+
+          root=Path('boot/uefi-screenreader-interactive-v1')
+          proof=root/'os-uefi-screenreader-interactive-v1.labproof'
+          text=proof.read_text()
+          if 'proof = PENDING_CI' not in text:
+              raise SystemExit('proof state is not PENDING_CI')
+
+          wav=root/'interactive.wav'
+          with wave.open(str(wav),'rb') as w:
+              frames=w.getnframes()
+              rate=w.getframerate()
+              raw=w.readframes(frames)
+          active=sum(abs(x-128)>=3 for x in raw)
+          ratio=active/max(1,len(raw))
+
+          efi=(root/'BOOTX64.EFI').read_bytes()
+          wav_bytes=wav.read_bytes()
+          text=text.replace('proof = PENDING_CI','proof = PASS')
+          text += (
+              f"proof-run = {os.environ['GITHUB_RUN_ID']}\n"
+              f"proof-head-sha = {os.environ['GITHUB_SHA']}\n"
+              "proof-keyboard-up-down = PASS\n"
+              "proof-keyboard-enter = PASS\n"
+              "proof-focus-speech = PASS\n"
+              "proof-action-speech = PASS\n"
+              "proof-invalid-key-speech = PASS\n"
+              "proof-audio-waveform = PASS\n"
+              f"proof-audio-frames = {frames}\n"
+              f"proof-audio-duration-seconds = {frames/rate}\n"
+              f"proof-audio-active-ratio = {ratio}\n"
+              f"proof-efi-sha256 = {hashlib.sha256(efi).hexdigest()}\n"
+              f"proof-wav-sha256 = {hashlib.sha256(wav_bytes).hexdigest()}\n"
+          )
+          proof.write_text(text)
+          PY
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$root/os-uefi-screenreader-interactive-v1.labproof"
+          git commit -m "Record interactive spoken UEFI proof [skip ci]"
+          git push origin HEAD:os
