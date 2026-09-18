@@ -88,6 +88,10 @@ jobs:
               "SELECTED_OPTION_CHILD_MATCH=PASS",
               "SELECTED_OPTION_CURRENT_MATCH=PASS",
               "CONFIG_ROUTING_EXPORT_CONFIG=PASS",
+              "c.label('read_buffer_current')",
+              "c.emit(b'\\x48\\x83\\xec\\x28')",
+              "c.emit(b'\\x31\\xc0\\x48\\x83\\xc4\\x28\\xc3')",
+              "c.emit(b'\\xb8\\x01\\x00\\x00\\x00\\x48\\x83\\xc4\\x28\\xc3')",
               "VARSTORE_NAME_CONFIG_MATCH=PASS",
               "CONFIG_TO_BLOCK=PASS",
               "CURRENT_VALUE_READ=PASS",
@@ -100,6 +104,7 @@ jobs:
           proof=set((root/'os-uefi-hii-selected-option-v1.labproof').read_text().splitlines())
           for line in [
               'selected-option-label-resolution = not-established-in-this-stage',
+              'nested-uefi-call-abi = Microsoft x64 helper reserves 32-byte shadow space plus 8-byte alignment before nested UEFI protocol and Boot Services calls',
               'selected-option-speech = not-established-in-this-stage',
               'route-config-call = forbidden',
               'runtime-variable-read = forbidden',
