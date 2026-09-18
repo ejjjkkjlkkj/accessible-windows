@@ -19,16 +19,23 @@ def put(buf: bytearray, off: int, fmt: str, *values: int) -> None:
     struct.pack_into(fmt, buf, off, *values)
 
 def build_code() -> bytes:
+    # Direct nonvisual COM1 witness. No firmware console protocol, runtime,
+    # assembler, compiler, linker, UIA, or screen reader is involved.
     code = bytearray()
-    # DX = QEMU isa-debugcon port 0xE9.
-    code += b"\x66\xBA\xE9\x00"
-    for value in MARKER:
-        code += b"\xB0" + bytes([value]) + b"\xEE"  # mov al,imm8 ; out dx,al
-    # QEMU isa-debug-exit port 0xF4, value 0x10 => host status 33.
-    code += b"\x66\xBA\xF4\x00"
-    code += b"\xB8\x10\x00\x00\x00"
-    code += b"\xEF"  # out dx,eax
-    code += b"\x31\xC0\xC3"  # EFI_SUCCESS fallback: xor eax,eax ; ret
+    data_offset = 43
+    code += b"\x4c\x8d\x15" + struct.pack("<i", data_offset - 7)  # lea r10,[rip+marker]
+    code += b"\xb9" + struct.pack("<I", len(MARKER))               # mov ecx,len
+    code += b"\x66\xba\xfd\x03"                                 # dx=COM1 LSR
+    code += b"\xec\xa8\x20\x74\xfb"                             # wait THR empty
+    code += b"\x66\xba\xf8\x03"                                 # dx=COM1 THR
+    code += b"\x41\x8a\x02\xee"                                 # al=[r10]; out dx,al
+    code += b"\x49\xff\xc2"                                      # inc r10
+    code += b"\x66\xba\xfd\x03"                                 # dx=COM1 LSR
+    code += b"\xff\xc9\x75\xe8"                                 # dec ecx; loop
+    code += b"\xf4\xeb\xfd"                                      # halt loop
+    if len(code) != data_offset:
+        raise SystemExit("seed code layout mismatch")
+    code += MARKER
     return bytes(code)
 
 def build_image() -> bytes:
