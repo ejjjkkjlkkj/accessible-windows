@@ -14,6 +14,11 @@ MARKS={
  'first_handle': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_FIRST_HANDLE_NONZERO=PASS\r\nEND\r\n',
  'static_empty': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_BUFFER_NOT_WRITTEN\r\nEND\r\n',
  'handle_export': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_HANDLE_EXPORT=PASS\r\nEND\r\n',
+ 'export_size_ok': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_HANDLE_EXPORT_SIZE=PASS\r\nEND\r\n',
+ 'export_size_invalid': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_HANDLE_EXPORT_SIZE=EFI_INVALID_PARAMETER\r\nEND\r\n',
+ 'export_size_not_found': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_HANDLE_EXPORT_SIZE=EFI_NOT_FOUND\r\nEND\r\n',
+ 'export_fetch_invalid': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_HANDLE_EXPORT_FETCH=EFI_INVALID_PARAMETER\r\nEND\r\n',
+ 'export_fetch_not_found': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_HANDLE_EXPORT_FETCH=EFI_NOT_FOUND\r\nEND\r\n',
  'forms_package_seen': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_FORMS_PACKAGE_IN_SELECTED_HANDLE=PASS\r\nEND\r\n',
  'ifr': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nIFR_TITLE_STRING_ID=PASS\r\nEND\r\n',
  'language': b'QEVARYNOX-UEFI-HII-TITLE-V1\r\nHII_LANGUAGE=PASS\r\nEND\r\n',
@@ -156,15 +161,30 @@ def build():
  c.emit(b'\x4c\x89\xe1\x4c\x89\xf2')
  c.lea_r8_data(L['pkg_size']); c.emit(b'\x45\x31\xc9')
  c.emit(b'\x41\xff\x54\x24\x20')
+ c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x84','export_size_status_ok')
+ c.emit(b'\x83\xf8\x05'); c.rel32(b'\x0f\x84','export_size_status_ok')
+ c.emit(b'\x83\xf8\x02'); c.rel32(b'\x0f\x84','export_size_bad_invalid')
+ c.emit(b'\x83\xf8\x0e'); c.rel32(b'\x0f\x84','export_size_bad_not_found')
+ c.rel32(b'\xe9','handle_loop')
+ c.label('export_size_bad_invalid'); serial('export_size_invalid'); c.rel32(b'\xe9','handle_loop')
+ c.label('export_size_bad_not_found'); serial('export_size_not_found'); c.rel32(b'\xe9','handle_loop')
+ c.label('export_size_status_ok')
  c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x8b\x1a')
  c.emit(b'\x48\x83\xfb\x18'); c.rel32(b'\x0f\x82','handle_loop')
+ serial('export_size_ok')
  alloc(True,L['pkg_ptr'])
 
  c.emit(b'\x4c\x89\xe1\x4c\x89\xf2')
  c.lea_r8_data(L['pkg_size'])
  c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x4c\x8b\x0a')
  c.emit(b'\x41\xff\x54\x24\x20')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','handle_loop')
+ c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x84','export_fetch_ok')
+ c.emit(b'\x83\xf8\x02'); c.rel32(b'\x0f\x84','export_fetch_bad_invalid')
+ c.emit(b'\x83\xf8\x0e'); c.rel32(b'\x0f\x84','export_fetch_bad_not_found')
+ c.rel32(b'\xe9','handle_loop')
+ c.label('export_fetch_bad_invalid'); serial('export_fetch_invalid'); c.rel32(b'\xe9','handle_loop')
+ c.label('export_fetch_bad_not_found'); serial('export_fetch_not_found'); c.rel32(b'\xe9','handle_loop')
+ c.label('export_fetch_ok')
  serial('handle_export')
 
  # Verify that this exact HII handle owns a Forms package.
