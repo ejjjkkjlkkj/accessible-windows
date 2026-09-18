@@ -541,3 +541,111 @@ jobs:
           $rc=[QevEmit0Witness]::Run($code)
           if ($rc -ne 0) { throw "emit0 witness failed rc=$rc" }
           'QEVARYNOX_EMIT0_RUNTIME_B_WINDOWS=PASS'
+
+
+  bootstrap-chain0-A:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify native generation constants map exactly to canonical pulse
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '\x48\xb8\x51\x45\x56\x41\x52\x59\x4e\x58\xc3' > /tmp/pulse-from-chain-constants.bin
+          cmp -n 11 -s /tmp/pulse-from-chain-constants.bin sovereign/seed0/pulse-x86_64.qevseed0
+          grep -q '^A = PASS$' sovereign/seed0/emit0-x86_64.qevproof0
+          grep -q '^B = PASS$' sovereign/seed0/emit0-x86_64.qevproof0
+          grep -q '^A = PASS$' sovereign/seed0/pulse-x86_64.qevproof0
+          grep -q '^B = PASS$' sovereign/seed0/pulse-x86_64.qevproof0
+          grep -q '^A = PASS$' sovereign/seed0/bootstrap-chain0.qevproof0
+          grep -q '^human-path = none$' sovereign/seed0/bootstrap-chain0.qevproof0
+
+  bootstrap-chain0-B-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: emit0 generates canonical pulse and generated pulse executes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/qev_chain0_witness.c <<'EOF'
+          #include <stdint.h>
+          #include <stdio.h>
+          #include <string.h>
+          #include <sys/mman.h>
+          typedef unsigned char* (*emit_fn)(unsigned char*, uint64_t);
+          typedef uint64_t (*pulse_fn)(void);
+          static int read_exact(const char *path, unsigned char *dst, size_t n) {
+              FILE *f=fopen(path,"rb"); if(!f) return 1;
+              size_t r=fread(dst,1,n,f); int extra=fgetc(f); fclose(f);
+              return (r==n && extra==EOF)?0:2;
+          }
+          int main(void) {
+              unsigned char emitcode[33], canonical[11];
+              if(read_exact("sovereign/seed0/emit0-x86_64.qevseed0",emitcode,33)) return 10;
+              if(read_exact("sovereign/seed0/pulse-x86_64.qevseed0",canonical,11)) return 11;
+              void *em = mmap(NULL,33,PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+              void *gm = mmap(NULL,16,PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+              if(em==MAP_FAILED || gm==MAP_FAILED) return 12;
+              memcpy(em,emitcode,33);
+              memset(gm,0xA5,16);
+              emit_fn emit=(emit_fn)em;
+              unsigned char *p=(unsigned char*)gm;
+              p=emit(p,UINT64_C(0x595241564551B848));
+              p=emit(p,UINT64_C(0x0000000000C3584E));
+              if(p!=(unsigned char*)gm+16) return 13;
+              if(memcmp(gm,canonical,11)!=0) return 14;
+              pulse_fn pulse=(pulse_fn)gm;
+              uint64_t v=pulse();
+              if(v!=UINT64_C(0x584E595241564551)) return 15;
+              puts("QEVARYNOX_BOOTSTRAP_CHAIN0_B_LINUX=PASS");
+              return 0;
+          }
+          EOF
+          cc -O2 -Wall -Wextra -o /tmp/qev_chain0_witness /tmp/qev_chain0_witness.c
+          /tmp/qev_chain0_witness
+
+  bootstrap-chain0-B-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - name: emit0 generates canonical pulse and generated pulse executes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $src=@'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class QevChain0Witness {
+              [DllImport("kernel32.dll", SetLastError=true)]
+              static extern IntPtr VirtualAlloc(IntPtr a, UIntPtr s, uint t, uint p);
+              [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+              delegate IntPtr Emit(IntPtr dst, ulong value);
+              [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+              delegate ulong Pulse();
+              public static long Run(byte[] emitCode, byte[] canonical) {
+                  IntPtr em=VirtualAlloc(IntPtr.Zero,(UIntPtr)emitCode.Length,0x3000,0x40);
+                  IntPtr gm=VirtualAlloc(IntPtr.Zero,(UIntPtr)16,0x3000,0x40);
+                  if(em==IntPtr.Zero || gm==IntPtr.Zero) return 10;
+                  Marshal.Copy(emitCode,0,em,emitCode.Length);
+                  for(int i=0;i<16;i++) Marshal.WriteByte(gm,i,0xA5);
+                  Emit emit=Marshal.GetDelegateForFunctionPointer<Emit>(IntPtr.Add(em,11));
+                  IntPtr p=emit(gm,0x595241564551B848UL);
+                  p=emit(p,0x0000000000C3584EUL);
+                  if(p!=IntPtr.Add(gm,16)) return 11;
+                  byte[] made=new byte[11];
+                  Marshal.Copy(gm,made,0,11);
+                  for(int i=0;i<11;i++) if(made[i]!=canonical[i]) return 12;
+                  Pulse pulse=Marshal.GetDelegateForFunctionPointer<Pulse>(gm);
+                  ulong v=pulse();
+                  if(v!=0x584E595241564551UL) return 13;
+                  return 0;
+              }
+          }
+          '@
+          Add-Type -TypeDefinition $src
+          [byte[]]$emit=[IO.File]::ReadAllBytes('sovereign/seed0/emit0-x86_64.qevseed0')
+          [byte[]]$pulse=[IO.File]::ReadAllBytes('sovereign/seed0/pulse-x86_64.qevseed0')
+          $rc=[QevChain0Witness]::Run($emit,$pulse)
+          if($rc -ne 0){throw "bootstrap-chain0 failed rc=$rc"}
+          'QEVARYNOX_BOOTSTRAP_CHAIN0_B_WINDOWS=PASS'
