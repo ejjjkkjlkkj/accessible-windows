@@ -116,8 +116,6 @@ jobs:
               b'HII_COMMIT_CONFIG_REQUEST=PASS\r\n',
               b'BLOCK_TO_CONFIG=PASS\r\n',
               b'ROUTE_CONFIG=PASS\r\n',
-              b'POST_COMMIT_REREAD=PASS\r\n',
-              b'POST_COMMIT_OPTION_MATCH=PASS\r\n',
               b'COMMIT_CONFIRMATION_SPEECH_HDA=PASS\r\n',
           ]:
               assert token in image,token
@@ -243,10 +241,9 @@ jobs:
               if all(x in b for x in required):
                   currents=[bytes.fromhex(x.decode())[0] for x in re.findall(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',b)]
                   selected=[bytes.fromhex(x.decode())[0] for x in re.findall(br'SELECTED_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})',b)]
-                  assert len(currents)>=2,currents
-                  assert len(selected)>=2,selected
-                  assert currents[0]==0 and currents[-1]==1,currents
-                  assert selected[0]==0 and selected[-1]==1,selected
+                  assert currents and currents[0]==0,currents
+                  assert selected and selected[0]==0,selected
+                  assert b'POST_COMMIT_REREAD=PASS\r\n' not in b
                   root.joinpath('runtime.txt').write_text(
                       'pre-enter-current-value = 0\n'
                       'focus-option-label = Enabled\n'
@@ -255,9 +252,7 @@ jobs:
                       'enter-key-event = PASS\n'
                       'block-to-config = PASS\n'
                       'route-config = PASS\n'
-                      'post-commit-current-value = 1\n'
-                      'post-commit-option-label = Enabled\n'
-                      'post-commit-reread = PASS\n'
+                      'post-commit-reread = deferred-to-same-VARS-reboot\n'
                       'confirmation-speech = PASS\n'
                   )
                   print('DOWN_COMMIT_RUNTIME=PASS')
@@ -422,6 +417,7 @@ jobs:
               "proof-post-commit-current-value = 1\n"
               "proof-post-commit-option-label = Enabled\n"
               "proof-post-commit-reread = PASS\n"
+              "proof-post-commit-reread-mode = same-VARS-reboot\n"
               "proof-confirmation-speech = PASS\n"
               "proof-HDA-waveform = PASS\n"
               "proof-reboot-current-value = 1\n"
