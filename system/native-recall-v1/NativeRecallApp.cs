@@ -5,6 +5,40 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
+public sealed class NativeRecallButton : Button
+{
+    public event EventHandler RecallLeft;
+    public event EventHandler RecallRight;
+
+    protected override bool IsInputKey(Keys keyData)
+    {
+        Keys code = keyData & Keys.KeyCode;
+        if (code == Keys.Left || code == Keys.Right) return true;
+        return base.IsInputKey(keyData);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.Left)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            var handler = RecallLeft;
+            if (handler != null) handler(this, EventArgs.Empty);
+            return;
+        }
+        if (e.KeyCode == Keys.Right)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            var handler = RecallRight;
+            if (handler != null) handler(this, EventArgs.Empty);
+            return;
+        }
+        base.OnKeyDown(e);
+    }
+}
+
 public sealed class NativeRecallForm : Form
 {
     [DllImport("nvdaControllerClient.dll")]
@@ -23,8 +57,8 @@ public sealed class NativeRecallForm : Form
     private readonly int episodeCount;
     private readonly string tracePath;
     private readonly Label status;
-    private readonly Button previousButton;
-    private readonly Button nextButton;
+    private readonly NativeRecallButton previousButton;
+    private readonly NativeRecallButton nextButton;
     private readonly Button closeButton;
     private int index;
 
@@ -193,7 +227,7 @@ public sealed class NativeRecallForm : Form
         status.AccessibleRole = AccessibleRole.StaticText;
         Controls.Add(status);
 
-        previousButton = new Button();
+        previousButton = new NativeRecallButton();
         previousButton.Text = "Previous episode";
         previousButton.AccessibleName = "Previous native episode";
         previousButton.AccessibleDescription = "Recall the previous native episode";
@@ -202,9 +236,11 @@ public sealed class NativeRecallForm : Form
         previousButton.Size = new Size(220, 46);
         previousButton.TabIndex = 0;
         previousButton.Click += delegate { Previous("assistive-previous"); };
+        previousButton.RecallLeft += delegate { Previous("keyboard-left"); };
+        previousButton.RecallRight += delegate { Next("keyboard-right"); };
         Controls.Add(previousButton);
 
-        nextButton = new Button();
+        nextButton = new NativeRecallButton();
         nextButton.Text = "Next episode";
         nextButton.AccessibleName = "Next native episode";
         nextButton.AccessibleDescription = "Recall the next native episode";
@@ -213,6 +249,8 @@ public sealed class NativeRecallForm : Form
         nextButton.Size = new Size(220, 46);
         nextButton.TabIndex = 1;
         nextButton.Click += delegate { Next("assistive-next"); };
+        nextButton.RecallLeft += delegate { Previous("keyboard-left"); };
+        nextButton.RecallRight += delegate { Next("keyboard-right"); };
         Controls.Add(nextButton);
 
         closeButton = new Button();
