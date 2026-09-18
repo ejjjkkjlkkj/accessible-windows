@@ -1,0 +1,20 @@
+OS-UEFI-HDA-GRAPH-LIVE-V1
+proof = PENDING_CI
+branch = os
+scope = freestanding first-party UEFI HDA graph engine
+language = C
+uefi-framework = none
+edk2 = none
+compiler-role = translation-only
+pci-controller-discovery = runtime
+codec-address-discovery = runtime
+afg-discovery = runtime
+widget-enumeration = runtime
+connection-list-short-form = implemented
+connection-list-long-form = implemented
+connection-list-range-expansion = implemented
+multi-hop-route-engine = implemented
+selector-plan-701h = implemented
+live-QEMU-HDA-graph = pending
+physical-ASUS-M1603QA-topology = not-established
+physical-ASUS-M1603QA-speech = not-established
