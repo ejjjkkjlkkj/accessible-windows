@@ -71,7 +71,7 @@ class Code:
 def put(b,o,f,*v): struct.pack_into(f,b,o,*v)
 
 def build():
- data=bytearray(0x11100)
+ data=bytearray(0x101100)
  L={
   'db_guid':0,'str_guid':16,'dbptr':32,'strptr':40,
   'handles_size':48,'handles_ptr':56,'pkg_size':64,'pkg_ptr':72,
@@ -125,20 +125,19 @@ def build():
  c.emit(b'\x4d\x85\xed'); c.rel32(b'\x0f\x84','fail_protocol')
  serial('string_protocol')
 
- # Export the whole live HII database read-only.  This follows the already
- # proven OS-UEFI-HII-PROBE-V1 path and avoids unstable opaque HII handles.
- zero_qword(L['pkg_size'])
- c.emit(b'\x4c\x89\xe1\x31\xd2')
- c.lea_r8_data(L['pkg_size']); c.emit(b'\x45\x31\xc9')
- c.emit(b'\x41\xff\x54\x24\x20')
- c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x18'); c.rel32(b'\x0f\x82','fail_export')
- alloc(True,L['pkg_ptr'])
+ # Export the whole live HII database read-only in one atomic protocol call.
+ # A bridge-owned 1 MiB buffer avoids the observed OVMF sizing/fetch race.
+ c.lea_rdx_data(L['pkg_size'])
+ c.emit(b'\x48\xc7\x02'+struct.pack('<I',0x100000))
+ c.lea_rax_data(L['pkg_static'])
+ c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x48\x89\x02')
  c.emit(b'\x4c\x89\xe1\x31\xd2')
  c.lea_r8_data(L['pkg_size'])
- c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x4c\x8b\x0a')
+ c.lea_r9_data(L['pkg_static'])
  c.emit(b'\x41\xff\x54\x24\x20')
  c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_export')
+ c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x83\x3a\x18')
+ c.rel32(b'\x0f\x82','fail_export')
  serial('direct_export')
 
  # Parse concatenated EFI_HII_PACKAGE_LIST_HEADER records.  Select one package
