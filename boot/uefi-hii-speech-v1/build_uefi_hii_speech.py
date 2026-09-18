@@ -153,7 +153,7 @@ def build():
  # Preserve all nonvolatile registers touched by the raw EFI entry point.
  c.emit(b'\x53\x55\x56\x57\x41\x54\x41\x55\x41\x56\x41\x57')
  c.emit(b'\x48\x8b\x6a\x30\x4c\x8b\x7a\x60')  # rbp = ConIn, r15 = BootServices
- c.emit(b'\x48\x83\xec\x60\xfc')
+ c.emit(b'\x48\x83\xec\x68\xfc')
  for p,v in ((0x3f9,0),(0x3fb,0x80),(0x3f8,3),(0x3f9,0),(0x3fb,3),(0x3fa,0xc7),(0x3fc,0x0b)):
   c.emit(b'\x66\xba'+struct.pack('<H',p)+b'\xb0'+bytes((v,))+b'\xee')
  def serial(n):
@@ -623,7 +623,7 @@ def build():
  c.label('fail_policy'); serial('policy_fail')
  c.label('return_fail'); c.emit(b'\xb8\x01\x00\x00\x00')
  c.label('return')
- c.emit(b'\x48\x83\xc4\x60\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5f\x5e\x5d\x5b\xc3')
+ c.emit(b'\x48\x83\xc4\x68\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5f\x5e\x5d\x5b\xc3')
 
  # Immediate Command helper, MMIO base r14, command eax.
  c.label('immediate')
