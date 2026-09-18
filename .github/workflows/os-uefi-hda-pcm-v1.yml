@@ -94,6 +94,7 @@ jobs:
           lines=set(Path('boot/uefi-hda-pcm-v1/os-uefi-hda-pcm-v1.labproof').read_text().splitlines())
           required={
               'depends-on = OS-UEFI-HDA-VERB-V1',
+              'depends-on = OS-UEFI-HDA-WIDGET-V1',
               'execution-domain = pre-OS UEFI',
               'operating-system-required = false',
               'external-audio-driver-required = false',
