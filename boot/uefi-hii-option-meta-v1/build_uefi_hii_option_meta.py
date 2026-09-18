@@ -442,8 +442,10 @@ def build():
  serial('meta_done'); c.emit(b'\xc3')
 
  c.label('hex8_emit')
- c.emit(b'\x88\xc3\xc0\xe8\x04'); c.rel32(b'\xe8','hex_nibble_emit')
- c.emit(b'\x88\xd8\x24\x0f'); c.rel32(b'\xe8','hex_nibble_emit'); c.emit(b'\xc3')
+ # Preserve the original byte in volatile r11b; hex_nibble_emit uses bl as its
+ # output-port scratch byte, so bl cannot safely hold the low nibble.
+ c.emit(b'\x41\x88\xc3\xc0\xe8\x04'); c.rel32(b'\xe8','hex_nibble_emit')
+ c.emit(b'\x44\x88\xd8\x24\x0f'); c.rel32(b'\xe8','hex_nibble_emit'); c.emit(b'\xc3')
  c.label('hex_nibble_emit')
  c.emit(b'\x3c\x09'); c.rel32(b'\x0f\x86','hex_digit')
  c.emit(b'\x04\x37'); c.rel32(b'\xe9','hex_char_ready')
