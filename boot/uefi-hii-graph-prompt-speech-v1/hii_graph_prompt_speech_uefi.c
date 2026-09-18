@@ -43,6 +43,7 @@ extern const u8 qev_letter_units[];
 #define WIDGET_VENDOR       0xf
 
 static u8 g_type[MAX_NID];
+static u32 g_widget_cap[MAX_NID];
 static u8 g_conn_count[MAX_NID];
 static u8 g_conn[MAX_NID][MAX_CONN];
 static u8 g_pin_output[MAX_NID];
@@ -54,6 +55,7 @@ static u8 g_route_index[MAX_NID];
 
 static volatile u8 *g_hda;
 static u8 g_cad;
+static u8 g_afg = INVALID_NID;
 static u8 g_controller_preferred;
 static u32 g_codec_vendor_id;
 static stall_fn g_stall;
@@ -261,6 +263,7 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
         g_controller_preferred ? "REALTEK_10EC_0256\r\n" : "GENERIC_RUNTIME\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_GRAPH_SEARCH_LIVE=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_SELECTOR_APPLY_LIVE=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_ROUTE_AMPLIFIERS=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_OUTPUT_PATH_CONFIGURATION=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_PIN_NID=0x"); proof_hex8(proof,sizeof(proof),&n,pin); proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_DAC_NID=0x"); proof_hex8(proof,sizeof(proof),&n,dac); proof_puts(proof,sizeof(proof),&n,"\r\n");
@@ -373,6 +376,7 @@ static void clear_graph(void) {
     u32 i, j;
     for (i = 0; i < MAX_NID; ++i) {
         g_type[i] = 0xff;
+        g_widget_cap[i] = 0;
         g_conn_count[i] = 0;
         g_pin_output[i] = 0;
         g_seen[i] = 0;
@@ -528,16 +532,61 @@ static int apply_route(u8 pin, u8 dac, u8 *applied_out) {
     return 1;
 }
 
+static u32 widget_amp_cap(u8 nid, u8 param) {
+    if (nid >= MAX_NID || g_afg == INVALID_NID) return INVALID_RESP;
+    if (g_widget_cap[nid] & 0x08u) return get_param(nid, param);
+    return get_param(g_afg, param);
+}
+
+static u8 amp_nominal_gain(u32 cap) {
+    u8 offset = (u8)(cap & 0x7fu);
+    u8 steps = (u8)((cap >> 8) & 0x7fu);
+    return offset <= steps ? offset : steps;
+}
+
+static int unmute_output_amp(u8 nid) {
+    if (!(g_widget_cap[nid] & 0x04u)) return 1;
+    u32 cap = widget_amp_cap(nid, 0x12);
+    if (cap == INVALID_RESP) return 0;
+    u8 gain = amp_nominal_gain(cap);
+    if (verb4(nid, 0x3, (u16)(0xb000u | gain)) == INVALID_RESP) return 0;
+    u32 left = verb4(nid, 0xb, 0xa000);
+    u32 right = verb4(nid, 0xb, 0x8000);
+    if (left == INVALID_RESP || right == INVALID_RESP) return 0;
+    if ((left & 0x80u) || (right & 0x80u)) return 0;
+    if ((left & 0x7fu) != gain || (right & 0x7fu) != gain) return 0;
+    return 1;
+}
+
+static int unmute_input_amp(u8 nid, u8 index) {
+    if (!(g_widget_cap[nid] & 0x02u)) return 1;
+    if (index > 0x0fu) return 0;
+    u32 cap = widget_amp_cap(nid, 0x0d);
+    if (cap == INVALID_RESP) return 0;
+    u8 gain = amp_nominal_gain(cap);
+    u16 set_payload = (u16)(0x7000u | ((u16)index << 8) | gain);
+    if (verb4(nid, 0x3, set_payload) == INVALID_RESP) return 0;
+    u32 left = verb4(nid, 0xb, (u16)(0x2000u | index));
+    u32 right = verb4(nid, 0xb, index);
+    if (left == INVALID_RESP || right == INVALID_RESP) return 0;
+    if ((left & 0x80u) || (right & 0x80u)) return 0;
+    if ((left & 0x7fu) != gain || (right & 0x7fu) != gain) return 0;
+    return 1;
+}
+
 static int configure_output_path(u8 pin, u8 dac) {
-    u32 amp_cap = get_param(dac, 0x12);
-    if (amp_cap == INVALID_RESP) return 0;
-    if (amp_cap) {
-        if (verb4(dac, 0x3, 0xb040) == INVALID_RESP) return 0;
-        u32 left = verb4(dac, 0xb, 0xa000);
-        u32 right = verb4(dac, 0xb, 0x8000);
-        if (left == INVALID_RESP || right == INVALID_RESP) return 0;
-        if ((left & 0x7f) != 0x40 || (right & 0x7f) != 0x40) return 0;
+    /* Unmute every amplifier actually traversed by the discovered route.
+       Widgets without Amp Parameter Override inherit the AFG capabilities. */
+    u8 cur = dac;
+    for (;;) {
+        if (!unmute_output_amp(cur)) return 0;
+        if (cur == pin) break;
+        u8 child = g_parent[cur];
+        if (child == INVALID_NID) return 0;
+        if (!unmute_input_amp(child, g_route_index[cur])) return 0;
+        cur = child;
     }
+    marker("HDA_ROUTE_AMPLIFIERS=PASS");
 
     u32 pin_cap = get_param(pin, 0x0c);
     if (pin_cap == INVALID_RESP) return 0;
@@ -929,6 +978,7 @@ static int discover_live_graph(u8 *pin_out, u8 *dac_out, u8 *selectors_out) {
         }
     }
     if (afg == INVALID_NID) return 0;
+    g_afg = afg;
     marker("HDA_AFG_RUNTIME=PASS");
 
     u32 widget_nodes = get_param(afg, 0x04);
@@ -941,6 +991,7 @@ static int discover_live_graph(u8 *pin_out, u8 *dac_out, u8 *selectors_out) {
         u8 nid = (u8)n;
         u32 cap = get_param(nid, 0x09);
         if (cap == INVALID_RESP) return 0;
+        g_widget_cap[nid] = cap;
         u8 type = (u8)((cap >> 20) & 0x0f);
         g_type[nid] = type;
         if (type == WIDGET_PIN) {
