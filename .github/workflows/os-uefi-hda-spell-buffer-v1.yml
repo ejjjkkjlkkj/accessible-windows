@@ -89,6 +89,7 @@ jobs:
               "c.emit(b'\\xff\\xc7')",
               'BDL_RUNTIME_SPELL_SCHEDULE=PASS',
               'RUNTIME_SPELL_HDA=PASS',
+              'FINAL_BDL_IOC=PASS',
               'NO_FIXED_WIDGET_NIDS=PASS',
               'PIN_CAPABILITIES_QUERY=PASS',
               'EAPD_IF_SUPPORTED=PASS',
@@ -107,6 +108,7 @@ jobs:
               'natural-language-grapheme-to-phoneme = not-established',
               'arbitrary-text-TTS = not-established',
               'physical-ASUS-HDA-speech = not-established',
+              'required-runtime-final-BDL-IOC = true',
           ]:
               assert line in proof,line
           print('SPELL_BUFFER_SOURCE_CONTRACT=PASS')
@@ -161,6 +163,7 @@ jobs:
               b'SPELL_BUFFER=PASS\r\n',
               b'BDL_RUNTIME_SPELL_SCHEDULE=PASS\r\n',
               b'RUNTIME_SPELL_HDA=PASS\r\n',
+              b'FINAL_BDL_IOC=PASS\r\n',
               b'AFG_RUNTIME_DISCOVERY=PASS\r\n',
               b'NO_FIXED_WIDGET_NIDS=PASS\r\n',
               b'PIN_CAPABILITIES_QUERY=PASS\r\n',
@@ -288,6 +291,7 @@ jobs:
               b'SPELL_BUFFER=PASS\r\n',
               b'BDL_RUNTIME_SPELL_SCHEDULE=PASS\r\n',
               b'LPIB_PROGRESS=PASS\r\n',
+              b'FINAL_BDL_IOC=PASS\r\n',
               b'RUNTIME_SPELL_HDA=PASS\r\n',
               b'STATUS=PASS\r\n',
           ]
@@ -377,6 +381,7 @@ jobs:
           output-policy = PASS
           EAPD-if-supported = PASS
           distinct-HDA-waveforms = PASS
+          final-BDL-IOC = PASS
           full-letter-name-pcm-assets = 0
           natural-language-G2P = not-established
           physical-ASUS-HDA-speech = not-established
@@ -459,6 +464,7 @@ jobs:
               "proof-UTF16-buffer = PASS\n"
               "proof-dynamic-BDL-letter-expansion = PASS\n"
               "proof-runtime-HDA-output = PASS\n"
+              "proof-final-BDL-IOC = PASS\n"
               "proof-distinct-waveforms = PASS\n"
               "proof-EAPD-if-supported = PASS\n"
               "proof-widget-NIDs-hardcoded = false\n"
