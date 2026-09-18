@@ -2,6 +2,7 @@ OS-UEFI-HII-CURRENT-OPTION-V1
 role = integrated native pre-OS read-only resolution from a live Buffer-Storage ONE_OF question to the text of the currently selected direct EFI_IFR_ONE_OF_OPTION
 system-foundation = true
 depends-on = OS-UEFI-HII-SELECTED-OPTION-V1
+depends-on = OS-UEFI-HII-OPTION-VALUE-V1
 depends-on = OS-UEFI-HII-ISCSI-FIXTURE-V1
 execution-domain = pre-OS UEFI
 artifact-format = PE32+ EFI application
@@ -22,6 +23,7 @@ option-string-id-source = matching live EFI_IFR_ONE_OF_OPTION in that same Forms
 option-text-source = live Strings package belonging to the same HII package-list namespace as the matched Forms package
 string-decoder = native direct EFI HII SCSU and UCS2 string-block decoder
 scope-policy = scan only the scope opened by the exact live ONE_OF; nested scopes are tracked and excluded from direct-child selection
+parent-one-of-scope-required = true
 numeric-option-layout = fixed prefix 6 bytes plus typed Value width 1 2 4 or 8 bytes
 numeric-option-lengths = 7 8 10 14 bytes for UINT8 UINT16 UINT32 UINT64
 match-policy = direct option width must equal live current-value width and every typed value byte must match
