@@ -1,0 +1,27 @@
+OS-UEFI-HII-OPTION-META-V1
+role = native pre-OS read-only metadata extraction from a live EFI_IFR_ONE_OF_OPTION opcode
+system-foundation = true
+depends-on = OS-UEFI-HII-OPTION-V1
+execution-domain = pre-OS UEFI
+artifact-format = PE32+ EFI application
+architecture = x86-64
+operating-system-required = false
+external-screen-reader-required = false
+external-accessibility-api-required = false
+IFR-option-opcode = 0x09 EFI_IFR_ONE_OF_OPTION
+option-label-resolution = required
+metadata-flags-offset = opcode plus 4
+metadata-type-offset = opcode plus 5
+metadata-value-offset = opcode plus 6
+metadata-value-capture = first min(opcode-length-minus-6,8) inline bytes, zero-padded to 8 bytes
+metadata-output = serial hexadecimal
+typed-value-semantics = not-established-in-this-stage
+nested-EFI_IFR_VALUE-for-type-other = not-established
+question-current-value-resolution = not-established
+varstore-read = forbidden-in-this-stage
+varstore-write = forbidden
+firmware-setting-mutation = forbidden
+claim = success establishes the Flags Type and inline raw value bytes physically encoded in the same live EFI_IFR_ONE_OF_OPTION whose label was resolved
+claim = success does not establish current selection VarStore state nested OTHER value semantics or any configuration mutation
+proof = PENDING_CI
+revalidation-request = 2026-09-18T22:08+02:00
