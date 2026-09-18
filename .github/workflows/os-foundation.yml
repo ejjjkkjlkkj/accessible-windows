@@ -58,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           find sovereign -type f | sort > /tmp/active
-          tail -n +3 sovereign/a11y0/registry.awa11y0 | cut -d'|' -f1 | sort > /tmp/registered
+          awk -F'|' 'index($0,"|")>0 && $0 !~ /^#/ {print $1}' sovereign/a11y0/registry.awa11y0 | sort > /tmp/registered
           diff -u /tmp/active /tmp/registered
           test "$(sort /tmp/registered | uniq -d | wc -l)" -eq 0
           grep -q '^AW0SRC00' sovereign/lang0/foundation.awsource0
