@@ -42,4 +42,14 @@ physical-ASUS-HDA-playback = not-established
 secure-boot = not-established
 claim = success establishes native UEFI HDA stream-descriptor DMA carrying non-silent PCM through the QEMU HDA codec into an external WAV witness
 claim = success does not establish generic physical-codec routing laptop-speaker output native text-to-speech or Secure Boot compatibility
-proof = PENDING_CI
+proof = PASS
+proof-run = 35379299227
+proof-head-sha = e6880095e0a4728aaac8c5c85871943dda954bc3
+proof-stream-descriptor-DMA = PASS
+proof-BDL = PASS
+proof-LPIB-progress = PASS
+proof-WAV-non-silent = PASS
+proof-wav-metrics = channels=2; sample-width=2; sample-rate=44100; frames=65950; peak=6000; nonzero-samples=131900
+proof-efi-sha256 = de79678ad4a67216c0208c8f02664fedc9b6c557344896f04eeabded25448319
+proof-serial-sha256 = c7949b099659c5b494230bdd2f492c59f1ff85eaadee555e02337265e5f9a078
+proof-wav-sha256 = fdcb415b2938b7ea2f9a73f77596340cfc0ead3f30c642c024da9cca9908abb7
