@@ -9,6 +9,7 @@ operating-system-required = false
 external-screen-reader-required = false
 external-accessibility-api-required = false
 keyboard-protocol = EFI_SIMPLE_TEXT_INPUT_PROTOCOL.ReadKeyStroke
+keyboard-interface-storage = bridge-owned persistent data pointer
 keyboard-command = Unicode R or r
 keyboard-effect = authorize repeat speech of the already resolved current option
 keyboard-setting-mutation = false
