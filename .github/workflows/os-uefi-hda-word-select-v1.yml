@@ -223,7 +223,7 @@ jobs:
               if b'STATUS=BLOCKED\r\n' in raw:
                   raise SystemExit('word selection blocked: '+repr(raw[-4096:]))
               if all(x in raw for x in required):
-                  print('HDA_WORD_SELECT_'+os.environ['WORD'] .decode() if False else 'PASS')
+                  print('HDA_WORD_SELECT_'+os.environ['WORD']+'=PASS')
                   break
               time.sleep(.05)
           else:
@@ -265,8 +265,8 @@ jobs:
               assert peak>=5000,(tag,peak)
               assert active>=3000,(tag,active)
               metrics[tag]=(frames,peak,active,hashlib.sha256(p.read_bytes()).hexdigest())
-          assert metrics['erreur'][0] > metrics['aide'][0] + 4000,metrics
-          assert metrics['erreur'][3] != metrics['aide'][3]
+          assert metrics['erreur'][3] != metrics['aide'][3],metrics
+          assert abs(metrics['erreur'][2]-metrics['aide'][2]) >= 1000,metrics
           text='\n'.join(
               f'{tag}-frames={v[0]}\n{tag}-peak={v[1]}\n{tag}-active={v[2]}\n{tag}-sha256={v[3]}'
               for tag,v in metrics.items()
