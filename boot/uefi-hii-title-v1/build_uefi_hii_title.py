@@ -68,13 +68,13 @@ class Code:
 def put(b,o,f,*v): struct.pack_into(f,b,o,*v)
 
 def build():
- data=bytearray(0x1100)
+ data=bytearray(0x11100)
  L={
   'db_guid':0,'str_guid':16,'dbptr':32,'strptr':40,
   'handles_size':48,'handles_ptr':56,'pkg_size':64,'pkg_ptr':72,
   'langs_size':80,'langs_ptr':88,'string_size':96,'string_ptr':104,
   'token':112,'temp_handle':120,'handle_cursor':128,'handles_remaining':136,
-  'handles_static':0x100,
+  'handles_static':0x100,'pkg_static':0x1100,
  }
  struct.pack_into('<IHH8B',data,L['db_guid'],
   0xef9fc172,0xa1b2,0x4693,0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42)
@@ -156,39 +156,31 @@ def build():
  c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x89\x2a')
  c.emit(b'\x4d\x85\xf6'); c.rel32(b'\x0f\x84','handle_loop')
 
- # Export this handle's package list, first obtaining the required byte count.
- zero_qword(L['pkg_size'])
- c.emit(b'\x4c\x89\xe1\x4c\x89\xf2')
- c.lea_r8_data(L['pkg_size']); c.emit(b'\x45\x31\xc9')
- c.emit(b'\x41\xff\x54\x24\x20')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x84','export_size_status_ok')
- c.emit(b'\x83\xf8\x05'); c.rel32(b'\x0f\x84','export_size_status_ok')
- c.emit(b'\x83\xf8\x02'); c.rel32(b'\x0f\x84','export_size_bad_invalid')
- c.emit(b'\x83\xf8\x0e'); c.rel32(b'\x0f\x84','export_size_bad_not_found')
- c.rel32(b'\xe9','handle_loop')
- c.label('export_size_bad_invalid'); serial('export_size_invalid'); c.rel32(b'\xe9','handle_loop')
- c.label('export_size_bad_not_found'); serial('export_size_not_found'); c.rel32(b'\xe9','handle_loop')
- c.label('export_size_status_ok')
- c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x18'); c.rel32(b'\x0f\x82','handle_loop')
- serial('export_size_ok')
- alloc(True,L['pkg_ptr'])
-
+ # Export this handle atomically into bridge-owned storage.  A previous
+ # size-query/AllocatePool/fetch sequence was proven to lose the handle in
+ # OVMF between calls (second call EFI_NOT_FOUND), so there is no split phase.
+ c.lea_rdx_data(L['pkg_size'])
+ c.emit(b'\x48\xc7\x02'+struct.pack('<I',0x10000))
  c.emit(b'\x4c\x89\xe1\x4c\x89\xf2')
  c.lea_r8_data(L['pkg_size'])
- c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x4c\x8b\x0a')
+ c.lea_r9_data(L['pkg_static'])
  c.emit(b'\x41\xff\x54\x24\x20')
  c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x84','export_fetch_ok')
  c.emit(b'\x83\xf8\x02'); c.rel32(b'\x0f\x84','export_fetch_bad_invalid')
  c.emit(b'\x83\xf8\x0e'); c.rel32(b'\x0f\x84','export_fetch_bad_not_found')
+ c.emit(b'\x83\xf8\x05'); c.rel32(b'\x0f\x84','export_fetch_static_small')
+ c.emit(b'\x83\xf8\x09'); c.rel32(b'\x0f\x84','export_fetch_static_small')
  c.rel32(b'\xe9','handle_loop')
  c.label('export_fetch_bad_invalid'); serial('export_fetch_invalid'); c.rel32(b'\xe9','handle_loop')
  c.label('export_fetch_bad_not_found'); serial('export_fetch_not_found'); c.rel32(b'\xe9','handle_loop')
+ c.label('export_fetch_static_small'); serial('export_size_invalid'); c.rel32(b'\xe9','handle_loop')
  c.label('export_fetch_ok')
+ c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x8b\x1a')
+ c.emit(b'\x48\x83\xfb\x18'); c.rel32(b'\x0f\x82','handle_loop')
  serial('handle_export')
 
  # Verify that this exact HII handle owns a Forms package.
- c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x48\x8b\x32') # rsi=list
+ c.lea_rsi_data(L['pkg_static']) # rsi=list
  c.emit(b'\x8b\x5e\x10\x83\xfb\x18'); c.rel32(b'\x0f\x82','fail_ifr')
  c.emit(b'\x48\x8d\x7e\x14\x83\xeb\x14') # rdi=package, ebx=remaining
  c.label('pkg_loop')
