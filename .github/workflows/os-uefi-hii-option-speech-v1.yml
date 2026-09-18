@@ -388,4 +388,16 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add "$proof"
           git commit -m "Record native UEFI HII option speech proof [skip ci]"
-          git push origin os
+          for attempt in 1 2 3; do
+            if git push origin os; then
+              exit 0
+            fi
+            git fetch origin os
+            if ! git rebase origin/os; then
+              git rebase --abort || true
+              echo HII_OPTION_SPEECH_CONCURRENT_PROOF_UPDATE=SKIP
+              exit 0
+            fi
+          done
+          echo HII_OPTION_SPEECH_PROOF_PUSH=FAIL >&2
+          exit 1
