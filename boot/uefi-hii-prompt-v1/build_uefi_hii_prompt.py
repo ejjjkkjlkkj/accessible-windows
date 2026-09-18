@@ -13,6 +13,7 @@ MARKS={
  'direct_export': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\nEND\r\n',
  'forms_handle': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_FORMS_HANDLE=LEGACY_NOT_USED\r\nEND\r\n',
  'strings_package': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_STRINGS_PACKAGE=PASS\r\nEND\r\n',
+ 'strings_retry': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_STRINGS_PACKAGE_RETRY=PASS\r\nEND\r\n',
  'first_handle': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_FIRST_HANDLE_NONZERO=PASS\r\nEND\r\n',
  'static_empty': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_BUFFER_NOT_WRITTEN\r\nEND\r\n',
  'handle_export': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_HANDLE_EXPORT=PASS\r\nEND\r\n',
@@ -78,6 +79,7 @@ def build():
   'langs_size':80,'langs_ptr':88,'string_size':96,'string_ptr':104,
   'token':112,'temp_handle':120,'handle_cursor':128,'handles_remaining':136,
   'forms_ptr':144,'strings_ptr':152,'list_len':160,'ifr_next_ptr':168,'ifr_next_remaining':176,
+  'strings_first':184,'list_start':192,
   'handles_static':0x100,'pkg_static':0x1100,
  }
  struct.pack_into('<IHH8B',data,L['db_guid'],
@@ -172,6 +174,9 @@ def build():
  c.label('direct_list_done')
  c.lea_rdx_data(L['forms_ptr']); c.emit(b'\x48\x83\x3a\x00'); c.rel32(b'\x0f\x84','direct_list_next')
  c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x83\x3a\x00'); c.rel32(b'\x0f\x84','direct_list_next')
+ c.lea_rdx_data(L['list_start']); c.emit(b'\x48\x89\x32')
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x8b\x02')
+ c.lea_rdx_data(L['strings_first']); c.emit(b'\x48\x89\x02')
  serial('forms_package_seen'); serial('strings_package')
  c.lea_rdx_data(L['forms_ptr']); c.emit(b'\x48\x8b\x3a')
  c.emit(b'\x8b\x07\x89\xc2\x81\xe2\xff\xff\xff\x00')
@@ -209,8 +214,13 @@ def build():
  c.lea_rdx_data(L['ifr_next_ptr']); c.emit(b'\x48\x89\x02')
  c.emit(b'\x44\x89\xd0\x29\xc8')
  c.lea_rdx_data(L['ifr_next_remaining']); c.emit(b'\x89\x02')
+ # Start every Prompt candidate at the first language package; failures can
+ # walk sibling EFI_HII_PACKAGE_STRINGS records in the same package list.
+ c.lea_rdx_data(L['strings_first']); c.emit(b'\x48\x8b\x02')
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x02')
  serial('ifr')
 
+ c.label('resolve_string_package')
  # Resolve the IFR StringId directly inside the selected Strings package.
  # EFI_HII_SIBT_STRING_SCSU=0x10 / STRINGS_SCSU=0x12 and
  # EFI_HII_SIBT_STRING_UCS2=0x14 / STRINGS_UCS2=0x16 are decoded;
@@ -329,7 +339,31 @@ def build():
  c.label('fail_ifr'); serial('ifr_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_language'); serial('lang_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_string')
- # Try the next real IFR prompt before declaring the package unresolvable.
+ # Try every sibling Strings package (typically alternate languages) before
+ # abandoning this Prompt StringId.
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x8b\x32')
+ c.emit(b'\x8b\x06\x25\xff\xff\xff\x00')
+ c.emit(b'\x83\xf8\x04'); c.rel32(b'\x0f\x82','prompt_next')
+ c.emit(b'\x48\x01\xc6')
+ c.lea_rdx_data(L['list_start']); c.emit(b'\x48\x8b\x3a')
+ c.lea_rdx_data(L['list_len']); c.emit(b'\x8b\x02\x48\x01\xc7')
+ c.label('next_strings_scan')
+ c.emit(b'\x48\x8d\x46\x04\x48\x39\xf8'); c.rel32(b'\x0f\x87','prompt_next')
+ c.emit(b'\x8b\x06\x89\xc1\x81\xe1\xff\xff\xff\x00')
+ c.emit(b'\x89\xc2\xc1\xea\x18')
+ c.emit(b'\x83\xf9\x04'); c.rel32(b'\x0f\x82','prompt_next')
+ c.emit(b'\x48\x8d\x04\x0e\x48\x39\xf8'); c.rel32(b'\x0f\x87','prompt_next')
+ c.emit(b'\x83\xfa\x04'); c.rel32(b'\x0f\x84','use_next_strings')
+ c.emit(b'\x81\xfa\xdf\x00\x00\x00'); c.rel32(b'\x0f\x84','prompt_next')
+ c.emit(b'\x48\x89\xc6'); c.rel32(b'\xe9','next_strings_scan')
+ c.label('use_next_strings')
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x89\x32')
+ serial('strings_retry')
+ c.rel32(b'\xe9','resolve_string_package')
+
+ c.label('prompt_next')
+ # No language package resolved this token: continue with the next real IFR
+ # prompt, preserving the firmware statement order.
  c.lea_rdx_data(L['ifr_next_ptr']); c.emit(b'\x4c\x8b\x0a')
  c.lea_rdx_data(L['ifr_next_remaining']); c.emit(b'\x44\x8b\x12')
  c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x83','ifr_loop')
