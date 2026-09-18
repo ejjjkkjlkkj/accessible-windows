@@ -421,8 +421,9 @@ def build():
  c.lea_rax_data(L['selected_option_token']); c.emit(b'\x0f\xb7\x00')
  c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  c.lea_rax_data(L['string_mode']); c.emit(b'\xc6\x00\x01')
- c.lea_rdx_data(L['strings_first']); c.emit(b'\x48\x8b\x02')
- c.lea_rax_data(L['strings_ptr']); c.emit(b'\x48\x89\x10')
+ # Keep strings_ptr on the exact sibling Strings package/language that resolved
+ # the question prompt.  This binds the selected label to the same live
+ # language namespace instead of restarting from an unrelated first package.
  c.rel32(b'\xe9','resolve_string_package')
 
  c.label('selected_scsu_found')
