@@ -32,8 +32,8 @@ physical-ASUS-commit = forbidden-in-this-stage
 claim = success proves DOWN focuses and speaks the next PlatformDxe resolution option, ENTER is required before RouteConfig, PlatformDxe persists the selected resolution through its non-volatile PlatformConfig backend, and a second boot using the exact same isolated VARS reads the committed option
 claim = success does not authorize or establish mutation of the physical ASUS firmware
 proof = PASS
-proof-run = 35401940164
-proof-head-sha = 88fa70654f6ba91f640acbd93814858ff1b7af7d
+proof-run = 35402027842
+proof-head-sha = 7773ed72a4a2cc926caedb1a80ee5caf12d1cf3c
 proof-platform-target = PASS
 proof-down-key-event = PASS
 proof-pre-enter-current-value = 0
@@ -54,8 +54,8 @@ proof-HDA-waveform = PASS
 proof-reboot-persistence = PASS
 proof-isolated-qemu-setting-mutation = true
 proof-physical-ASUS-commit = false
-proof-wave-metrics = frames=37533; peak=13821; active=58372; wav-sha256=07b6be74cc178ad7de0407ebcb58ad8166df6c4adcdda478c8a0fcfc5f91f8ee
-proof-efi-sha256 = 48f8235a1fd58bc2c0dc456ef722d8259fc6dd43a42c9a666f4a8ab84bd3c433
-proof-serial-sha256 = c915f3182c2ea7185de30a60d37e9e60f4f92e5e1597525d85d5464cbc2e8454
-proof-wav-sha256 = 07b6be74cc178ad7de0407ebcb58ad8166df6c4adcdda478c8a0fcfc5f91f8ee
-proof-post-serial-sha256 = 4ef1cecb0cdc06b5179b372b501fe13cfeeda518c3ccdd7b53fb9d8dc1005bc5
+proof-wave-metrics = frames=37503; peak=13821; active=58314; wav-sha256=563091703012f1621d7d7bd88ef47e260e1f12c792974f78bbd356bec84fc2dd
+proof-efi-sha256 = 1b8c498a215a9474c8654a773a582cc85d4a0860ed43ad890e39f9f437c9c894
+proof-serial-sha256 = af21e576d30cc8fb9c1c88d9a90ffecb93c8c79865abc077b4b45b88a0e90795
+proof-wav-sha256 = 563091703012f1621d7d7bd88ef47e260e1f12c792974f78bbd356bec84fc2dd
+proof-post-serial-sha256 = cd916dcfbebda26f279d86f91281acfb5d088b7f7d6bc644103cc50dcd88d0db
