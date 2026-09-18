@@ -58,6 +58,7 @@ MARKS={
  'policy_fail': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nSTATUS=BLOCKED\r\nREASON=OUTPUT_POLICY_FAILED\r\nEND\r\n',
  'spoken_prefix': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nOPTION_SPOKEN_PREFIX=',
  'spoken_prefix_done': b'\r\nOPTION_SPOKEN_PREFIX=PASS\r\nEND\r\n',
+ 'target_match': b'QEVARYNOX-UEFI-HII-OPTION-SPEECH-V1\r\nOPTION_TARGET_PREFIX_MATCH=PASS\r\nEND\r\n',
 }
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -92,6 +93,7 @@ LETTER_UNITS={
 }
 TEXT_UNITS=tuple(sorted({name for sequence in LETTER_UNITS.values() for name in sequence}))
 UNIT_LAYOUT: dict[str, tuple[int,int]] = {}
+TARGET_PREFIX: str | None = None
 
 def load_module(name: str, path: Path):
  spec=importlib.util.spec_from_file_location(name,path)
@@ -158,6 +160,10 @@ def build():
  struct.pack_into('<IHH8B',data,L['db_guid'],0xef9fc172,0xa1b2,0x4693,0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42)
  struct.pack_into('<IHH8B',data,L['str_guid'],0x0fd96974,0x23aa,0x4cdc,0xb9,0xcb,0x98,0xd1,0x77,0x50,0x32,0x2a)
  for n,m in MARKS.items(): L[n]=len(data); data+=m
+ if TARGET_PREFIX is not None:
+  L['target_prefix']=len(data); data+=TARGET_PREFIX.encode('utf-16le')
+ else:
+  L['target_prefix']=0
  L['pcm']=len(data); data+=pcm
 
  c=Code()
@@ -431,6 +437,15 @@ def build():
  c.emit(b'\x85\xff'); c.rel32(b'\x0f\x84','fail_hii_string')
  c.lea_rdx_data(L['textbuf']); c.emit(b'\x89\xf8\x48\x8d\x04\x42\x66\xc7\x00\x00\x00')
  c.lea_rdx_data(L['text_count']); c.emit(b'\x89\x3a')
+ if TARGET_PREFIX is not None:
+  c.emit(b'\x83\xff'+bytes((len(TARGET_PREFIX),)))
+  c.rel32(b'\x0f\x85','option_next')
+  c.lea_rsi_data(L['textbuf']); c.lea_rdx_data(L['target_prefix'])
+  c.emit(b'\xb9'+struct.pack('<I',len(TARGET_PREFIX)))
+  c.label('target_prefix_loop')
+  c.emit(b'\x66\x8b\x06\x66\x3b\x02'); c.rel32(b'\x0f\x85','option_next')
+  c.emit(b'\x48\x83\xc6\x02\x48\x83\xc2\x02\xff\xc9'); c.rel32(b'\x0f\x85','target_prefix_loop')
+  serial('target_match')
  serial('hii')
  serial('spoken_prefix'); c.rel32(b'\xe8','serial_textbuf'); serial('spoken_prefix_done')
 
@@ -787,7 +802,13 @@ def validate(image,pcm):
  for m in MARKS.values(): assert m in image
 
 def main():
- if len(sys.argv)!=2: raise SystemExit('usage: build_uefi_hii_option_speech.py OUTPUT_EFI')
+ global TARGET_PREFIX
+ if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_option_speech.py OUTPUT_EFI [TARGET_PREFIX]')
+ if len(sys.argv)==3:
+  target=sys.argv[2]
+  if not (1<=len(target)<=8) or any(ch<'a' or ch>'z' for ch in target):
+   raise SystemExit('TARGET_PREFIX must be 1..8 lowercase ASCII letters')
+  TARGET_PREFIX=target
  image,pcm=build(); validate(image,pcm)
  p=Path(sys.argv[1]); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(image)
  print('OS_UEFI_HII_OPTION_SPEECH_BUILD=PASS')
@@ -796,6 +817,7 @@ def main():
  print('hii-option-graphemes=a-z')
  print('hii-option-max-spoken-graphemes=8')
  print('full-utterance-pcm-assets=0')
+ print('target-prefix='+(TARGET_PREFIX if TARGET_PREFIX is not None else 'none'))
  print('pcm-bytes='+str(len(pcm)))
  print('pcm-sha256='+hashlib.sha256(pcm).hexdigest())
  print('sha256='+hashlib.sha256(image).hexdigest())
