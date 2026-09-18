@@ -5,6 +5,7 @@ on:
     branches: [os]
     paths:
       - 'system/native-correction-review-v1/NativeCorrectionReviewApp.cs'
+      - 'system/native-correction-review-v1/native-correction-review-v1.labproof'
       - '.github/workflows/system-native-correction-review-v1.yml'
   workflow_dispatch:
 
