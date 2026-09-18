@@ -68,6 +68,7 @@ jobs:
           required=[
               bytes.fromhex('4181fc00000100'),
               bytes.fromhex('48c1e0204909c6'),
+              bytes.fromhex('488dbc0380000000'),
               bytes.fromhex('0f09'),
               bytes.fromhex('c70702001000'),
               bytes.fromhex('66c747121100'),
