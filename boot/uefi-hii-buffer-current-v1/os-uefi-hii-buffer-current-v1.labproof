@@ -11,10 +11,11 @@ external-accessibility-api-required = false
 question-opcode = 0x05 EFI_IFR_ONE_OF
 storage-opcode = 0x24 EFI_IFR_VARSTORE
 storage-kind = Buffer Storage
-storage-read-service = EFI_HII_CONFIG_ACCESS_PROTOCOL.ExtractConfig
-extract-config-request = NULL to request all settings abstracted by the matched driver
-package-driver-binding = ListPackageLists plus per-handle ExportPackageLists exact PackageListGuid and PackageLength match plus GetPackageListHandle
-config-access-binding = BootServices.HandleProtocol on the matched DriverHandle with EFI_HII_CONFIG_ACCESS_PROTOCOL_GUID
+storage-read-service = EFI_HII_CONFIG_ROUTING_PROTOCOL.ExportConfig
+external-caller-routing = required by UEFI; direct EFI_HII_CONFIG_ACCESS_PROTOCOL invocation is not used
+export-scope = entire current HII database
+config-response-selection = UTF-16 GUID= field matched byte-for-byte against the live EFI_IFR_VARSTORE GUID
+config-response-isolation = selected current ConfigResp is temporarily NUL-terminated at the next &GUID= boundary in the allocated ExportConfig copy only
 binary-reconstruction = EFI_HII_CONFIG_ROUTING_PROTOCOL.ConfigToBlock
 question-offset-source = EFI_IFR_QUESTION_HEADER.VarStoreInfo.VarOffset
 question-width-source = EFI_IFR_ONE_OF.Flags and EFI_IFR_NUMERIC_SIZE mask 0x03
@@ -26,6 +27,6 @@ runtime-variable-read = forbidden
 set-variable-call = forbidden
 varstore-write = forbidden
 firmware-setting-mutation = forbidden
-claim = success establishes the live current bytes of a Buffer-Storage-backed ONE_OF question by matching its HII package to the driver ConfigAccess interface, calling ExtractConfig read-only, reconstructing the block with ConfigToBlock, and selecting the field at VarOffset
-claim = success does not call RouteConfig GetVariable SetVariable or modify any HII configuration firmware setting or option selection
+claim = success establishes the live current bytes of a Buffer-Storage-backed ONE_OF question by exporting current configuration through HII Config Routing, matching the live VarStore GUID, reconstructing the selected ConfigResp with ConfigToBlock, and selecting the field at VarOffset
+claim = success does not directly invoke ConfigAccess RouteConfig GetVariable SetVariable or modify any HII configuration firmware setting or option selection
 proof = PENDING_CI
