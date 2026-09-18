@@ -69,10 +69,10 @@ jobs:
           sbsign             --key "$root/db.key"             --cert "$root/db.crt"             --output "$root/BOOTX64-SIGNED.EFI"             "$root/BOOTX64-UNSIGNED.EFI"
           sbverify --list "$root/BOOTX64-SIGNED.EFI" | tee "$root/signature.txt"
           test -s "$root/BOOTX64-SIGNED.EFI"
-          cmp -s "$root/BOOTX64-UNSIGNED.EFI" "$root/BOOTX64-SIGNED.EFI" && {
+          if cmp -s "$root/BOOTX64-UNSIGNED.EFI" "$root/BOOTX64-SIGNED.EFI"; then
             echo 'signed image unexpectedly identical' >&2
             exit 1
-          } || true
+          fi
 
       - name: Resolve Secure Boot OVMF pair
         shell: bash
