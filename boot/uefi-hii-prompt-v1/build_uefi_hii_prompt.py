@@ -10,7 +10,18 @@ MARKS={
  'start': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATE=START\r\nDOMAIN=PRE_OS_UEFI\r\nEND\r\n',
  'database': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_DATABASE_PROTOCOL=PASS\r\nEND\r\n',
  'string_protocol': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_STRING_PROTOCOL=PASS\r\nEND\r\n',
- 'forms_handle': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_FORMS_HANDLE=PASS\r\nEND\r\n',
+ 'direct_export': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_EXPORT_ALL_PACKAGE_LISTS=PASS\r\nEND\r\n',
+ 'forms_handle': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_FORMS_HANDLE=LEGACY_NOT_USED\r\nEND\r\n',
+ 'strings_package': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_STRINGS_PACKAGE=PASS\r\nEND\r\n',
+ 'first_handle': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_FIRST_HANDLE_NONZERO=PASS\r\nEND\r\n',
+ 'static_empty': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_BUFFER_NOT_WRITTEN\r\nEND\r\n',
+ 'handle_export': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_HANDLE_EXPORT=PASS\r\nEND\r\n',
+ 'export_size_ok': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_HANDLE_EXPORT_SIZE=PASS\r\nEND\r\n',
+ 'export_size_invalid': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_HANDLE_EXPORT_SIZE=EFI_INVALID_PARAMETER\r\nEND\r\n',
+ 'export_size_not_found': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_HANDLE_EXPORT_SIZE=EFI_NOT_FOUND\r\nEND\r\n',
+ 'export_fetch_invalid': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_HANDLE_EXPORT_FETCH=EFI_INVALID_PARAMETER\r\nEND\r\n',
+ 'export_fetch_not_found': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_HANDLE_EXPORT_FETCH=EFI_NOT_FOUND\r\nEND\r\n',
+ 'forms_package_seen': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_FORMS_PACKAGE=PASS\r\nEND\r\n',
  'ifr': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nIFR_PROMPT_STRING_ID=PASS\r\nEND\r\n',
  'language': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nHII_LANGUAGE=PASS\r\nEND\r\n',
  'prefix': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nPROMPT_TEXT=',
@@ -20,8 +31,9 @@ MARKS={
  'list_fetch_fail': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_FAILED\r\nEND\r\n',
  'list_fetch_invalid': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_EFI_INVALID_PARAMETER\r\nEND\r\n',
  'list_fetch_not_found': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_EFI_NOT_FOUND\r\nEND\r\n',
+ 'list_fetch_bts_twice': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_FETCH_BUFFER_TOO_SMALL_TWICE\r\nEND\r\n',
  'list_static_small': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_LIST_STATIC_BUFFER_TOO_SMALL\r\nEND\r\n',
- 'no_handle': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_FORMS_HANDLE_NOT_FOUND\r\nEND\r\n',
+ 'no_handle': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_FORMS_AND_STRINGS_PACKAGE_LIST_NOT_FOUND\r\nEND\r\n',
  'alloc': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=POOL_ALLOC_FAILED\r\nEND\r\n',
  'export': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=HII_HANDLE_EXPORT_FAILED\r\nEND\r\n',
  'ifr_fail': b'QEVARYNOX-UEFI-HII-PROMPT-V1\r\nSTATUS=BLOCKED\r\nREASON=IFR_PROMPT_TOKEN_NOT_FOUND\r\nEND\r\n',
@@ -45,6 +57,7 @@ class Code:
  def lea_rax_data(self,off): self.data_disp(b'\x48\x8d\x05',off)
  def lea_rcx_data(self,off): self.data_disp(b'\x48\x8d\x0d',off)
  def lea_rdx_data(self,off): self.data_disp(b'\x48\x8d\x15',off)
+ def lea_rsi_data(self,off): self.data_disp(b'\x48\x8d\x35',off)
  def lea_r8_data(self,off): self.data_disp(b'\x4c\x8d\x05',off)
  def lea_r9_data(self,off): self.data_disp(b'\x4c\x8d\x0d',off)
  def patch(self):
@@ -58,13 +71,14 @@ class Code:
 def put(b,o,f,*v): struct.pack_into(f,b,o,*v)
 
 def build():
- data=bytearray(0x1100)
+ data=bytearray(0x101100)
  L={
   'db_guid':0,'str_guid':16,'dbptr':32,'strptr':40,
   'handles_size':48,'handles_ptr':56,'pkg_size':64,'pkg_ptr':72,
   'langs_size':80,'langs_ptr':88,'string_size':96,'string_ptr':104,
   'token':112,'temp_handle':120,'handle_cursor':128,'handles_remaining':136,
-  'handles_static':0x100,
+  'forms_ptr':144,'strings_ptr':152,'list_len':160,
+  'handles_static':0x100,'pkg_static':0x1100,
  }
  struct.pack_into('<IHH8B',data,L['db_guid'],
   0xef9fc172,0xa1b2,0x4693,0xb3,0x27,0x6d,0x32,0xfc,0x41,0x60,0x42)
@@ -111,156 +125,199 @@ def build():
  c.emit(b'\x4d\x85\xed'); c.rel32(b'\x0f\x84','fail_protocol')
  serial('string_protocol')
 
- # Take one atomic snapshot of every active HII handle into bridge-owned
- # storage. Avoid a sizing/fetch race while firmware HII registrations move.
- c.lea_rdx_data(L['handles_size'])
- c.emit(b'\x48\xc7\x02'+struct.pack('<I',0x1000))
- c.emit(b'\x4c\x89\xe1\xba\x02\x00\x00\x00\x45\x31\xc0')
- c.lea_r9_data(L['handles_size'])
- c.lea_rax_data(L['handles_static']); c.emit(b'\x48\x89\x44\x24\x20')
- c.emit(b'\x41\xff\x54\x24\x18')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x84','list_fetch_ready')
- c.emit(b'\x83\xf8\x02'); c.rel32(b'\x0f\x84','fail_list_fetch_invalid')
- c.emit(b'\x83\xf8\x0e'); c.rel32(b'\x0f\x84','fail_list_fetch_not_found')
- c.emit(b'\x83\xf8\x05'); c.rel32(b'\x0f\x84','fail_list_static_small')
- c.rel32(b'\xe9','fail_list_fetch')
- c.label('list_fetch_ready')
- c.lea_rax_data(L['handles_static'])
- c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x89\x02')
- c.lea_rdx_data(L['handles_size']); c.emit(b'\x48\x8b\x02')
- c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x89\x02')
-
- c.label('handle_loop')
- c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x8b\x2a')
- c.emit(b'\x48\x83\xfd\x08'); c.rel32(b'\x0f\x82','fail_no_handle')
- c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x8b\x32')
- c.emit(b'\x4c\x8b\x36')
- c.emit(b'\x48\x83\xc6\x08\x48\x83\xed\x08')
- c.lea_rdx_data(L['handle_cursor']); c.emit(b'\x48\x89\x32')
- c.lea_rdx_data(L['handles_remaining']); c.emit(b'\x48\x89\x2a')
- c.emit(b'\x4d\x85\xf6'); c.rel32(b'\x0f\x84','handle_loop')
-
- zero_qword(L['pkg_size'])
- c.emit(b'\x4c\x89\xe1\x4c\x89\xf2')
- c.lea_r8_data(L['pkg_size']); c.emit(b'\x45\x31\xc9')
- c.emit(b'\x41\xff\x54\x24\x20')
- c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x18'); c.rel32(b'\x0f\x82','handle_loop')
- alloc(True,L['pkg_ptr'])
-
- c.emit(b'\x4c\x89\xe1\x4c\x89\xf2')
+ # Export the whole live HII database read-only in one atomic protocol call.
+ # A bridge-owned 1 MiB buffer avoids the observed OVMF sizing/fetch race.
+ c.lea_rdx_data(L['pkg_size'])
+ c.emit(b'\x48\xc7\x02'+struct.pack('<I',0x100000))
+ c.lea_rax_data(L['pkg_static'])
+ c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x48\x89\x02')
+ c.emit(b'\x4c\x89\xe1\x31\xd2')
  c.lea_r8_data(L['pkg_size'])
- c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x4c\x8b\x0a')
+ c.lea_r9_data(L['pkg_static'])
  c.emit(b'\x41\xff\x54\x24\x20')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','handle_loop')
+ c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_export')
+ c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x83\x3a\x18')
+ c.rel32(b'\x0f\x82','fail_export')
+ serial('direct_export')
 
+ # Parse concatenated EFI_HII_PACKAGE_LIST_HEADER records.  Select one package
+ # list containing both Forms and Strings so the IFR StringId and text share
+ # the same package-list namespace.
  c.lea_rdx_data(L['pkg_ptr']); c.emit(b'\x48\x8b\x32')
- c.emit(b'\x8b\x5e\x10\x83\xfb\x18'); c.rel32(b'\x0f\x82','fail_ifr')
- c.emit(b'\x48\x8d\x7e\x14\x83\xeb\x14')
- c.label('pkg_loop')
- c.emit(b'\x83\xfb\x04'); c.rel32(b'\x0f\x82','fail_ifr')
+ c.lea_rdx_data(L['pkg_size']); c.emit(b'\x48\x8b\x1a')
+ c.label('direct_list_loop')
+ c.emit(b'\x48\x83\xfb\x14'); c.rel32(b'\x0f\x82','fail_no_handle')
+ c.emit(b'\x8b\x46\x10\x83\xf8\x18'); c.rel32(b'\x0f\x82','fail_ifr')
+ c.emit(b'\x48\x39\xd8'); c.rel32(b'\x0f\x87','fail_ifr')
+ c.lea_rdx_data(L['list_len']); c.emit(b'\x89\x02')
+ zero_qword(L['forms_ptr']); zero_qword(L['strings_ptr'])
+ c.emit(b'\x48\x8d\x7e\x14\x89\xc1\x83\xe9\x14')
+ c.label('direct_pkg_loop')
+ c.emit(b'\x83\xf9\x04'); c.rel32(b'\x0f\x82','fail_ifr')
  c.emit(b'\x8b\x07\x89\xc2\x81\xe2\xff\xff\xff\x00')
  c.emit(b'\x89\xc5\xc1\xed\x18')
  c.emit(b'\x83\xfa\x04'); c.rel32(b'\x0f\x82','fail_ifr')
- c.emit(b'\x39\xda'); c.rel32(b'\x0f\x87','fail_ifr')
- c.emit(b'\x83\xfd\x02'); c.rel32(b'\x0f\x84','forms_pkg')
- c.emit(b'\x81\xfd\xdf\x00\x00\x00'); c.rel32(b'\x0f\x84','handle_loop')
- c.emit(b'\x48\x01\xd7\x29\xd3'); c.rel32(b'\xe9','pkg_loop')
+ c.emit(b'\x39\xca'); c.rel32(b'\x0f\x87','fail_ifr')
+ c.emit(b'\x81\xfd\xdf\x00\x00\x00'); c.rel32(b'\x0f\x84','direct_list_done')
+ c.emit(b'\x83\xfd\x02'); c.rel32(b'\x0f\x85','direct_not_forms')
+ c.lea_rax_data(L['forms_ptr']); c.emit(b'\x48\x83\x38\x00'); c.rel32(b'\x0f\x85','direct_not_forms')
+ c.emit(b'\x48\x89\x38')
+ c.label('direct_not_forms')
+ c.emit(b'\x83\xfd\x04'); c.rel32(b'\x0f\x85','direct_not_strings')
+ c.lea_rax_data(L['strings_ptr']); c.emit(b'\x48\x83\x38\x00'); c.rel32(b'\x0f\x85','direct_not_strings')
+ c.emit(b'\x48\x89\x38')
+ c.label('direct_not_strings')
+ c.emit(b'\x48\x01\xd7\x29\xd1'); c.rel32(b'\xe9','direct_pkg_loop')
+
+ c.label('direct_list_done')
+ c.lea_rdx_data(L['forms_ptr']); c.emit(b'\x48\x83\x3a\x00'); c.rel32(b'\x0f\x84','direct_list_next')
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x83\x3a\x00'); c.rel32(b'\x0f\x84','direct_list_next')
+ serial('forms_package_seen'); serial('strings_package')
+ c.lea_rdx_data(L['forms_ptr']); c.emit(b'\x48\x8b\x3a')
+ c.emit(b'\x8b\x07\x89\xc2\x81\xe2\xff\xff\xff\x00')
+ c.rel32(b'\xe9','forms_pkg')
+
+ c.label('direct_list_next')
+ c.lea_rdx_data(L['list_len']); c.emit(b'\x8b\x02')
+ c.emit(b'\x48\x01\xc6\x48\x29\xc3')
+ c.emit(b'\x48\x85\xdb'); c.rel32(b'\x0f\x85','direct_list_loop')
+ c.rel32(b'\xe9','fail_no_handle')
 
  c.label('forms_pkg')
  # r9=first IFR opcode, r10d=bytes available in verified Forms package.
  c.emit(b'\x4c\x8d\x4f\x04\x41\x89\xd2\x41\x83\xea\x04')
- serial('forms_handle')
  c.label('ifr_loop')
  c.emit(b'\x41\x83\xfa\x02'); c.rel32(b'\x0f\x82','fail_ifr')
  c.emit(b'\x41\x0f\xb6\x01')       # eax=OpCode
  c.emit(b'\x41\x0f\xb6\x49\x01\x83\xe1\x7f') # ecx=Length
  c.emit(b'\x83\xf9\x02'); c.rel32(b'\x0f\x82','fail_ifr')
  c.emit(b'\x44\x39\xd1'); c.rel32(b'\x0f\x87','fail_ifr')
- # Statement/question opcodes whose first payload member is
- # EFI_IFR_STATEMENT_HEADER { Prompt, Help }.  A nonzero Prompt StringId
- # at IFR offset +2 is directly resolvable by HII String.GetString.
  for opcode in (0x02,0x03,0x05,0x06,0x07,0x08,0x0c,0x0d,0x0f,0x1a,0x1b,0x1c,0x23):
-  c.emit(b'\x3c'+bytes((opcode,)))
-  c.rel32(b'\x0f\x84','ifr_statement')
+  c.emit(b'\x3c'+bytes((opcode,))); c.rel32(b'\x0f\x84','ifr_prompt')
  c.label('ifr_next')
  c.emit(b'\x49\x01\xc9\x41\x29\xca')
  c.rel32(b'\xe9','ifr_loop')
 
- c.label('ifr_statement')
- c.emit(b'\x83\xf9\x06'); c.rel32(b'\x0f\x82','ifr_next')
+ c.label('ifr_prompt')
+ c.emit(b'\x83\xf9\x04'); c.rel32(b'\x0f\x82','ifr_next')
  c.emit(b'\x41\x0f\xb7\x41\x02')
  c.emit(b'\x66\x85\xc0'); c.rel32(b'\x0f\x84','ifr_next')
  c.lea_rdx_data(L['token']); c.emit(b'\x66\x89\x02')
  serial('ifr')
 
- # GetLanguages selected handle: size query.
- zero_qword(L['langs_size'])
- c.emit(b'\x4c\x89\xe9\x4c\x89\xf2\x45\x31\xc0')
- c.lea_r9_data(L['langs_size'])
- c.emit(b'\x41\xff\x55\x18')
- c.lea_rdx_data(L['langs_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x02'); c.rel32(b'\x0f\x82','fail_language')
- alloc(True,L['langs_ptr'])
-
- # GetLanguages into buffer.
- c.emit(b'\x4c\x89\xe9\x4c\x89\xf2')
- c.lea_rdx_data(L['langs_ptr']); c.emit(b'\x4c\x8b\x02') # r8=buffer
- c.lea_r9_data(L['langs_size'])
- c.emit(b'\x41\xff\x55\x18')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_language')
-
- # Keep first RFC language tag: replace first ';' by NUL.
- c.lea_rdx_data(L['langs_ptr']); c.emit(b'\x48\x8b\x32')
- c.emit(b'\x80\x3e\x00'); c.rel32(b'\x0f\x84','fail_language')
- c.label('lang_scan')
- c.emit(b'\x8a\x06\x84\xc0'); c.rel32(b'\x0f\x84','lang_ready')
- c.emit(b'\x3c\x3b'); c.rel32(b'\x0f\x84','lang_cut')
- c.emit(b'\x48\xff\xc6'); c.rel32(b'\xe9','lang_scan')
- c.label('lang_cut'); c.emit(b'\xc6\x06\x00')
- c.label('lang_ready')
+ # Resolve the IFR StringId directly inside the selected Strings package.
+ # EFI_HII_SIBT_STRING_SCSU=0x10 / STRINGS_SCSU=0x12 and
+ # EFI_HII_SIBT_STRING_UCS2=0x14 / STRINGS_UCS2=0x16 are decoded;
+ # FONT variants, DUPLICATE, SKIP1/SKIP2 and EXT1/EXT2/EXT4 are traversed.
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x8b\x32')
+ c.emit(b'\x48\x85\xf6'); c.rel32(b'\x0f\x84','fail_string')
+ c.emit(b'\x8b\x06\x25\xff\xff\xff\x00\x89\xc3')
+ c.emit(b'\x83\xfb\x2f'); c.rel32(b'\x0f\x82','fail_string')
+ c.emit(b'\x8b\x4e\x04\x83\xf9\x2f'); c.rel32(b'\x0f\x82','fail_language')
+ c.emit(b'\x39\xd9'); c.rel32(b'\x0f\x87','fail_language')
+ c.emit(b'\x80\x7e\x2e\x00'); c.rel32(b'\x0f\x84','fail_language')
  serial('language')
+ c.emit(b'\x8b\x46\x08\x39\xc8'); c.rel32(b'\x0f\x82','fail_string')
+ c.emit(b'\x39\xd8'); c.rel32(b'\x0f\x83','fail_string')
+ c.emit(b'\x48\x8d\x3c\x1e\x48\x01\xc6')
+ c.emit(b'\x41\xbc\x01\x00\x00\x00')
+ c.lea_rdx_data(L['token']); c.emit(b'\x44\x0f\xb7\x2a')
 
- # GetString token: query UTF-16 byte size.
- zero_qword(L['string_size'])
- c.emit(b'\x4c\x89\xe9')
- c.lea_rdx_data(L['langs_ptr']); c.emit(b'\x48\x8b\x12')
- c.emit(b'\x4d\x89\xf0')
- c.lea_r9_data(L['token']); c.emit(b'\x45\x0f\xb7\x09')
- c.emit(b'\x48\xc7\x44\x24\x20\x00\x00\x00\x00')
- c.lea_rax_data(L['string_size']); c.emit(b'\x48\x89\x44\x24\x28')
- c.emit(b'\x48\xc7\x44\x24\x30\x00\x00\x00\x00')
- c.emit(b'\x41\xff\x55\x08')
- c.lea_rdx_data(L['string_size']); c.emit(b'\x48\x8b\x1a')
- c.emit(b'\x48\x83\xfb\x04'); c.rel32(b'\x0f\x82','fail_string')
- alloc(True,L['string_ptr'])
+ c.label('string_block_loop')
+ c.emit(b'\x48\x39\xfe'); c.rel32(b'\x0f\x83','fail_string')
+ c.emit(b'\x0f\xb6\x06\x84\xc0'); c.rel32(b'\x0f\x84','fail_string')
+ for typ,label in ((0x10,'str_scsu1'),(0x11,'str_scsu1_font'),(0x12,'str_scsun'),(0x13,'str_scsun_font'),
+                   (0x14,'str_ucs1'),(0x15,'str_ucs1_font'),(0x16,'str_ucsn'),(0x17,'str_ucsn_font'),
+                   (0x20,'str_duplicate'),(0x21,'str_skip2'),(0x22,'str_skip1'),
+                   (0x30,'str_ext1'),(0x31,'str_ext2'),(0x32,'str_ext4')):
+  c.emit(b'\x3c'+bytes((typ,))); c.rel32(b'\x0f\x84',label)
+ c.rel32(b'\xe9','fail_string')
 
- # GetString into UTF-16 buffer.
- c.emit(b'\x4c\x89\xe9')
- c.lea_rdx_data(L['langs_ptr']); c.emit(b'\x48\x8b\x12')
- c.emit(b'\x4d\x89\xf0')
- c.lea_r9_data(L['token']); c.emit(b'\x45\x0f\xb7\x09')
- c.lea_rax_data(L['string_ptr']); c.emit(b'\x48\x8b\x00\x48\x89\x44\x24\x20')
- c.lea_rax_data(L['string_size']); c.emit(b'\x48\x89\x44\x24\x28')
- c.emit(b'\x48\xc7\x44\x24\x30\x00\x00\x00\x00')
- c.emit(b'\x41\xff\x55\x08')
- c.emit(b'\x48\x85\xc0'); c.rel32(b'\x0f\x85','fail_string')
- c.lea_rdx_data(L['string_ptr']); c.emit(b'\x48\x8b\x32')
+ c.label('str_scsu1')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','str_scsu1_found')
+ c.emit(b'\x41\xff\xc4\x48\x8d\x56\x01'); c.rel32(b'\xe9','scan_scsu_single')
+ c.label('str_scsu1_found'); c.emit(b'\x48\x83\xc6\x01'); c.rel32(b'\xe9','direct_scsu_found')
+ c.label('str_scsu1_font')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','str_scsu1_font_found')
+ c.emit(b'\x41\xff\xc4\x48\x8d\x56\x02'); c.rel32(b'\xe9','scan_scsu_single')
+ c.label('str_scsu1_font_found'); c.emit(b'\x48\x83\xc6\x02'); c.rel32(b'\xe9','direct_scsu_found')
+ c.label('scan_scsu_single')
+ c.emit(b'\x48\x39\xfa'); c.rel32(b'\x0f\x83','fail_string')
+ c.emit(b'\x80\x3a\x00'); c.rel32(b'\x0f\x84','scan_scsu_single_done')
+ c.emit(b'\x48\xff\xc2'); c.rel32(b'\xe9','scan_scsu_single')
+ c.label('scan_scsu_single_done'); c.emit(b'\x48\x8d\x72\x01'); c.rel32(b'\xe9','string_block_loop')
+
+ c.label('str_scsun'); c.emit(b'\x44\x0f\xb7\x76\x01\x48\x8d\x56\x03'); c.rel32(b'\xe9','multi_scsu_loop')
+ c.label('str_scsun_font'); c.emit(b'\x44\x0f\xb7\x76\x02\x48\x8d\x56\x04')
+ c.label('multi_scsu_loop')
+ c.emit(b'\x45\x85\xf6'); c.rel32(b'\x0f\x84','multi_scsu_done')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','multi_scsu_found')
+ c.label('multi_scsu_scan')
+ c.emit(b'\x48\x39\xfa'); c.rel32(b'\x0f\x83','fail_string')
+ c.emit(b'\x80\x3a\x00'); c.rel32(b'\x0f\x84','multi_scsu_next')
+ c.emit(b'\x48\xff\xc2'); c.rel32(b'\xe9','multi_scsu_scan')
+ c.label('multi_scsu_next'); c.emit(b'\x48\xff\xc2\x41\xff\xc4\x41\xff\xce'); c.rel32(b'\xe9','multi_scsu_loop')
+ c.label('multi_scsu_found'); c.emit(b'\x48\x89\xd6'); c.rel32(b'\xe9','direct_scsu_found')
+ c.label('multi_scsu_done'); c.emit(b'\x48\x89\xd6'); c.rel32(b'\xe9','string_block_loop')
+
+ c.label('str_ucs1')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','str_ucs1_found')
+ c.emit(b'\x41\xff\xc4\x48\x8d\x56\x01'); c.rel32(b'\xe9','scan_ucs_single')
+ c.label('str_ucs1_found'); c.emit(b'\x48\x83\xc6\x01'); c.rel32(b'\xe9','direct_ucs_found')
+ c.label('str_ucs1_font')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','str_ucs1_font_found')
+ c.emit(b'\x41\xff\xc4\x48\x8d\x56\x02'); c.rel32(b'\xe9','scan_ucs_single')
+ c.label('str_ucs1_font_found'); c.emit(b'\x48\x83\xc6\x02'); c.rel32(b'\xe9','direct_ucs_found')
+ c.label('scan_ucs_single')
+ c.emit(b'\x48\x39\xfa'); c.rel32(b'\x0f\x83','fail_string')
+ c.emit(b'\x66\x83\x3a\x00'); c.rel32(b'\x0f\x84','scan_ucs_single_done')
+ c.emit(b'\x48\x83\xc2\x02'); c.rel32(b'\xe9','scan_ucs_single')
+ c.label('scan_ucs_single_done'); c.emit(b'\x48\x8d\x72\x02'); c.rel32(b'\xe9','string_block_loop')
+
+ c.label('str_ucsn'); c.emit(b'\x44\x0f\xb7\x76\x01\x48\x8d\x56\x03'); c.rel32(b'\xe9','multi_ucs_loop')
+ c.label('str_ucsn_font'); c.emit(b'\x44\x0f\xb7\x76\x02\x48\x8d\x56\x04')
+ c.label('multi_ucs_loop')
+ c.emit(b'\x45\x85\xf6'); c.rel32(b'\x0f\x84','multi_ucs_done')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x84','multi_ucs_found')
+ c.label('multi_ucs_scan')
+ c.emit(b'\x48\x39\xfa'); c.rel32(b'\x0f\x83','fail_string')
+ c.emit(b'\x66\x83\x3a\x00'); c.rel32(b'\x0f\x84','multi_ucs_next')
+ c.emit(b'\x48\x83\xc2\x02'); c.rel32(b'\xe9','multi_ucs_scan')
+ c.label('multi_ucs_next'); c.emit(b'\x48\x83\xc2\x02\x41\xff\xc4\x41\xff\xce'); c.rel32(b'\xe9','multi_ucs_loop')
+ c.label('multi_ucs_found'); c.emit(b'\x48\x89\xd6'); c.rel32(b'\xe9','direct_ucs_found')
+ c.label('multi_ucs_done'); c.emit(b'\x48\x89\xd6'); c.rel32(b'\xe9','string_block_loop')
+
+ c.label('str_duplicate')
+ c.emit(b'\x45\x39\xec'); c.rel32(b'\x0f\x85','str_duplicate_skip')
+ c.emit(b'\x44\x0f\xb7\x6e\x01\x45\x85\xed'); c.rel32(b'\x0f\x84','fail_string')
+ c.emit(b'\x41\xbc\x01\x00\x00\x00')
+ c.lea_rdx_data(L['strings_ptr']); c.emit(b'\x48\x8b\x32\x8b\x46\x08\x48\x01\xc6'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_duplicate_skip'); c.emit(b'\x41\xff\xc4\x48\x83\xc6\x03'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_skip1'); c.emit(b'\x0f\xb6\x46\x01\x41\x01\xc4\x48\x83\xc6\x02'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_skip2'); c.emit(b'\x0f\xb7\x46\x01\x41\x01\xc4\x48\x83\xc6\x03'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_ext1'); c.emit(b'\x0f\xb6\x46\x02\x83\xf8\x03'); c.rel32(b'\x0f\x82','fail_string'); c.emit(b'\x48\x01\xc6'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_ext2'); c.emit(b'\x0f\xb7\x46\x02\x83\xf8\x04'); c.rel32(b'\x0f\x82','fail_string'); c.emit(b'\x48\x01\xc6'); c.rel32(b'\xe9','string_block_loop')
+ c.label('str_ext4'); c.emit(b'\x8b\x46\x02\x83\xf8\x06'); c.rel32(b'\x0f\x82','fail_string'); c.emit(b'\x48\x01\xc6'); c.rel32(b'\xe9','string_block_loop')
+
+ c.label('direct_scsu_found')
+ c.emit(b'\x80\x3e\x00'); c.rel32(b'\x0f\x84','fail_string')
+ serial('prefix'); c.rel32(b'\xe8','serial_scsu_ascii')
+ c.emit(b'\x85\xc0'); c.rel32(b'\x0f\x85','fail_string')
+ serial('suffix'); c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
+ c.label('direct_ucs_found')
  c.emit(b'\x66\x83\x3e\x00'); c.rel32(b'\x0f\x84','fail_string')
-
- # Emit a machine-readable ASCII projection of the real UTF-16 title.
- serial('prefix')
- c.rel32(b'\xe8','serial_utf16')
- serial('suffix')
- c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
+ serial('prefix'); c.rel32(b'\xe8','serial_utf16')
+ serial('suffix'); c.emit(b'\x31\xc0'); c.rel32(b'\xe9','return')
 
  c.label('fail_protocol'); serial('no_protocol'); c.rel32(b'\xe9','return_fail')
  c.label('fail_list_size'); serial('list_size_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_list_fetch'); serial('list_fetch_fail'); c.rel32(b'\xe9','return_fail')
  c.label('fail_list_fetch_invalid'); serial('list_fetch_invalid'); c.rel32(b'\xe9','return_fail')
  c.label('fail_list_fetch_not_found'); serial('list_fetch_not_found'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_list_fetch_bts_twice'); serial('list_fetch_bts_twice'); c.rel32(b'\xe9','return_fail')
  c.label('fail_list_static_small'); serial('list_static_small'); c.rel32(b'\xe9','return_fail')
  c.label('fail_no_handle'); serial('no_handle'); c.rel32(b'\xe9','return_fail')
+ c.label('fail_static_empty'); serial('static_empty'); c.rel32(b'\xe9','return_fail')
  c.label('fail_alloc'); serial('alloc'); c.rel32(b'\xe9','return_fail')
  c.label('fail_export'); serial('export'); c.rel32(b'\xe9','return_fail')
  c.label('fail_ifr'); serial('ifr_fail'); c.rel32(b'\xe9','return_fail')
@@ -283,6 +340,17 @@ def build():
  c.emit(b'\x66\xba\xf8\x03\x88\xd8\xee\x48\x83\xc6\x02')
  c.rel32(b'\xe9','utf16_loop')
  c.label('utf16_done'); c.emit(b'\xc3')
+
+ c.label('serial_scsu_ascii')
+ c.label('scsu_ascii_loop')
+ c.emit(b'\x8a\x06\x84\xc0'); c.rel32(b'\x0f\x84','scsu_ascii_ok')
+ c.emit(b'\x3c\x20'); c.rel32(b'\x0f\x82','scsu_ascii_bad')
+ c.emit(b'\x3c\x7e'); c.rel32(b'\x0f\x87','scsu_ascii_bad')
+ c.emit(b'\x88\xc3\x66\xba\xfd\x03')
+ c.label('scsu_ascii_wait'); c.emit(b'\xec\xa8\x20'); c.rel8(0x74,'scsu_ascii_wait')
+ c.emit(b'\x66\xba\xf8\x03\x88\xd8\xee\x48\xff\xc6'); c.rel32(b'\xe9','scsu_ascii_loop')
+ c.label('scsu_ascii_ok'); c.emit(b'\x31\xc0\xc3')
+ c.label('scsu_ascii_bad'); c.emit(b'\xb8\x01\x00\x00\x00\xc3')
 
  c.label('serial_emit')
  c.emit(b'\x49\x89\xd0\x66\xba\xfd\x03')
@@ -329,8 +397,9 @@ def validate(image):
  assert image[:2]==b'MZ'
  for token in (
   b'HII_DATABASE_PROTOCOL=PASS',
-  b'HII_STRING_PROTOCOL=PASS',
-  b'HII_FORMS_HANDLE=PASS',
+  b'HII_EXPORT_ALL_PACKAGE_LISTS=PASS',
+  b'HII_FORMS_PACKAGE=PASS',
+  b'HII_STRINGS_PACKAGE=PASS',
   b'IFR_PROMPT_STRING_ID=PASS',
   b'PROMPT_TEXT=',
   b'HII_PROMPT_STRING=PASS',
