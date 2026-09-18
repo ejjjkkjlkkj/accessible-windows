@@ -147,3 +147,14 @@ It must also pass Evidence B:
 - survive malformed-input tests without expanding authority.
 
 Until both pass, the compiler is **UNPROVEN**.
+
+
+## 11. Mandatory accessibility proof
+
+Every AWL source artifact has an A11Y0 registry record.
+
+A human-interactive cell is invalid unless its structural evidence declares semantic identity, keyboard reachability and a required non-visual path.
+
+Compilation of a future AWL implementation must reject interactive code whose A evidence is absent or fails. Release admission additionally requires independent B evidence.
+
+There is no accessibility opt-out annotation.

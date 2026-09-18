@@ -18,6 +18,12 @@ cell FoundationProbe {
         path keyboard | speech | braille
     }
 
+    proof accessibility {
+        invariant A11Y0.FOUNDATION.NO-HUMAN-PATH-WITHOUT-SEMANTICS
+        evidence A structural
+        evidence B required
+    }
+
     flow inspect(input : untrusted<bytes>) -> trusted<semantic.record> {
         effects validate(input) | use(semantic.emit)
         body validate_then_emit(input)
