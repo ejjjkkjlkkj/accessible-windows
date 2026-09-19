@@ -137,6 +137,7 @@ jobs:
             'HII_GRAPH_NAV_KEY=PAGE_DOWN' \
             'HII_GRAPH_NAV_KEY=R' \
             'HII_GRAPH_NAV_KEY=ESC' \
+            'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS' \
             'HII_GRAPH_NAV_SPEECH_DMA=PASS' \
             'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
           do
