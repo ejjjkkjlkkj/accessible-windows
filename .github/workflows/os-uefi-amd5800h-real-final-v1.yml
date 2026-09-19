@@ -19,6 +19,7 @@ on:
       - 'boot/uefi-hii-graph-prompt-speech-v1/os-uefi-hii-graph-prompt-speech-v1.labproof'
       - 'boot/uefi-physical-audio-v1/os-uefi-physical-audio-probe-v1.labproof'
       - 'boot/uefi-asus-m1603qa-preflight-v1/os-uefi-asus-m1603qa-preflight-v1.labproof'
+      - 'boot/uefi-physical-boot-proof-v1/os-uefi-physical-boot-proof-v1.labproof'
       - '.github/workflows/os-uefi-amd5800h-real-final-v1.yml'
   workflow_dispatch:
 
