@@ -1094,6 +1094,8 @@ jobs:
             'PHYSICAL_TARGET_CODEC_VERIFICATION=NATIVE_HDA_GET_PARAMETER_00'
             'PHYSICAL_HOST_REBOOT=false'
             'PHYSICAL_HOST_FIRMWARE_MUTATION=false'
+            'VIRTUALIZATION_CLOSURE=PASS'
+            'PHYSICAL_PRE_OS_SPEAKER=NOT_ESTABLISHED'
           ) | Set-Content "$root/final-result.txt" -Encoding ascii
           if(Test-Path "$root/qemu-waveform.txt"){ Get-Content "$root/qemu-waveform.txt" | Add-Content "$root/final-result.txt" -Encoding ascii }
           if(Test-Path "$root/vmware-result.txt"){ Get-Content "$root/vmware-result.txt" | Add-Content "$root/final-result.txt" -Encoding ascii }
@@ -1171,12 +1173,13 @@ jobs:
             if($qw -match 'qemu-waveform = PASS'){ $qemuWave='PASS' }
             elseif($qw -match 'NOT_ESTABLISHED_ON_WINDOWS_BACKEND'){ $qemuWave='NOT_ESTABLISHED_ON_WINDOWS_BACKEND' }
           }
-          $lines += 'final-proof-state = PASS'
+          $lines += 'final-proof-state = VIRTUALIZATION_PASS_PHYSICAL_AUDIO_PENDING'
           $lines += "proof-current-option-proof-blob = $testedCurrentProof"
           $lines += "proof-platform-commit-proof-blob = $testedCommitProof"
           $lines += "proof-secure-boot-proof-blob = $testedSecureBootProof"
           $lines += "proof-hii-graph-proof-blob = $testedGraphProof"
-          $lines += 'proof = PASS'
+          $lines += 'proof = PENDING_PHYSICAL_PRE_OS_AUDIO'
+          $lines += 'proof-virtualization-suite = PASS'
           $lines += "proof-run = $env:GITHUB_RUN_ID"
           $lines += "proof-head-sha = $env:GITHUB_SHA"
           $lines += "proof-runner = $env:RUNNER_NAME"
