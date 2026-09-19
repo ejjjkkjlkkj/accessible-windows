@@ -51,6 +51,7 @@ jobs:
           grep -aF 'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_NAV_EXIT=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_NAV_SPEECH_DMA=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_SPEECH_DMA_REUSE=PASS' "$out/BOOTX64.EFI"
           grep -aF 'BOOT_MEDIA_PERSISTENT_PROOF=PASS' "$out/BOOTX64.EFI"
           grep -aF 'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$out/BOOTX64.EFI"
@@ -218,6 +219,7 @@ jobs:
             'UEFI_SOURCE_BLOB=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
             'STATUS=PASS'
             'HII_PROMPT_SOURCE=PASS'
+            'HII_GRAPH_SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3'
             'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3'
             'HDA_CODEC_VENDOR_DEVICE=0x10EC0256'
             'HDA_CODEC_SELECTION=REALTEK_10EC_0256'
@@ -291,6 +293,10 @@ jobs:
             'UEFI_SOURCE_BLOB=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             'UEFI_SOURCE_BLOB=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
           ))
+          Assert-Rejected 'negative-speech-mode' ($raw.Replace(
+            'HII_GRAPH_SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3',
+            'HII_GRAPH_SPEECH_MODE=GRAPHEME_ALLOPHONE_RUNTIME_TEXT_V2'
+          ))
           'PHYSICAL_PROOF_VERIFIER_NEGATIVE_GATES=PASS'
 
       - name: Write package manifest
@@ -317,6 +323,7 @@ jobs:
           INTERACTIVE_CONTROL=UP_DOWN_NAVIGATE_R_REPEAT_ESC_EXIT
           NAVIGATION_PROOF=UP_DOWN_HOME_END_PAGEUP_PAGEDOWN_R_ESC
           DMA_REUSE=REQUIRED
+          SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3
           INTERNAL_SPEAKER_ROUTE=REQUIRED
           HDA_ROUTE_READBACK=REQUIRED
           SELECTOR_WRITE_COUNT_MATCH=REQUIRED
