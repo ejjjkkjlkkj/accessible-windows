@@ -606,7 +606,7 @@ static int power_up_afg(void) {
     if (g_afg == INVALID_NID) return 0;
     u32 supported = get_param(g_afg, 0x0f);
     /* Some virtual codecs expose no controllable AFG power states. */
-    if (supported == INVALID_RESP || !(supported & 0x01u)) return 1;
+    if (supported == INVALID_RESP || !(supported & 0x01u))\n        return g_controller_preferred ? 0 : 1;
     if (verb12(g_afg, 0x705, 0x00) == INVALID_RESP) return 0;
     return wait_node_d0(g_afg);
 }
