@@ -271,8 +271,16 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     const u64 rw_mode = 0x2ull | 0x1ull;
     file_protocol *old_file = 0;
     if (root->open(root, (void **)&old_file, filename, rw_mode, 0) == 0 && old_file) {
-        if (!old_file->delete_file || old_file->delete_file(old_file) != 0) {
+        if (!old_file->delete_file) {
             if (old_file->close) old_file->close(old_file);
+            if (root->close) root->close(root);
+            return 0;
+        }
+        /*
+         * EFI_FILE_DELETE closes old_file in all cases, including delete
+         * failure/warning, so never touch that handle after this call.
+         */
+        if (old_file->delete_file(old_file) != 0) {
             if (root->close) root->close(root);
             return 0;
         }
