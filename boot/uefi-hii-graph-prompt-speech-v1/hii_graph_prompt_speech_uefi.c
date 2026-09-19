@@ -1062,7 +1062,7 @@ static int wait_navigation_keys(void *system_table) {
         u64 st = conin->read_key(conin, &key);
         if (st == 0) {
             u8 speak = 0;
-            if (key.unicode_char == 0x001bu) {
+            if (key.unicode_char == 0x001bu || key.scan_code == 0x0017u) {
                 marker("HII_GRAPH_NAV_KEY=ESC");
                 marker("HII_GRAPH_NAV_EXIT=PASS");
                 return 1;
