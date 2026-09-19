@@ -810,9 +810,25 @@ static int run_speech_dma(const char *text, u32 text_count) {
     if (dma_payload < total_bytes || dma_payload > dma_bytes - pcm_off) return 0;
     for (u32 i = total_bytes; i < dma_payload; ++i) pcm[i] = 0;
 
-    *(volatile u64 *)(bdl + 0x00) = base + pcm_off;
-    *(volatile u32 *)(bdl + 0x08) = dma_payload;
-    *(volatile u32 *)(bdl + 0x0c) = 1u;
+    /* Keep each HDA BDL buffer at or below 64 KiB. QEMU/virtio-hda and
+       physical codecs are more reliable with bounded descriptors, while the
+       PCM itself remains one contiguous utterance. */
+    const u32 max_bdl_bytes = 0x10000u;
+    u32 entries = 0;
+    u32 described = 0;
+    while (described < dma_payload) {
+        if (entries >= 64u) return 0;
+        u32 len = dma_payload - described;
+        if (len > max_bdl_bytes) len = max_bdl_bytes;
+        volatile u8 *e = bdl + entries * 16u;
+        *(volatile u64 *)(e + 0x00) = base + pcm_off + described;
+        *(volatile u32 *)(e + 0x08) = len;
+        *(volatile u32 *)(e + 0x0c) = 0u;
+        described += len;
+        ++entries;
+    }
+    if (!entries) return 0;
+    *(volatile u32 *)(bdl + (entries - 1u) * 16u + 0x0c) = 1u;
     fence();
 
     u16 gcap = mmio16(0x00);
@@ -833,7 +849,7 @@ static int run_speech_dma(const char *text, u32 text_count) {
     if (!timeout) return 0;
 
     *(volatile u32 *)(sd + 0x08) = dma_payload;
-    *(volatile u16 *)(sd + 0x0c) = 0u;
+    *(volatile u16 *)(sd + 0x0c) = (u16)(entries - 1u);
     *(volatile u16 *)(sd + 0x12) = 0x0011;
     *(volatile u32 *)(sd + 0x18) = (u32)base;
     *(volatile u32 *)(sd + 0x1c) = (u32)(base >> 32);
