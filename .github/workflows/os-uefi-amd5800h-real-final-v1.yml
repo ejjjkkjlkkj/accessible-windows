@@ -113,6 +113,9 @@ jobs:
           test -s "$hiiroot/hii-graph.EFI"
           grep -aF 'HDA_CODEC_SELECTION=REALTEK_10EC_0256' "$hiiroot/hii-graph.EFI"
           grep -aF 'HDA_CODEC_SELECTION=GENERIC_RUNTIME' "$hiiroot/hii-graph.EFI"
+          grep -aF 'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS' "$hiiroot/hii-graph.EFI"
+          grep -aF 'PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS' "$hiiroot/hii-graph.EFI"
+          grep -aF 'PHYSICAL_ASUS_M1603QA_AUDIBLE_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$hiiroot/hii-graph.EFI"
           clang $hiiflags -c "$hiiroot/hii_graph_prompt_speech_uefi.c" -o "$hiiroot/main-2.obj"
           clang $hiiflags -c "$hiiroot/speech_units.c" -o "$hiiroot/units-2.obj"
           lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$hiiroot/hii-graph-2.EFI" "$hiiroot/main-2.obj" "$hiiroot/units-2.obj"
@@ -387,6 +390,9 @@ jobs:
             b"HDA_EAPD_POLICY=PASS\r\n",
             b"HDA_DAC_STREAM_READBACK=PASS\r\n",
             b"HDA_PIN_CONTROL_READBACK=PASS\r\n",
+            b"PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS\r\n",
+            b"PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS\r\n",
+            b"PHYSICAL_ASUS_M1603QA_AUDIBLE_SPEAKER=REQUIRES_HUMAN_CONFIRMATION\r\n",
           ]
           for p in root.glob("*.EFI"):
               image=p.read_bytes()
@@ -1322,6 +1328,9 @@ jobs:
             'PHYSICAL_TARGET_HDA_CONTROLLER=PCI_VEN_1022_DEV_15E3'
             'PHYSICAL_TARGET_CODEC=HDAUDIO_VEN_10EC_DEV_0256'
             'PHYSICAL_TARGET_CODEC_VERIFICATION=NATIVE_HDA_GET_PARAMETER_00'
+            'PHYSICAL_UEFI_HDA_RUNTIME_MARKER=REQUIRED'
+            'PHYSICAL_INTERNAL_SPEAKER_PIN_MARKER=REQUIRED'
+            'PHYSICAL_AUDIBLE_SPEAKER=REQUIRES_HUMAN_CONFIRMATION'
             'PHYSICAL_TARGET_BIOS=M1603QA.308'
             'PHYSICAL_TARGET_OS_BUILD=26300'
             'PHYSICAL_HOST_UEFI=PASS'
