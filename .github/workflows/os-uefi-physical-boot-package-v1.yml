@@ -48,6 +48,7 @@ jobs:
           grep -aF 'HII_GRAPH_NAV_KEY=PAGE_UP' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_NAV_KEY=PAGE_DOWN' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_NAV_KEY=R' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_NAV_EXIT=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_NAV_SPEECH_DMA=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_SPEECH_DMA_REUSE=PASS' "$out/BOOTX64.EFI"
@@ -245,6 +246,7 @@ jobs:
             'HII_GRAPH_NAV_PAGE_UP=PASS'
             'HII_GRAPH_NAV_PAGE_DOWN=PASS'
             'HII_GRAPH_NAV_REPEAT=PASS'
+            'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS'
             'HII_GRAPH_NAV_EXIT=PASS'
             'HII_GRAPH_NAV_SPEECH_EVENTS=0x07'
             'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
