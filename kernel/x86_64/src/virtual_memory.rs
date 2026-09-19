@@ -40,10 +40,11 @@ pub const IDENTITY_GIB: u64 = 4;
 const GIB: u64 = 1 << 30;
 const TWO_MIB: u64 = 2 * 1024 * 1024;
 
-/// Root, PDPT, the PD covering the first GiB, and one PT per 2 MiB region the
-/// kernel image spans. Eight leaves room for the image to grow well past its
-/// current single 2 MiB region before this becomes a build-time decision.
-const PAGE_TABLE_CAPACITY: usize = 8;
+/// Root plus enough sparse child tables for the low bootstrap window and every
+/// framebuffer/PCIe ECAM range handed off by firmware. 32 tables cost 128 KiB of
+/// BSS and cover the worst case of four disjoint ECAM regions plus framebuffer
+/// ranges even when they cross PML4/PDPT boundaries.
+const PAGE_TABLE_CAPACITY: usize = 32;
 
 /// Number of 8-byte entries in one page table.
 const PAGE_TABLE_ENTRIES: usize = 512;
@@ -210,6 +211,7 @@ pub struct ActiveMap {
     pub table_count: usize,
     pub layout: KernelImageLayout,
     pub guard_page: u64,
+    pub extra_identity_range_count: usize,
 }
 
 /// Build the W^X identity map, audit it, and load it into CR3.
@@ -230,6 +232,7 @@ pub struct ActiveMap {
 pub unsafe fn activate(
     mut next_frame: impl FnMut() -> Option<u64>,
     guard_page: u64,
+    extra_identity_ranges: &[(u64, u64)],
 ) -> Result<ActiveMap, VmmError> {
     if !supports_1gib_pages() {
         return Err(VmmError::NoOneGibPages);
@@ -251,8 +254,14 @@ pub unsafe fn activate(
     )
     .map_err(|error| frame_error(error, frames.escaped_window))?;
 
-    build_map(&mut builder, &mut frames, layout, guard_page)?;
-    audit_map(&builder, layout, guard_page)?;
+    build_map(
+        &mut builder,
+        &mut frames,
+        layout,
+        guard_page,
+        extra_identity_ranges,
+    )?;
+    audit_map(&builder, layout, guard_page, extra_identity_ranges)?;
 
     let root = builder.root_frame().start_address();
     let table_count = builder.table_count();
@@ -294,6 +303,7 @@ pub unsafe fn activate(
         table_count,
         layout,
         guard_page,
+        extra_identity_range_count: extra_identity_ranges.len(),
     })
 }
 
@@ -310,6 +320,7 @@ fn build_map<F: FnMut() -> Option<u64>>(
     frames: &mut WindowedFrames<'_, F>,
     layout: KernelImageLayout,
     guard_page: u64,
+    extra_identity_ranges: &[(u64, u64)],
 ) -> Result<(), VmmError> {
     let image_start = layout.start();
     let image_end = layout.end();
@@ -361,6 +372,71 @@ fn build_map<F: FnMut() -> Option<u64>>(
         page += PAGE_SIZE;
     }
 
+    map_extra_identity_ranges(builder, frames, extra_identity_ranges)?;
+    Ok(())
+}
+
+fn align_up(value: u64, align: u64) -> Option<u64> {
+    let mask = align.checked_sub(1)?;
+    value.checked_add(mask).map(|rounded| rounded & !mask)
+}
+
+fn map_extra_identity_ranges<F: FnMut() -> Option<u64>>(
+    builder: &mut OfflinePageTableBuilder<PAGE_TABLE_CAPACITY>,
+    frames: &mut WindowedFrames<'_, F>,
+    ranges: &[(u64, u64)],
+) -> Result<(), VmmError> {
+    let low_end = IDENTITY_GIB * GIB;
+
+    for &(start, end) in ranges {
+        if start >= end {
+            return Err(VmmError::BuildFailed);
+        }
+
+        let mut address = (start & !(PAGE_SIZE - 1)).max(low_end);
+        let end = align_up(end, PAGE_SIZE).ok_or(VmmError::BuildFailed)?;
+        if address >= end {
+            continue;
+        }
+
+        while address < end {
+            let virtual_address = VirtualAddress::new(address).ok_or(VmmError::BuildFailed)?;
+
+            // Ranges may overlap each other. Reuse an existing identity leaf only
+            // when it already has the required MMIO permissions.
+            if let Ok(leaf) = builder.resolve(virtual_address) {
+                let span = leaf.size.bytes();
+                let leaf_start = address & !(span - 1);
+                if leaf.frame.start_address() != leaf_start
+                    || !leaf.flags.contains(PageTableFlags::WRITABLE)
+                    || !leaf.flags.contains(PageTableFlags::NO_EXECUTE)
+                    || leaf.flags.contains(PageTableFlags::USER_ACCESSIBLE)
+                {
+                    return Err(VmmError::BuildFailed);
+                }
+                address = leaf_start.checked_add(span).ok_or(VmmError::BuildFailed)?;
+                continue;
+            }
+
+            let remaining = end - address;
+            if address.is_multiple_of(GIB) && remaining >= GIB {
+                map_huge(builder, frames, address, LeafSize::Size1GiB)?;
+                address += GIB;
+            } else if address.is_multiple_of(TWO_MIB) && remaining >= TWO_MIB {
+                map_huge(builder, frames, address, LeafSize::Size2MiB)?;
+                address += TWO_MIB;
+            } else {
+                let page = VirtualPage::new(address).ok_or(VmmError::BuildFailed)?;
+                let frame = PhysicalFrame::new(address, MAX_X86_64_PHYSICAL_ADDRESS_BITS)
+                    .ok_or(VmmError::BuildFailed)?;
+                builder
+                    .map_4k(frames, page, frame, RW_NX)
+                    .map_err(|error| frame_error(error, frames.escaped_window))?;
+                address += PAGE_SIZE;
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -404,6 +480,7 @@ fn audit_map(
     builder: &OfflinePageTableBuilder<PAGE_TABLE_CAPACITY>,
     layout: KernelImageLayout,
     guard_page: u64,
+    extra_identity_ranges: &[(u64, u64)],
 ) -> Result<(), VmmError> {
     let expectations = [
         (layout.header, false, false),
@@ -442,6 +519,33 @@ fn audit_map(
         let leaf = builder.resolve(address).map_err(|_| VmmError::AuditFailed)?;
         if !leaf.flags.contains(PageTableFlags::NO_EXECUTE) {
             return Err(VmmError::AuditFailed);
+        }
+    }
+
+    // Firmware-owned MMIO may sit above 4 GiB. Verify the first and last page of
+    // every handed-off range are present, identity-mapped, writable and NX.
+    let low_end = IDENTITY_GIB * GIB;
+    for &(start, end) in extra_identity_ranges {
+        if start >= end {
+            return Err(VmmError::AuditFailed);
+        }
+        let first = (start & !(PAGE_SIZE - 1)).max(low_end);
+        let rounded_end = align_up(end, PAGE_SIZE).ok_or(VmmError::AuditFailed)?;
+        if first >= rounded_end {
+            continue;
+        }
+        for probe in [first, rounded_end - PAGE_SIZE] {
+            let address = VirtualAddress::new(probe).ok_or(VmmError::AuditFailed)?;
+            let leaf = builder.resolve(address).map_err(|_| VmmError::AuditFailed)?;
+            let span = leaf.size.bytes();
+            let leaf_start = probe & !(span - 1);
+            if leaf.frame.start_address() != leaf_start
+                || !leaf.flags.contains(PageTableFlags::WRITABLE)
+                || !leaf.flags.contains(PageTableFlags::NO_EXECUTE)
+                || leaf.flags.contains(PageTableFlags::USER_ACCESSIBLE)
+            {
+                return Err(VmmError::AuditFailed);
+            }
         }
     }
 
