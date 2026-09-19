@@ -115,7 +115,9 @@ def main():
         'letter-map=a-z\n'
         'max-input-graphemes=32\n'
         'max-units-per-letter=8\n'
-        'inter-letter-silence-ms=0\n'\n        'word-silence-ms=65\n'\n        'speech-mode=grapheme-allophone-v2\n'
+        'inter-letter-silence-ms=0\n'
+        'word-silence-ms=65\n'
+        'speech-mode=grapheme-allophone-v2\n'
         'full-utterance-asset=false\n'
     )
     print('HII_GRAPH_PROMPT_UNIT_GENERATION=PASS')
