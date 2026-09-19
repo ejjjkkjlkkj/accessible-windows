@@ -69,10 +69,10 @@ LETTER_UNITS={
  'd':('d','e'),
  'e':('e',),
  'f':('e','f'),
- 'g':('sh','e'),
+ 'g':('zh','e'),
  'h':('a','sh'),
  'i':('i',),
- 'j':('sh','i'),
+ 'j':('zh','i'),
  'k':('k','a'),
  'l':('e','l'),
  'm':('e','m'),
@@ -90,7 +90,7 @@ LETTER_UNITS={
  'y':('i','g','r','e','k'),
  'z':('z','e','d'),
 }
-TEXT_UNITS=tuple(sorted({name for sequence in LETTER_UNITS.values() for name in sequence}))
+TEXT_UNITS=tuple(sorted({'sil'} | {name for sequence in LETTER_UNITS.values() for name in sequence}))
 UNIT_LAYOUT: dict[str, tuple[int,int]] = {}
 
 def load_module(name: str, path: Path):
@@ -657,7 +657,12 @@ def build():
  c.label('expanded_char')
  c.emit(bytes.fromhex('ffc6'))
  c.emit(bytes.fromhex('39fe'))
- c.rel32(bytes.fromhex('0f82'),'expand_char')
+ c.rel32(bytes.fromhex('0f83'),'all_chars_expanded')
+ # Separate spelled graphemes. Without this pause, letter names merge into
+ # one continuous allophone stream and become difficult to understand.
+ emit_unit_descriptor('sil')
+ c.rel32(bytes.fromhex('e9'),'expand_char')
+ c.label('all_chars_expanded')
  c.emit(bytes.fromhex('85db')); c.rel32(bytes.fromhex('0f84'),'fail_key')
  c.emit(bytes.fromhex('89d8ffc848c1e0044c01e8'))
  c.emit(bytes.fromhex('c7400c01000000'))
