@@ -1251,6 +1251,34 @@ jobs:
             'audible-speaker=REQUIRES_HUMAN_CONFIRMATION'
           ) | Set-Content (Join-Path $ev 'pc-gate.txt') -Encoding ascii
 
+          $interaction='boot/uefi-hii-platform-commit-v1/pc-runner-evidence/pc-platform-interaction.txt'
+          $cancelProof='boot/uefi-hii-platform-commit-v1/pc-runner-evidence/pc-platform-cancel.txt'
+          foreach($p in @($interaction,$cancelProof)){
+            if(-not (Test-Path $p)){ throw "final interaction proof missing: $p" }
+          }
+          $interactionText=Get-Content $interaction -Raw
+          $cancelText=Get-Content $cancelProof -Raw
+          foreach($marker in @(
+            'enter-gate=PASS',
+            'route-config-after-enter=PASS',
+            'confirmation-speech=PASS',
+            'same-vars-reboot-persistence=PASS',
+            'physical-asus-uefi-write=false',
+            'result=PASS'
+          )){
+            if(-not $interactionText.Contains($marker)){ throw "ENTER proof missing: $marker" }
+          }
+          foreach($marker in @(
+            'esc-gate=PASS',
+            'route-config=absent',
+            'same-vars-reboot-unchanged=PASS',
+            'physical-asus-uefi-write=false',
+            'result=PASS'
+          )){
+            if(-not $cancelText.Contains($marker)){ throw "ESC proof missing: $marker" }
+          }
+
+          'UEFI_PLATFORM_ENTER_ESC_PC_ACCEPTANCE=PASS'
           'UEFI_REALTIME_SCREENREADER_PC_RUNNER=PASS'
 
       - uses: actions/upload-artifact@v4
