@@ -28,17 +28,21 @@ UNIT_SPECS = {
     "r":  ("r", 80,  (420, 1450, 2200)),
     "l":  ("l", 85,  (390, 1500, 2400)),
     "w":  ("v", 75,  (330, 900, 2200)),
-    "s":  ("f", 90,  (3900, 5200, 6500)),
-    "sh": ("f", 105, (2200, 3300, 4700)),
-    "f":  ("f", 95,  (1800, 3000, 4700)),
-    "v":  ("z", 95,  (700, 1500, 2900)),
-    "z":  ("z", 90,  (900, 2200, 3600)),
-    "t":  ("p", 70,  (3600, 4900, 6200)),
-    "d":  ("p", 75,  (700, 1800, 2900)),
-    "k":  ("p", 80,  (1500, 3000, 4700)),
-    "g":  ("p", 80,  (600, 1500, 2500)),
-    "p":  ("p", 75,  (1000, 2600, 4300)),
-    "b":  ("p", 75,  (500, 1400, 2400)),
+    # Keep every spectral target below 0.45*Fs (3.6 kHz at 8 kHz).
+    # The previous 3.9-6.5 kHz targets aliased into the speech band and made
+    # sibilants/plosives sound like unrelated low-frequency noise.
+    "s":  ("f", 100, (2200, 3000, 3600)),
+    "sh": ("f", 110, (1600, 2400, 3200)),
+    "f":  ("f", 100, (1100, 2000, 3000)),
+    "v":  ("z", 100, (700, 1500, 2800)),
+    "z":  ("z", 100, (900, 1800, 3000)),
+    "zh": ("z", 105, (700, 1800, 3000)),
+    "t":  ("p", 80,  (2200, 3000, 3500)),
+    "d":  ("p", 85,  (700, 1600, 2600)),
+    "k":  ("p", 90,  (1400, 2400, 3400)),
+    "g":  ("p", 90,  (600, 1400, 2400)),
+    "p":  ("p", 85,  (800, 1800, 2800)),
+    "b":  ("p", 85,  (500, 1300, 2300)),
     "sil":("s", 65,  (0, 0, 0)),
 }
 
@@ -130,6 +134,16 @@ def make_unit(name: str, spec: tuple[str, int, tuple[int, int, int]]) -> bytes:
     return bytes(out)
 
 def make_units() -> dict[str, bytes]:
+    # Hard fail instead of silently generating aliased speech. 0.45*Fs keeps
+    # a small transition margin below Nyquist for the zero-order 48 kHz
+    # conversion used by the HDA backends.
+    spectral_limit = int(SAMPLE_RATE * 0.45)
+    for name, (_, _, formants) in UNIT_SPECS.items():
+        if any(freq < 0 or freq > spectral_limit for freq in formants):
+            raise ValueError(
+                f"{name}: formant target exceeds spectral budget "
+                f"({formants!r}, limit={spectral_limit} Hz)"
+            )
     return {name: make_unit(name, spec) for name, spec in UNIT_SPECS.items()}
 
 class Code:
