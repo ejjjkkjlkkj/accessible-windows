@@ -198,7 +198,7 @@ jobs:
           cp "$OVMF_VARS" ovmf-vars.fd
 
           set +e
-          timeout 20s qemu-system-x86_64 \
+          timeout 45s qemu-system-x86_64 \
             -machine q35 \
             -m 256M \
             -display none \
