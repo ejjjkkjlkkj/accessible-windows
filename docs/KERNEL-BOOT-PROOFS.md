@@ -226,6 +226,9 @@ pwsh -NoProfile -File scripts/Invoke-VMwareBoot.ps1
 | Subsystem | State | Evidence marker |
 |---|---|---|
 | Full clean boot on VMware EFI | PASS | `AW_VMWARE_BOOT_OK`; the native kernel reaches `AW_NATIVE_KERNEL_IDLE` on VMware with no `AW_NATIVE_EXCEPTION`/`AW_NATIVE_KERNEL_PANIC`, and the serial banner appears exactly once (no crash-reboot loop) - VMware's firmware booted `\EFI\BOOT\BOOTX64.EFI`, the loader handed off, and every native proof (W^X, Ring 3, swapgs, scheduler, APIC timer, clock, PCIe scan) ran on it |
+| Framebuffer console on VMware GOP | PASS | `AW_FBCON_PROOF_OK` in the COM1 capture; `AW_FBCON_READY width=1024 height=768` on VMware's own SVGA framebuffer, and the rendered `A` glyph reads back with all 28 lit pixels - the on-screen console works on a different GOP than OVMF's |
+| PS/2 keyboard on VMware i8042 | PASS | `AW_KBD_PROOF_OK` in the capture; VMware's own 8042 self-tests, routes IRQ1, and delivers every injected scancode (space/enter/up/down) through a real IRQ with the mask/resume test intact - keyboard input works on a second, independent controller model |
+| Accessible menu on VMware | PASS | `AW_MENU_PROOF_OK` then `AW_MENU_INTERACTIVE_BEGIN`; the menu navigates and the live loop arms the keyboard for the user. HDA is absent from the VMX, so spoken output reports `AW_HDA_SPEECH_UNAVAILABLE` and the menu falls back to its on-screen focus bar - the documented graceful degradation, not a failure |
 
 0xE9 debugcon is a QEMU/Bochs convenience VMware does not have, so `debug_write`
 mirrors every marker onto the real 16550 once `serial::prove` confirms it, and the
