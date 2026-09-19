@@ -178,14 +178,6 @@ jobs:
           if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){
             throw "AMD-5800H-REAL runner must be started from an elevated Administrator console"
           }
-          if(-not (Get-Module -ListAvailable -Name Hyper-V | Select-Object -First 1)){
-            throw 'Hyper-V PowerShell module is not installed'
-          }
-          $vmms=Get-Service vmms -ErrorAction Stop
-          if($vmms.Status -ne 'Running'){
-            throw "Hyper-V VMMS is not running: $($vmms.Status)"
-          }
-
           New-Item -ItemType Directory -Force boot/uefi-amd5800h-real-final-v1/evidence | Out-Null
           @(
             "runner=$env:RUNNER_NAME"
@@ -194,8 +186,7 @@ jobs:
             "cpu=$($cpu.Name)"
             "bios=$($bios.SMBIOSBIOSVersion)"
             "administrator=PASS"
-            "hyperv-module=PASS"
-            "hyperv-vmms=PASS"
+            "hyperv-prerequisites=DEFERRED_UNTIL_HYPERV_GATE"
             "host-binding=PASS"
             "physical-host-reboot=false"
             "physical-host-firmware-mutation=false"
@@ -908,6 +899,202 @@ jobs:
             'VMWARE_STATUS=PASS'
             ($raw -split "[\r\n]+" | Where-Object { $_ -match '^(HII_PROMPT_TEXT|HDA_PIN_NID|HDA_DAC_NID|HDA_ROUTE_DEPTH|HDA_SELECTOR_WRITES_)=' })
           ) | Set-Content (Join-Path $root 'vmware-result.txt') -Encoding ascii
+
+      - name: VMware Workstation interactive HII navigation with spoken HDA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path 'boot/uefi-amd5800h-real-final-v1/evidence').Path
+          if(-not $env:VMRUN_EXE -or -not (Test-Path $env:VMRUN_EXE)){ throw 'VMware Workstation vmrun.exe missing' }
+          $efi=Join-Path $root 'hii-graph-nav.EFI'
+          if(-not (Test-Path $efi)){ throw 'interactive VMware HII graph EFI artifact missing' }
+          $fatBuilder=Join-Path $root 'make_fat16.py'
+          if(-not (Test-Path $fatBuilder)){ throw 'FAT16 builder missing' }
+          $rawDisk=Join-Path $root 'vmware-nav-esp.raw'
+          $vmdk=Join-Path $root 'vmware-nav.vmdk'
+          $serial=Join-Path $root 'vmware-nav.serial'
+          $vmx=Join-Path $root 'qevarynx-nav.vmx'
+          $port=20000 + ([long]$env:GITHUB_RUN_ID % 20000)
+
+          & $env:PYTHON_EXE $fatBuilder $efi $rawDisk | Out-File (Join-Path $root 'vmware-nav-fat16-build.txt') -Encoding utf8
+          if($LASTEXITCODE -ne 0){ throw 'VMware navigation FAT16 creation failed' }
+          & $env:QEMU_IMG_EXE convert -f raw -O vmdk $rawDisk $vmdk
+          if($LASTEXITCODE -ne 0){ throw 'VMware navigation VMDK conversion failed' }
+
+          @" 
+          .encoding = "UTF-8"
+          config.version = "8"
+          virtualHW.version = "20"
+          displayName = "Qevarynx Interactive UEFI HII Screen Reader"
+          guestOS = "other-64"
+          firmware = "efi"
+          uefi.secureBoot.enabled = "FALSE"
+          memsize = "256"
+          numvcpus = "1"
+          ide0:0.present = "TRUE"
+          ide0:0.fileName = "$($vmdk.Replace('\','/'))"
+          ide0:0.deviceType = "disk"
+          sound.present = "TRUE"
+          sound.virtualDev = "hdaudio"
+          serial0.present = "TRUE"
+          serial0.fileType = "file"
+          serial0.fileName = "$($serial.Replace('\','/'))"
+          floppy0.present = "FALSE"
+          ethernet0.present = "FALSE"
+          RemoteDisplay.vnc.enabled = "TRUE"
+          RemoteDisplay.vnc.port = "$port"
+          RemoteDisplay.vnc.ip = "127.0.0.1"
+          msg.autoAnswer = "TRUE"
+          "@ | Set-Content $vmx -Encoding ascii
+
+          Remove-Item $serial -Force -ErrorAction SilentlyContinue
+          $script=Join-Path $root 'vmware_nav_vnc_test.py'
+          @'
+          from pathlib import Path
+          import socket,struct,sys,time
+
+          root=Path(sys.argv[1])
+          port=int(sys.argv[2])
+          serial=root/"vmware-nav.serial"
+
+          def raw():
+              try:
+                  return serial.read_bytes()
+              except FileNotFoundError:
+                  return b""
+
+          def wait_for(marker,count=1,timeout=75):
+              end=time.time()+timeout
+              while time.time()<end:
+                  b=raw()
+                  if b"STATUS=BLOCKED\r\n" in b:
+                      raise SystemExit("VMware navigation blocked: "+repr(b[-24000:]))
+                  if b.count(marker)>=count:
+                      return b
+                  time.sleep(.05)
+              raise SystemExit("timeout waiting for "+repr(marker)+": "+repr(raw()[-24000:]))
+
+          def recv_exact(sock,n):
+              out=b""
+              while len(out)<n:
+                  chunk=sock.recv(n-len(out))
+                  if not chunk:
+                      raise SystemExit("VNC connection closed")
+                  out+=chunk
+              return out
+
+          def connect_vnc():
+              end=time.time()+30
+              while time.time()<end:
+                  try:
+                      s=socket.create_connection(("127.0.0.1",port),1.0)
+                      break
+                  except OSError:
+                      time.sleep(.1)
+              else:
+                  raise SystemExit("VMware VNC endpoint unavailable")
+              version=recv_exact(s,12)
+              if not version.startswith(b"RFB "):
+                  raise SystemExit("bad RFB version "+repr(version))
+              try:
+                  minor=int(version[8:11])
+              except ValueError:
+                  minor=8
+              if minor<=3:
+                  s.sendall(b"RFB 003.003\n")
+                  sec=struct.unpack(">I",recv_exact(s,4))[0]
+                  if sec!=1:
+                      raise SystemExit("VMware VNC requires unsupported RFB 3.3 security type "+str(sec))
+              else:
+                  s.sendall(b"RFB 003.008\n")
+                  n=recv_exact(s,1)[0]
+                  if n==0:
+                      ln=struct.unpack(">I",recv_exact(s,4))[0]
+                      reason=recv_exact(s,ln)
+                      raise SystemExit("VMware VNC rejected client: "+reason.decode("utf-8","replace"))
+                  types=recv_exact(s,n)
+                  if 1 not in types:
+                      raise SystemExit("VMware VNC has no None security type: "+repr(types))
+                  s.sendall(b"\x01")
+                  result=struct.unpack(">I",recv_exact(s,4))[0]
+                  if result!=0:
+                      raise SystemExit("VMware VNC security failed: "+str(result))
+              s.sendall(b"\x01")
+              init=recv_exact(s,24)
+              name_len=struct.unpack(">I",init[20:24])[0]
+              if name_len:
+                  recv_exact(s,name_len)
+              return s
+
+          def key(sock,keysym):
+              sock.sendall(struct.pack(">BBHI",4,1,0,keysym))
+              time.sleep(.06)
+              sock.sendall(struct.pack(">BBHI",4,0,0,keysym))
+              time.sleep(.12)
+
+          wait_for(b"HII_GRAPH_NAV_READY=PASS\r\n")
+          s=connect_vnc()
+          try:
+              sequence=[
+                  (0xff54,b"HII_GRAPH_NAV_KEY=DOWN\r\n"),
+                  (0xff52,b"HII_GRAPH_NAV_KEY=UP\r\n"),
+                  (0xff57,b"HII_GRAPH_NAV_KEY=END\r\n"),
+                  (0xff50,b"HII_GRAPH_NAV_KEY=HOME\r\n"),
+                  (0xff56,b"HII_GRAPH_NAV_KEY=PAGE_DOWN\r\n"),
+                  (0xff55,b"HII_GRAPH_NAV_KEY=PAGE_UP\r\n"),
+                  (ord("r"),b"HII_GRAPH_NAV_KEY=R\r\n"),
+              ]
+              for idx,(keysym,marker) in enumerate(sequence,1):
+                  key(s,keysym)
+                  wait_for(marker)
+                  wait_for(b"HII_GRAPH_NAV_SPEECH_DMA=PASS\r\n",idx)
+                  wait_for(b"HII_GRAPH_NAV_SPEECH_HDA=PASS\r\n",idx)
+                  wait_for(b"HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n",idx)
+              key(s,0xff1b)
+              wait_for(b"HII_GRAPH_NAV_KEY=ESC\r\n")
+              b=wait_for(b"STATUS=PASS\r\n")
+          finally:
+              s.close()
+
+          required=[
+              b"HII_DATABASE_PROTOCOL=PASS\r\n",
+              b"HII_STRING_PROTOCOL=PASS\r\n",
+              b"HII_GRAPH_NAV_PROMPT_COLLECTION=PASS\r\n",
+              b"HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403\r\n",
+              b"HDA_CODEC_SELECTION=GENERIC_RUNTIME\r\n",
+              b"HDA_GRAPH_SEARCH_LIVE=PASS\r\n",
+              b"HDA_SELECTOR_APPLY_LIVE=PASS\r\n",
+              b"HDA_ROUTE_POWER_D0=PASS\r\n",
+              b"HDA_EAPD_POLICY=PASS\r\n",
+              b"HDA_DAC_STREAM_READBACK=PASS\r\n",
+              b"HDA_PIN_CONTROL_READBACK=PASS\r\n",
+              b"HII_PROMPT_SPEECH_HDA=PASS\r\n",
+              b"HII_GRAPH_NAV_EXIT=PASS\r\n",
+              b"HII_GRAPH_SPEECH_DMA_REUSE=PASS\r\n",
+          ]
+          for marker in required:
+              if marker not in b:
+                  raise SystemExit("missing "+repr(marker)+": "+repr(b[-24000:]))
+          if b.count(b"HII_GRAPH_NAV_SPEECH_DMA=PASS\r\n") < 7:
+              raise SystemExit("expected seven spoken VMware navigation events")
+          print("VMWARE_INTERACTIVE_HII_NAVIGATION=PASS")
+          print("VMWARE_INTERACTIVE_HII_NAV_SPEECH_EVENTS=7")
+          print("VMWARE_INTERACTIVE_HII_NAV_DMA_REUSE=PASS")
+          print("VMWARE_VNC_FIRMWARE_KEY_INJECTION=PASS")
+          '@ | Set-Content $script -Encoding utf8
+
+          & $env:VMRUN_EXE -T ws start $vmx nogui
+          if($LASTEXITCODE -ne 0){ throw 'vmrun interactive navigation start failed' }
+          try {
+            & $env:PYTHON_EXE $script $root $port | Tee-Object (Join-Path $root 'vmware-nav-result.txt')
+            if($LASTEXITCODE -ne 0){ throw 'VMware interactive HII navigation test failed' }
+          } finally {
+            & $env:VMRUN_EXE -T ws stop $vmx hard 2>$null | Out-Null
+            Start-Sleep -Seconds 1
+          }
+          Get-Content (Join-Path $root 'vmware-nav-result.txt') | Add-Content (Join-Path $root 'vmware-result.txt') -Encoding ascii
+          Get-Content $serial -Raw | Set-Content (Join-Path $root 'vmware-nav-captured.txt') -Encoding ascii
+
       - name: Hyper-V Generation 2 UEFI reader boot witness
         shell: pwsh
         run: |
@@ -1146,6 +1333,7 @@ jobs:
           $vm='NOT_FOUND'
           $vmSpeech='NOT_ESTABLISHED'
           $vmIntegrated='NOT_ESTABLISHED'
+          $vmInteractive='NOT_ESTABLISHED'
           $vmControllerSelection='NOT_ESTABLISHED'
           $vmCodecSelection='NOT_ESTABLISHED'
           if(Test-Path "$root/evidence/vmware-result.txt"){
@@ -1153,6 +1341,7 @@ jobs:
             if($vr -match 'VMWARE_WORKSTATION=PASS'){ $vm='PASS' }
             if($vr -match 'VMWARE_FULL_HDA_SPEECH=PASS'){ $vmSpeech='PASS' }
             if($vr -match 'VMWARE_INTEGRATED_HII_HDA_SPEECH=PASS'){ $vmIntegrated='PASS' }
+            if($vr -match 'VMWARE_INTERACTIVE_HII_NAVIGATION=PASS'){ $vmInteractive='PASS' }
             if($vr -match 'VMWARE_HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403'){ $vmControllerSelection='GENERIC_CLASS_0403' }
             if($vr -match 'VMWARE_HDA_CODEC_SELECTION=GENERIC_RUNTIME'){ $vmCodecSelection='GENERIC_RUNTIME' }
           }
@@ -1196,6 +1385,7 @@ jobs:
           $lines += "proof-vmware-workstation = $vm"
           $lines += "proof-vmware-hda-graph-speech = $vmSpeech"
           $lines += "proof-vmware-integrated-hii-hda-speech = $vmIntegrated"
+          $lines += "proof-vmware-interactive-hii-navigation = $vmInteractive"
           $lines += "proof-vmware-hda-controller-selection = $vmControllerSelection"
           $lines += "proof-vmware-hda-codec-selection = $vmCodecSelection"
           $lines += "proof-hyperv-generation2-uefi-execution = $hyperv"
