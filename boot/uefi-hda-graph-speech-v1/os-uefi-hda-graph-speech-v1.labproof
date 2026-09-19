@@ -15,8 +15,8 @@ HDA-DMA-LPIB-progress = required
 captured-waveform = required
 physical-ASUS-M1603QA-speech = not-established
 proof = PASS
-proof-run = 35402276393
-proof-head-sha = 6d105219ad128109c6b3b5618c9a8328640ed24f
+proof-run = 35432774243
+proof-head-sha = ed87e82fd718e9248c7f4d0836694ac707aabf6a
 proof-live-HDA-graph = PASS
 proof-selector-apply-readback = PASS
 proof-runtime-allophone-BDL-order = e,d
@@ -24,8 +24,8 @@ proof-full-utterance-asset = false
 proof-DMA-LPIB-progress = PASS
 proof-speech-waveform = PASS
 proof-physical-ASUS-M1603QA-speech = not-established
-proof-wav-metrics = frames=18799; duration=0.39164583333333336; peak=13355; active-samples=30746; wav-sha256=a3737f905a488419323a9556725633fc1a6f1ca02ec096ce7970fd339d24ff5e
+proof-wav-metrics = frames=18770; duration=0.3910416666666667; peak=13355; active-samples=30696; wav-sha256=c8034b710aab8718bb4a22e3483f5e9be12be2bf073f8bcc9ee2d60e557b37dd
 proof-unit-metadata-sha256 = 988305ef633596af80648384df5fe3149b3dc765deca41b28d5acace12aa4d69
-proof-efi-sha256 = fca2edf5de29e9e3ed86ed8001dc24925711687e53606f2c1d779ffc441f822a
-proof-wav-sha256 = a3737f905a488419323a9556725633fc1a6f1ca02ec096ce7970fd339d24ff5e
-proof-serial-sha256 = e036bb7e4574ded84b3fca25d17934148b9dd265c1ae69f5b28d41a1662930eb
+proof-efi-sha256 = 28ed94fa7f0ffb01e7fb488def31d267157c8c5ce3c16883d9837a2d569206d0
+proof-wav-sha256 = c8034b710aab8718bb4a22e3483f5e9be12be2bf073f8bcc9ee2d60e557b37dd
+proof-serial-sha256 = d70c07ad07a1a9f1adcc704e537064f736586e9d70645b16abe2342d1459221c
