@@ -21,8 +21,8 @@ physical-ASUS-repeat-speech = not-established
 claim = success establishes that native UEFI resolves the live current HII option, waits for explicit R input, and only then repeats that option through native HDA speech
 claim = success does not establish physical ASUS keyboard or audio behavior
 proof = PASS
-proof-run = 35401649267
-proof-head-sha = 9dbc401a25f584647ceb4f6ffed64c38d4c37f24
+proof-run = 35435708974
+proof-head-sha = 332d0932d7208909c1bd70c323c6fd5e00450161
 proof-repeat-key-event = PASS
 proof-pre-key-hda-speech = false
 proof-current-value = 0
@@ -36,8 +36,8 @@ proof-route-config-call = false
 proof-set-variable-call = false
 proof-setting-mutation = false
 proof-physical-ASUS-repeat-speech = false
-proof-wave-metrics = frames=18767; peak=13355; active=32172; wav-sha256=57019a16047c172caa8a8723a7543f6e7fe02b49dbc1804e392c706ed48b32d9
-proof-efi-sha256 = 06ffe2b1b8e01b89328d35a61724c52ecdcc2782abd0d906fe693316d734c2cd
-proof-serial-sha256 = 885d69cd31c9b51bde7b748c5a28479ae574dec7048630a42d29246296c20290
-proof-wav-sha256 = 57019a16047c172caa8a8723a7543f6e7fe02b49dbc1804e392c706ed48b32d9
-proof-post-serial-sha256 = 44cdf46232f96b140d565c576ce27452e770a8ccb6e2e14d256aec1fba4b6153
+proof-wave-metrics = frames=18750; peak=13355; active=26256; wav-sha256=da2958f03fb6df8d5a74d623ec0a7a95cdde78801b5ed1264acd89b96a08fbee
+proof-efi-sha256 = 264b3101a9e5d03486777f451902768d809ebe8f8b8c3b8075177f820b960373
+proof-serial-sha256 = 578a3275c2ac38baa323b9da6606d4db865f51c7a5af520b7b7032808a9900eb
+proof-wav-sha256 = da2958f03fb6df8d5a74d623ec0a7a95cdde78801b5ed1264acd89b96a08fbee
+proof-post-serial-sha256 = b8d293dd6f7b61f3e8ba93c54125d0e34d1b6502e9753b8c480131c99f7e957f
