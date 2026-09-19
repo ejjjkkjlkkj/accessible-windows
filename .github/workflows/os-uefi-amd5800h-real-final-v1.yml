@@ -1229,16 +1229,25 @@ jobs:
 
             $captureJob=Start-Job -ScriptBlock {
               param($pipeName,$serialPath)
-              $server=[System.IO.Pipes.NamedPipeServerStream]::new(
+              $client=[System.IO.Pipes.NamedPipeClientStream]::new(
+                '.',
                 $pipeName,
                 [System.IO.Pipes.PipeDirection]::In,
-                1,
-                [System.IO.Pipes.PipeTransmissionMode]::Byte,
                 [System.IO.Pipes.PipeOptions]::Asynchronous
               )
               try {
-                'HYPERV_PIPE_SERVER_READY'
-                $server.WaitForConnection()
+                $connected=$false
+                for($i=0;$i -lt 120 -and -not $connected;$i++){
+                  try {
+                    $client.Connect(250)
+                    $connected=$client.IsConnected
+                  } catch [System.TimeoutException] {
+                    Start-Sleep -Milliseconds 100
+                  } catch {
+                    Start-Sleep -Milliseconds 100
+                  }
+                }
+                if(-not $connected){ throw "Hyper-V COM named pipe connection timeout: $pipeName" }
                 $file=[System.IO.File]::Open(
                   $serialPath,
                   [System.IO.FileMode]::Create,
@@ -1248,7 +1257,7 @@ jobs:
                 try {
                   $buf=New-Object byte[] 4096
                   while($true){
-                    $n=$server.Read($buf,0,$buf.Length)
+                    $n=$client.Read($buf,0,$buf.Length)
                     if($n -le 0){ break }
                     $file.Write($buf,0,$n)
                     $file.Flush()
@@ -1257,22 +1266,9 @@ jobs:
                   $file.Dispose()
                 }
               } finally {
-                $server.Dispose()
+                $client.Dispose()
               }
             } -ArgumentList $pipeName,$serial
-
-            $pipeReady=$false
-            $pipeDeadline=(Get-Date).AddSeconds(10)
-            do {
-              $captureOutput=@(Receive-Job $captureJob -Keep -ErrorAction SilentlyContinue)
-              if($captureOutput -contains 'HYPERV_PIPE_SERVER_READY'){
-                $pipeReady=$true
-                break
-              }
-              if($captureJob.State -eq 'Failed'){ throw 'Hyper-V COM pipe server failed before VM start' }
-              Start-Sleep -Milliseconds 100
-            } while((Get-Date) -lt $pipeDeadline)
-            if(-not $pipeReady){ throw 'Hyper-V COM pipe server readiness timeout' }
 
             Start-VM -Name $vmName
             $deadline=(Get-Date).AddSeconds(45)
