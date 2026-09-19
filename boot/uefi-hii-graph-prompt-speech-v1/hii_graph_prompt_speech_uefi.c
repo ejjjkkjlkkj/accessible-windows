@@ -818,7 +818,7 @@ static void speech_dma_stop(void) {
 static int speech_dma_begin(const char *text, u32 text_count) {
     if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 95u) return 0;
     const u32 pcm_off = 0x1000u;
-    const u32 dma_pages = 1536u;
+    const u32 dma_pages = 4096u;
     const u32 dma_bytes = dma_pages * 4096u;
     if (!qev_unit_bank_len || pcm_off >= dma_bytes) return 0;
 
@@ -829,10 +829,10 @@ static int speech_dma_begin(const char *text, u32 text_count) {
      * interruption while avoiding one BDL descriptor per allophone and the
      * alignment failures seen with longer HII labels.
      *
-     * Worst-case 32-character French letter-name spelling is about 4.36 MiB
-     * (all 'w'). Reserve 6 MiB and up to 128 BDL entries so every accepted
-     * 32-character label remains representable. Playback stays interruptible,
-     * so the larger worst-case timeout never blocks keyboard focus changes.
+     * Worst-case semantic speech can approach the 95-byte runtime limit.
+     * Reserve 16 MiB and up to 256 BDL entries so long role-plus-label text
+     * remains representable. Playback stays interruptible, so the larger
+     * worst-case timeout never blocks keyboard focus changes.
      */
     u64 base = g_speech_dma_base;
     if (!base) {
@@ -911,7 +911,7 @@ static int speech_dma_begin(const char *text, u32 text_count) {
     u32 entries = 0;
     u32 described = 0;
     while (described < dma_payload) {
-        if (entries >= 128u) return 0;
+        if (entries >= 256u) return 0;
         u32 len = dma_payload - described;
         if (len > max_bdl_bytes) len = max_bdl_bytes;
         volatile u8 *e = bdl + entries * 16u;
@@ -962,7 +962,7 @@ static int speech_dma_begin(const char *text, u32 text_count) {
        keyboard focus can cancel the current utterance immediately. */
     u64 play_us = (((u64)dma_payload * 125ull) + 23ull) / 24ull;
     play_us += 150000ull;
-    if (play_us > 30000000ull) {
+    if (play_us > 90000000ull) {
         speech_dma_stop();
         return 0;
     }
