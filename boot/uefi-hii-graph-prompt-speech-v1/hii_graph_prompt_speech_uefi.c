@@ -153,6 +153,8 @@ static u32 g_prompt_count;
 #define MAX_HII_NAV_PROMPTS 96
 static char g_nav_prompts[MAX_HII_NAV_PROMPTS][MAX_SPOKEN_CHARS + 1];
 static u8 g_nav_prompt_lengths[MAX_HII_NAV_PROMPTS];
+static char g_nav_help[MAX_HII_NAV_PROMPTS][MAX_SPOKEN_CHARS + 1];
+static u8 g_nav_help_lengths[MAX_HII_NAV_PROMPTS];
 static u8 g_nav_opcode[MAX_HII_NAV_PROMPTS];
 static u16 g_nav_question_id[MAX_HII_NAV_PROMPTS];
 static u16 g_nav_help_token[MAX_HII_NAV_PROMPTS];
@@ -165,6 +167,8 @@ static u8 g_nav_prompt_index;
 static u8 g_nav_event_mask;
 static u8 g_nav_speech_events;
 static u8 g_nav_question_speech_events;
+static u8 g_nav_help_events;
+static u8 g_nav_form_headings;
 #define NAV_SEEN_UP        0x01u
 #define NAV_SEEN_DOWN      0x02u
 #define NAV_SEEN_R         0x04u
@@ -375,7 +379,13 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SPEECH_EVENTS=0x");
     proof_hex8(proof,sizeof(proof),&n,g_nav_speech_events);
     proof_puts(proof,sizeof(proof),&n,"\r\n");
-    proof_puts(proof,sizeof(proof),&n,"HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_HELP_EVENTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_help_events);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_FORM_HEADINGS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_form_headings);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V2\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SEMANTIC_CONTROL=");
     proof_puts(proof,sizeof(proof),&n,
@@ -964,6 +974,7 @@ static int question_opcode(u8 op) {
 }
 static const char *nav_role_name(u8 op) {
     switch (op) {
+        case 0x01: return "form";
         case 0x02: return "subtitle";
         case 0x03: return "text";
         case 0x05: return "one of";
@@ -1071,21 +1082,28 @@ static int get_hii_string(hii_string_protocol *str, void *handle, u16 token, cha
 }
 
 #ifdef QEV_INTERACTIVE_NAV
-static int nav_prompt_add(const char *text, u32 count, u8 op, u16 question_id,
-                          u16 help_token, u16 varstore_id, u16 varstore_info,
+static int nav_prompt_add(const char *text, u32 count,
+                          const char *help, u32 help_count,
+                          u8 op, u16 question_id, u16 help_token,
+                          u16 varstore_id, u16 varstore_info,
                           u8 question_flags) {
     if (!text || !count || count > MAX_SPOKEN_CHARS) return 0;
+    if (help_count > MAX_SPOKEN_CHARS) return 0;
     if (g_nav_prompt_total >= MAX_HII_NAV_PROMPTS) return 0;
     u8 slot = g_nav_prompt_total++;
     for (u32 j = 0; j < count; ++j) g_nav_prompts[slot][j] = text[j];
     g_nav_prompts[slot][count] = 0;
     g_nav_prompt_lengths[slot] = (u8)count;
+    for (u32 j = 0; j < help_count; ++j) g_nav_help[slot][j] = help[j];
+    g_nav_help[slot][help_count] = 0;
+    g_nav_help_lengths[slot] = (u8)help_count;
     g_nav_opcode[slot] = op;
     g_nav_question_id[slot] = question_id;
     g_nav_help_token[slot] = help_token;
     g_nav_varstore_id[slot] = varstore_id;
     g_nav_varstore_info[slot] = varstore_info;
     g_nav_question_flags[slot] = question_flags;
+    if (op == 0x01u) ++g_nav_form_headings;
     return 1;
 }
 
@@ -1111,8 +1129,42 @@ static u32 nav_build_speech_text(void) {
         for (u32 i = 0; readonly_text[i] && n + 1u < sizeof(g_nav_speech_text); ++i)
             g_nav_speech_text[n++] = readonly_text[i];
     }
+    if (g_nav_help_lengths[g_nav_prompt_index] &&
+        n + 16u < sizeof(g_nav_speech_text)) {
+        static const char help_available_text[] = " help available";
+        for (u32 i = 0; help_available_text[i] && n + 1u < sizeof(g_nav_speech_text); ++i)
+            g_nav_speech_text[n++] = help_available_text[i];
+    }
     g_nav_speech_text[n] = 0;
     return n;
+}
+
+static int nav_speak_help(void) {
+    static const char help_prefix[] = "help ";
+    static const char no_help[] = "no help available";
+    u32 n = 0;
+    u8 help_count = g_nav_help_lengths[g_nav_prompt_index];
+    if (!help_count) {
+        for (u32 i = 0; no_help[i] && n + 1u < sizeof(g_nav_speech_text); ++i)
+            g_nav_speech_text[n++] = no_help[i];
+        marker("HII_GRAPH_NAV_HELP_AVAILABLE=NO");
+    } else {
+        for (u32 i = 0; help_prefix[i] && n + 1u < sizeof(g_nav_speech_text); ++i)
+            g_nav_speech_text[n++] = help_prefix[i];
+        for (u32 i = 0; i < help_count && n + 1u < sizeof(g_nav_speech_text); ++i)
+            g_nav_speech_text[n++] = g_nav_help[g_nav_prompt_index][i];
+        marker("HII_GRAPH_NAV_HELP_AVAILABLE=PASS");
+    }
+    g_nav_speech_text[n] = 0;
+    serial_puts("HII_GRAPH_NAV_HELP_TEXT=");
+    serial_puts(g_nav_speech_text);
+    serial_puts("\r\n");
+    if (!run_speech_dma(g_nav_speech_text, n)) return 0;
+    marker("HII_GRAPH_NAV_HELP_SPEECH_DMA=PASS");
+    marker("HII_GRAPH_NAV_HELP_SPEECH_HDA=PASS");
+    marker("HII_GRAPH_NAV_HELP_LPIB_PROGRESS=PASS");
+    ++g_nav_help_events;
+    return 1;
 }
 #endif
 
@@ -1140,6 +1192,8 @@ static int resolve_hii_prompt(void *system_table) {
     g_nav_event_mask = 0;
     g_nav_speech_events = 0;
     g_nav_question_speech_events = 0;
+    g_nav_help_events = 0;
+    g_nav_form_headings = 0;
 #endif
 
     for (u32 hi = 0; hi < handles; ++hi) {
@@ -1166,13 +1220,19 @@ static int resolve_hii_prompt(void *system_table) {
                     u8 op = q[0];
                     u32 oplen = (u32)(q[1] & 0x7f);
                     if (oplen < 2u || q + oplen > end) break;
-                    if (prompt_opcode(op) && oplen >= 4u) {
-                        u16 token = rd16(q + 2);
+                    if ((op == 0x01u && oplen >= 6u) ||
+                        (prompt_opcode(op) && oplen >= 4u)) {
+                        u16 token = op == 0x01u ? rd16(q + 4) : rd16(q + 2);
 #ifdef QEV_INTERACTIVE_NAV
                         char candidate[MAX_SPOKEN_CHARS + 1];
                         u32 candidate_count = 0;
                         if (token && get_hii_string(str, handle, token, candidate, &candidate_count)) {
-                            u16 help_token = oplen >= 6u ? rd16(q + 4) : 0;
+                            u16 help_token = (op != 0x01u && oplen >= 6u) ? rd16(q + 4) : 0;
+                            char help_candidate[MAX_SPOKEN_CHARS + 1];
+                            u32 help_count = 0;
+                            help_candidate[0] = 0;
+                            if (help_token)
+                                get_hii_string(str, handle, help_token, help_candidate, &help_count);
                             u16 question_id = 0;
                             u16 varstore_id = 0;
                             u16 varstore_info = 0;
@@ -1183,8 +1243,10 @@ static int resolve_hii_prompt(void *system_table) {
                                 varstore_info = rd16(q + 10);
                                 question_flags = q[12];
                             }
-                            nav_prompt_add(candidate, candidate_count, op, question_id,
-                                           help_token, varstore_id, varstore_info,
+                            nav_prompt_add(candidate, candidate_count,
+                                           help_candidate, help_count,
+                                           op, question_id, help_token,
+                                           varstore_id, varstore_info,
                                            question_flags);
                         }
 #else
@@ -1211,6 +1273,10 @@ static int resolve_hii_prompt(void *system_table) {
         marker("IFR_PROMPT_STRING_ID=PASS");
         marker("HII_LANGUAGE_AND_STRING=PASS");
         marker("HII_GRAPH_NAV_PROMPT_COLLECTION=PASS");
+        if (g_nav_form_headings)
+            marker("HII_GRAPH_NAV_FORM_HEADING=PASS");
+        else
+            marker("HII_GRAPH_NAV_FORM_HEADING=NOT_ESTABLISHED");
         serial_puts("HII_GRAPH_NAV_PROMPT_TOTAL=0x");
         serial_hex8(g_nav_prompt_total);
         serial_puts("\r\n");
@@ -1486,6 +1552,12 @@ static int wait_navigation_keys(void *system_table) {
         u64 st = conin->read_key(conin, &key);
         if (st == 0) {
             u8 speak = 0;
+            if (key.unicode_char == (u16)'h' || key.unicode_char == (u16)'H' ||
+                key.scan_code == 0x000bu) {
+                marker("HII_GRAPH_NAV_KEY=HELP");
+                if (!nav_speak_help()) return 0;
+                continue;
+            }
             if (key.unicode_char == 0x001bu || key.scan_code == 0x0017u) {
                 marker("HII_GRAPH_NAV_KEY=ESC");
                 if ((g_nav_event_mask & NAV_REQUIRED_MASK) != NAV_REQUIRED_MASK ||
@@ -1498,7 +1570,13 @@ static int wait_navigation_keys(void *system_table) {
                 marker("HII_GRAPH_NAV_EXIT=PASS");
                 return 1;
             }
-            if (key.unicode_char == (u16)'r' || key.unicode_char == (u16)'R') {
+            if (key.unicode_char == 0x0009u) {
+                marker("HII_GRAPH_NAV_KEY=TAB");
+                u8 next = (u8)(g_nav_prompt_index + 1u);
+                if (next >= g_nav_prompt_total) next = 0;
+                nav_prompt_load(next);
+                speak = 1;
+            } else if (key.unicode_char == (u16)'r' || key.unicode_char == (u16)'R') {
                 marker("HII_GRAPH_NAV_KEY=R");
                 g_nav_event_mask |= NAV_SEEN_R;
                 speak = 1;
@@ -1645,7 +1723,9 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("SYNTH=ALLOPHONE_BDL_RUNTIME_TEXT_V1");
     marker("SYNTH=GRAPHEME_ALLOPHONE_RUNTIME_TEXT_V2");
     marker("HII_PROMPT_MAX_CHARS=64");
-    marker("HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1");
+    marker("HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V2");
+    marker("HII_NAV_FORM_HEADINGS=PASS");
+    marker("HII_NAV_HELP_AND_TAB=PASS");
     marker("HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS");
     marker("HII_PROMPT_WORD_BOUNDARIES=PASS");
     marker("BDL_RUNTIME_TEXT_SCHEDULE=PASS");
