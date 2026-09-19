@@ -257,6 +257,10 @@ jobs:
             'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS'
             'HII_GRAPH_NAV_EXIT=PASS'
             'HII_GRAPH_NAV_SPEECH_EVENTS=0x07'
+            'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1'
+            'HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS'
+            'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS'
+            'HII_GRAPH_NAV_SEMANTIC_QUESTION_EVENTS=0x07'
             'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
             'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION'
           ) | Set-Content $proof -Encoding ascii
@@ -293,6 +297,14 @@ jobs:
           Assert-Rejected 'negative-navigation-speech-count' ($raw.Replace(
             'HII_GRAPH_NAV_SPEECH_EVENTS=0x07',
             'HII_GRAPH_NAV_SPEECH_EVENTS=0x06'
+          ))
+          Assert-Rejected 'negative-semantic-control' ($raw.Replace(
+            'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS',
+            'HII_GRAPH_NAV_SEMANTIC_CONTROL=NOT_ESTABLISHED'
+          ))
+          Assert-Rejected 'negative-semantic-question-count' ($raw.Replace(
+            'HII_GRAPH_NAV_SEMANTIC_QUESTION_EVENTS=0x07',
+            'HII_GRAPH_NAV_SEMANTIC_QUESTION_EVENTS=0x00'
           ))
           Assert-Rejected 'negative-duplicate-field' ($raw + "`r`nPHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=NOT_ESTABLISHED`r`n")
           Assert-Rejected 'negative-source-mismatch' ($raw.Replace(
