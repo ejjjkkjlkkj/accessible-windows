@@ -10,7 +10,9 @@ CHANNELS=2
 BITS=16
 TONE_HZ=660.0
 TONE_MS=320
-DMA_PAGES=128
+# 256 pages keep the complete first-party allophone bank below 4 GiB while
+# leaving the first page for the BDL. 128 pages no longer fit the current bank.
+DMA_PAGES=256
 PCM_OFF=0x1000
 
 MARKS={
