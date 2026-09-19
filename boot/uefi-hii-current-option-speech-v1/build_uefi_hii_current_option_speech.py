@@ -1763,7 +1763,7 @@ def validate(image,pcm):
 
 def main():
  global WAIT_REPEAT_KEY, WAIT_DOWN_PROBE, WAIT_DOWN_SPEAK, WAIT_UP_PROBE, WAIT_UP_SPEAK, WAIT_DOWN_COMMIT, WAIT_DOWN_CANCEL, EFI_VARSTORE_ONLY, PLATFORM_TARGET_ONLY
- if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak|--wait-up-probe|--wait-up-speak|--wait-down-repeat-speak|--wait-down-commit|--wait-down-cancel|--efivar-probe|--platform-probe|--wait-platform-commit]')
+ if len(sys.argv) not in {2,3}: raise SystemExit('usage: build_uefi_hii_current_option_speech.py OUTPUT_EFI [--wait-repeat|--wait-down-probe|--wait-down-speak|--wait-up-probe|--wait-up-speak|--wait-down-repeat-speak|--wait-down-commit|--wait-down-cancel|--efivar-probe|--platform-probe|--wait-platform-commit|--wait-platform-cancel]')
  if len(sys.argv)==3:
   if sys.argv[2]=='--wait-repeat': WAIT_REPEAT_KEY=True
   elif sys.argv[2]=='--wait-down-probe': WAIT_DOWN_PROBE=True
@@ -1776,6 +1776,7 @@ def main():
   elif sys.argv[2]=='--efivar-probe': EFI_VARSTORE_ONLY=True
   elif sys.argv[2]=='--platform-probe': PLATFORM_TARGET_ONLY=True
   elif sys.argv[2]=='--wait-platform-commit': PLATFORM_TARGET_ONLY=True; WAIT_DOWN_COMMIT=True
+  elif sys.argv[2]=='--wait-platform-cancel': PLATFORM_TARGET_ONLY=True; WAIT_DOWN_CANCEL=True
   else: raise SystemExit('unknown mode: '+sys.argv[2])
  image,pcm=build(); validate(image,pcm)
  p=Path(sys.argv[1]); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(image)
