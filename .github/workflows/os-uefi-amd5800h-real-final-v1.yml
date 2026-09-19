@@ -169,14 +169,32 @@ jobs:
           $cs=Get-CimInstance Win32_ComputerSystem
           $cpu=Get-CimInstance Win32_Processor | Select-Object -First 1
           $bios=Get-CimInstance Win32_BIOS
+          $os=Get-CimInstance Win32_OperatingSystem
+          $dg=Get-CimInstance -Namespace root\Microsoft\Windows\DeviceGuard -ClassName Win32_DeviceGuard -ErrorAction Stop
+
+          if ([string]$cs.Manufacturer -notmatch 'ASUSTeK') { throw "unexpected manufacturer: $($cs.Manufacturer)" }
           if ([string]$cs.Model -notmatch 'M1603QA') { throw "unexpected model: $($cs.Model)" }
           if ([string]$cpu.Name -notmatch '5800H') { throw "unexpected cpu: $($cpu.Name)" }
+          if ([string]$bios.SMBIOSBIOSVersion -ne 'M1603QA.308') { throw "unexpected BIOS: $($bios.SMBIOSBIOSVersion)" }
+          if ([string]$os.BuildNumber -ne '26300') { throw "unexpected Windows build: $($os.BuildNumber)" }
+          if (-not [bool]$cs.HypervisorPresent) { throw 'expected Windows hypervisor/VBS host state' }
+          if ([int]$dg.VirtualizationBasedSecurityStatus -ne 2) { throw "VBS is not running: $($dg.VirtualizationBasedSecurityStatus)" }
+          if (-not (@($dg.SecurityServicesRunning) -contains 1)) { throw 'Credential Guard is not running' }
+          if ([uint64]$cs.TotalPhysicalMemory -lt 39GB) { throw "unexpected RAM: $($cs.TotalPhysicalMemory)" }
 
           $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
           $principal=[Security.Principal.WindowsPrincipal]::new($identity)
           if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){
             throw "AMD-5800H-REAL runner must be started from an elevated Administrator console"
           }
+
+          try {
+            $secureBoot=[bool](Confirm-SecureBootUEFI)
+          } catch {
+            throw "UEFI Secure Boot state unavailable: $($_.Exception.Message)"
+          }
+          if($secureBoot){ throw 'physical target requires Secure Boot disabled for the current unsigned pre-OS test image' }
+
           New-Item -ItemType Directory -Force boot/uefi-amd5800h-real-final-v1/evidence | Out-Null
           @(
             "runner=$env:RUNNER_NAME"
@@ -184,6 +202,15 @@ jobs:
             "model=$($cs.Model)"
             "cpu=$($cpu.Name)"
             "bios=$($bios.SMBIOSBIOSVersion)"
+            "windows-caption=$($os.Caption)"
+            "windows-version=$($os.Version)"
+            "windows-build=$($os.BuildNumber)"
+            "ram-bytes=$($cs.TotalPhysicalMemory)"
+            "uefi=PASS"
+            "secure-boot=DISABLED"
+            "hypervisor-present=PASS"
+            "vbs-running=PASS"
+            "credential-guard=PASS"
             "administrator=PASS"
             "hyperv-prerequisites=DEFERRED_UNTIL_HYPERV_GATE"
             "host-binding=PASS"
@@ -191,6 +218,10 @@ jobs:
             "physical-host-firmware-mutation=false"
           ) | Set-Content boot/uefi-amd5800h-real-final-v1/evidence/host.txt -Encoding utf8
           'AMD5800H_REAL_BINDING=PASS'
+          'AMD5800H_BIOS_308=PASS'
+          'AMD5800H_WINDOWS_BUILD_26300=PASS'
+          'AMD5800H_UEFI_SECURE_BOOT_DISABLED=PASS'
+          'AMD5800H_VBS_CREDENTIAL_GUARD=PASS'
 
       - name: Discover Python QEMU OVMF and VMware
         shell: pwsh
@@ -1278,6 +1309,13 @@ jobs:
             'PHYSICAL_TARGET_HDA_CONTROLLER=PCI_VEN_1022_DEV_15E3'
             'PHYSICAL_TARGET_CODEC=HDAUDIO_VEN_10EC_DEV_0256'
             'PHYSICAL_TARGET_CODEC_VERIFICATION=NATIVE_HDA_GET_PARAMETER_00'
+            'PHYSICAL_TARGET_BIOS=M1603QA.308'
+            'PHYSICAL_TARGET_OS_BUILD=26300'
+            'PHYSICAL_HOST_UEFI=PASS'
+            'PHYSICAL_HOST_SECURE_BOOT=DISABLED'
+            'PHYSICAL_HOST_HYPERVISOR=DETECTED'
+            'PHYSICAL_HOST_VBS=RUNNING'
+            'PHYSICAL_HOST_CREDENTIAL_GUARD=RUNNING'
             'PHYSICAL_HOST_REBOOT=false'
             'PHYSICAL_HOST_FIRMWARE_MUTATION=false'
             'VIRTUALIZATION_CLOSURE=PASS'
