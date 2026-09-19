@@ -245,7 +245,7 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
         '\\','Q','E','V','A','R','Y','N','O','X','-','P','H','Y','S','I','C','A','L',
         '-','P','R','O','O','F','.','T','X','T',0
     };
-    char proof[4096];
+    static char proof[4096];
     usize n = 0;
     g_proof_overflow = 0;
     loaded_image_protocol_head *loaded = 0;
