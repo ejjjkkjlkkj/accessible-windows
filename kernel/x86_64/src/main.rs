@@ -19,6 +19,7 @@ mod device_irq;
 mod fat16;
 mod frame_allocator;
 mod gpt;
+mod hda;
 mod heap;
 #[cfg(feature = "disk-build-smoke-test")]
 mod installer;
@@ -1564,6 +1565,10 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // Bring up an NVMe controller and read its IDENTIFY data (read-only, safe
         // on any machine; reports unavailable when no controller is present).
         nvme::prove();
+        // Bring up the HDA audio controller and read the codec's identity over
+        // CORB/RIRB (read-only, safe on any machine; the foundation for spoken
+        // screen-reader output). Reports unavailable when no controller is present.
+        hda::prove();
         // Create a file on a FAT16 scratch disk and read it back (installer
         // foundation). Scratch disk only: it modifies the filesystem, so it is
         // gated out of the normal boot path and never touches a real disk.

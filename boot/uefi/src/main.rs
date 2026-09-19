@@ -18,6 +18,10 @@ use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::cfg::ConfigTableEntry;
 use uefi::{cstr16, system, Status};
 
+mod hda;
+mod screen_reader;
+mod sound;
+
 const UEFI_PAGE_SIZE: usize = 4096;
 const MAX_ACPI_SDT_LEN: usize = 1024 * 1024;
 const NORMALIZED_MEMORY_MAP_PAGES: usize = 16;
@@ -545,10 +549,12 @@ fn main() -> Status {
         })
     };
 
-    uefi::println!("Accessible Windows");
-    uefi::println!("BOOT_STAGE=UEFI_HARDWARE_DISCOVERY");
-    uefi::println!("ARCH=x86_64");
-    uefi::println!("DISPLAY={}x{}", width, height);
+    // Accessibility before the operating system: with the display mode now known,
+    // the native screen reader voices the boot screen on the visible console and
+    // lets the user review it and continue by keyboard, while boot services (and
+    // so the console and its keyboard) are still available. Unattended, it reads
+    // the screen and continues on its own.
+    screen_reader::run(width, height);
 
     let normalized_memory_map_buffer = match boot::allocate_pages(
         AllocateType::AnyPages,

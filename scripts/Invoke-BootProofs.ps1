@@ -97,6 +97,35 @@ $configurations = @(
         Required = @(
             # UEFI loader stage.
             'AW_BOOT_OK stage=uefi_init arch=x86_64'
+            # Accessibility begins at the firmware stage, before the kernel loads:
+            # the same announcement engine the kernel and installer use voices the
+            # boot screen on the visible UEFI console (and the debug console it is
+            # asserted on here), states the real display mode, then waits for a
+            # keyboard review before continuing - operable, nonvisual delivery
+            # evidence that a user is told the machine is coming up, in words, this
+            # early. The display line varies with the firmware's mode, so it is not
+            # pinned; the constant lines are. With no key pressed (as here) the
+            # review window times out and the boot continues on its own.
+            'AW_UEFI_SR_BEGIN'
+            # The first audible layer: a startup chime through the PC speaker
+            # (PIT channel 2 + port 0x61), so a blind user hears the accessible
+            # boot come up before any text. Actual sound is not captured headless,
+            # but the speaker interface being driven is proved by reading port
+            # 0x61 back as gated then silenced. A machine with no beeper is silent
+            # yet still passes; spoken words await the HDA + synthesis work.
+            'AW_UEFI_SND_BEGIN'
+            'AW_UEFI_SND_TONE freq=660'
+            'AW_UEFI_SND_GATED'
+            'AW_UEFI_SND_TONE freq=990'
+            'AW_UEFI_SND_SILENCED'
+            'AW_UEFI_SND_PROOF_OK'
+            'AW_UEFI_SR_SPEAK "Accessible Windows, window"'
+            'AW_UEFI_SR_SPEAK "Screen reader active at firmware stage"'
+            'AW_UEFI_SR_SPEAK "Starting Accessible Windows"'
+            'AW_UEFI_SR_SPEAK "Loading the operating system"'
+            'AW_UEFI_SR_READY'
+            'AW_UEFI_SR_CONTINUE reason=timeout'
+            'AW_UEFI_SR_PROOF_OK'
             'AW_KERNEL_FILE_READ_OK'
             'AW_KERNEL_IMAGE_HEADER_OK base=0x200000'
             'AW_NATIVE_KERNEL_LOAD_OK address=0x200000'
@@ -264,6 +293,8 @@ $configurations = @(
             'AW_RING3_PREEMPT_FAIL'
             'AW_CLOCK_FAIL'
             'AW_RTC_FAIL'
+            'AW_UEFI_SR_FAIL'
+            'AW_UEFI_SND_FAIL'
             'AW_SR_FAIL'
             'AW_BRAILLE_FAIL'
             'AW_GDT_SEGMENTS_FAIL'
@@ -473,6 +504,60 @@ $configurations = @(
         Forbidden = @(
             'AW_NVME_UNAVAILABLE'
             'AW_NVME_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
+        # Intel HD Audio: the machine's real audio path and the foundation for
+        # spoken screen-reader output. Bring the controller out of reset, stand up
+        # the CORB/RIRB command/response rings, find the codec, and read the codec's
+        # vendor/device id back over the ring - real data the codec produced, not a
+        # status bit. QEMU's ich6 `intel-hda` controller with an `hda-output` codec;
+        # the `none` audio backend discards sound but the controller and codec still
+        # run, which is all bring-up needs.
+        Name     = 'hda'
+        Features = @()
+        QemuArgs = @(
+            '-audiodev', 'none,id=snd0'
+            '-device', 'intel-hda'
+            '-device', 'hda-output,audiodev=snd0'
+        )
+        # The UEFI stage streams ~12 s of pre-recorded speech through HDA before the
+        # kernel even loads, so this configuration needs more than the default
+        # budget to reach idle. Raising it weakens no assertion.
+        TimeoutSeconds = 150
+        Required = @(
+            # First, the firmware stage speaks through HDA, before the kernel: the
+            # UEFI screen reader reaches the real audio codec (arXiv:1712.03186) and
+            # streams pre-recorded PCM speech of the boot screen by DMA, so a blind
+            # user hears the words on the machine's actual speakers, not the (often
+            # absent) PC-speaker buzzer. Sound is not captured headless; the proof is
+            # the codec answering and the clips streaming (link position advanced).
+            'AW_UEFI_HDA_CODEC_ID vendor_device='
+            'AW_UEFI_HDA_READY dac='
+            'AW_UEFI_HDA_SPEAK bytes='
+            # Then the kernel brings the same controller up again for the installer.
+            'AW_HDA_FOUND'
+            'AW_HDA_RESET_OK'
+            'AW_HDA_CODEC_PRESENT'
+            'AW_HDA_CODEC_ID vendor_device='
+            'AW_HDA_PROOF_OK'
+            # Then real audio DMA: walk the codec to a DAC + output pin, configure
+            # them, program output stream 0 with a BDL over a PCM tone buffer, start
+            # it, and prove the link position advances - the controller is actually
+            # streaming samples from memory, not just holding a status bit.
+            'AW_HDA_OUTPUT dac='
+            'AW_HDA_STREAM_RUN'
+            'AW_HDA_DMA_ADVANCED position='
+            'AW_HDA_PLAYBACK_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_UEFI_HDA_UNAVAILABLE'
+            'AW_UEFI_HDA_FAIL'
+            'AW_HDA_UNAVAILABLE'
+            'AW_HDA_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )
