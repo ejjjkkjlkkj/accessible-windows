@@ -1,5 +1,6 @@
 param(
-  [string]$ProofPath
+  [string]$ProofPath,
+  [switch]$AudibleSpeakerConfirmed
 )
 $ErrorActionPreference='Stop'
 
@@ -83,10 +84,16 @@ if($navEventCount -lt 7){
   HiiNavigation='UP_DOWN_HOME_END_PAGEUP_PAGEDOWN_R_ESC_PASS'
   NavigationSpeechEvents=$navEventCount
   DmaReuse='PASS'
-  AudiblePhysicalSpeaker='REQUIRES_HUMAN_CONFIRMATION'
+  AudiblePhysicalSpeaker=$(if($AudibleSpeakerConfirmed){'PASS'}else{'REQUIRES_HUMAN_CONFIRMATION'})
 } | ConvertTo-Json -Depth 4
 
 'PHYSICAL_UEFI_HDA_EXECUTION=PASS'
 'PHYSICAL_UEFI_HII_NAVIGATION=PASS'
 'PHYSICAL_UEFI_DMA_REUSE=PASS'
-'PHYSICAL_UEFI_SPEAKER_AUDIBLE=REQUIRES_HUMAN_CONFIRMATION'
+if($AudibleSpeakerConfirmed){
+  'PHYSICAL_UEFI_SPEAKER_AUDIBLE=PASS'
+  'PHYSICAL_UEFI_FINAL_CLOSURE=PASS'
+} else {
+  'PHYSICAL_UEFI_SPEAKER_AUDIBLE=REQUIRES_HUMAN_CONFIRMATION'
+  'PHYSICAL_UEFI_FINAL_CLOSURE=PENDING_AUDIBLE_CONFIRMATION'
+}
