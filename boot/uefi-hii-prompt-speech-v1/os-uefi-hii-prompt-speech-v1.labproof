@@ -40,8 +40,8 @@ claim = success establishes that a real prompt resolved from live firmware HII b
 claim = success does not establish option or current-value speech navigation configuration mutation or physical ASUS firmware output
 proof = PASS
 revalidation-request = 2026-09-18T22:04+02:00
-proof-run = 35435706465
-proof-head-sha = 1b6abeb271d37af7725ba0dbf48c194f7c5d1548
+proof-run = 35435830632
+proof-head-sha = 7d953ceab10db5094416c82b93c3f73230ce758e
 proof-HII-prompt-source = PASS
 proof-HII-export-all-package-lists = PASS
 proof-HII-direct-string-decoder = PASS
@@ -52,7 +52,7 @@ proof-runtime-HDA-route = PASS
 proof-HDA-waveform = PASS
 proof-keyboard-input-required = false
 proof-setting-mutation = false
-proof-wave-metrics = frames=18779; peak=13821; active=27000; wav-sha256=a06f7f47a8ce2751cbe814d8a98bf41a67ce73eeb67dcccef3739290cd30b735
-proof-efi-sha256 = 3e6be66d9a70dee73e1d376106de08548c78bd0fade09da967a7038436511827
+proof-wave-metrics = frames=89944; peak=13822; active=121256; wav-sha256=b2f7c62c1fdd4498b77b1864454f4805f8b89ec21552cd8e598eea9bb0c34ad2
+proof-efi-sha256 = db92a8684c46030887617a67bdb079b38c3497f7d4c4dd77face6bc1ec4df129
 proof-serial-sha256 = f8fae7c3be74d97a16a72263a1973d7aa790e5a764ae98bd3bf516e365df859b
-proof-wav-sha256 = a06f7f47a8ce2751cbe814d8a98bf41a67ce73eeb67dcccef3739290cd30b735
+proof-wav-sha256 = b2f7c62c1fdd4498b77b1864454f4805f8b89ec21552cd8e598eea9bb0c34ad2
