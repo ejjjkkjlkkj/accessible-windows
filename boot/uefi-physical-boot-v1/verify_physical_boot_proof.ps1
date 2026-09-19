@@ -34,6 +34,10 @@ $required=@(
   'LPIB_PROGRESS=PASS',
   'HII_GRAPH_NAV_UP=PASS',
   'HII_GRAPH_NAV_DOWN=PASS',
+  'HII_GRAPH_NAV_HOME=PASS',
+  'HII_GRAPH_NAV_END=PASS',
+  'HII_GRAPH_NAV_PAGE_UP=PASS',
+  'HII_GRAPH_NAV_PAGE_DOWN=PASS',
   'HII_GRAPH_NAV_REPEAT=PASS',
   'HII_GRAPH_NAV_EXIT=PASS',
   'HII_GRAPH_SPEECH_DMA_REUSE=PASS',
@@ -63,8 +67,8 @@ $dac=Get-ProofField 'HDA_DAC_NID' '0x[0-9A-F]{2}'
 $depth=Get-ProofField 'HDA_ROUTE_DEPTH' '0x[0-9A-F]{2}'
 $navEvents=Get-ProofField 'HII_GRAPH_NAV_SPEECH_EVENTS' '0x[0-9A-F]{2}'
 $navEventCount=[Convert]::ToInt32($navEvents.Substring(2),16)
-if($navEventCount -lt 3){
-  throw "Physical HII navigation produced only $navEventCount speech events; expected at least 3"
+if($navEventCount -lt 7){
+  throw "Physical HII navigation produced only $navEventCount speech events; expected at least 7"
 }
 
 [pscustomobject]@{
@@ -76,7 +80,7 @@ if($navEventCount -lt 3){
   DacNid=$dac
   RouteDepth=$depth
   NativeUefiHdaExecution='PASS'
-  HiiNavigation='UP_DOWN_R_ESC_PASS'
+  HiiNavigation='UP_DOWN_HOME_END_PAGEUP_PAGEDOWN_R_ESC_PASS'
   NavigationSpeechEvents=$navEventCount
   DmaReuse='PASS'
   AudiblePhysicalSpeaker='REQUIRES_HUMAN_CONFIRMATION'
