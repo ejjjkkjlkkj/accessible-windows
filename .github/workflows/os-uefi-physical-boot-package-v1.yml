@@ -52,6 +52,13 @@ jobs:
           grep -aF 'HII_GRAPH_SPEECH_DMA_REUSE=PASS' "$out/BOOTX64.EFI"
           grep -aF 'BOOT_MEDIA_PERSISTENT_PROOF=PASS' "$out/BOOTX64.EFI"
           grep -aF 'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$out/BOOTX64.EFI"
+          grep -aF 'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HDA_ROUTE_POWER_D0=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HDA_ROUTE_AMPLIFIERS=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HDA_EAPD_POLICY=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HDA_DAC_STREAM_READBACK=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HDA_PIN_CONTROL_READBACK=PASS' "$out/BOOTX64.EFI"
 
       - name: Build deterministic GPT ESP image
         run: |
@@ -197,6 +204,78 @@ jobs:
             exit 1
           fi
 
+      - name: Test physical proof verifier closure gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='boot/uefi-physical-boot-v1'
+          $proof=Join-Path $root 'build/SYNTHETIC-PROOF.TXT'
+          @(
+            'QEVARYNOX-UEFI-PHYSICAL-BOOT-PROOF-V1'
+            'STATUS=PASS'
+            'HII_PROMPT_SOURCE=PASS'
+            'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3'
+            'HDA_CODEC_VENDOR_DEVICE=0x10EC0256'
+            'HDA_CODEC_SELECTION=REALTEK_10EC_0256'
+            'HDA_GRAPH_SEARCH_LIVE=PASS'
+            'HDA_SELECTOR_APPLY_LIVE=PASS'
+            'HDA_ROUTE_POWER_D0=PASS'
+            'HDA_ROUTE_AMPLIFIERS=PASS'
+            'HDA_EAPD_POLICY=PASS'
+            'HDA_DAC_STREAM_READBACK=PASS'
+            'HDA_PIN_CONTROL_READBACK=PASS'
+            'HDA_OUTPUT_PATH_CONFIGURATION=PASS'
+            'HDA_PIN_NID=0x14'
+            'HDA_DAC_NID=0x02'
+            'HDA_ROUTE_DEPTH=0x03'
+            'HDA_SELECTOR_WRITES_REQUIRED=0x01'
+            'HDA_SELECTOR_WRITES_APPLIED=0x01'
+            'HII_GRAPH_SPEECH_DMA=PASS'
+            'LPIB_PROGRESS=PASS'
+            'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS'
+            'PHYSICAL_ASUS_M1603QA_CODEC=REALTEK_10EC_0256'
+            'PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS'
+            'HII_GRAPH_NAV_UP=PASS'
+            'HII_GRAPH_NAV_DOWN=PASS'
+            'HII_GRAPH_NAV_HOME=PASS'
+            'HII_GRAPH_NAV_END=PASS'
+            'HII_GRAPH_NAV_PAGE_UP=PASS'
+            'HII_GRAPH_NAV_PAGE_DOWN=PASS'
+            'HII_GRAPH_NAV_REPEAT=PASS'
+            'HII_GRAPH_NAV_EXIT=PASS'
+            'HII_GRAPH_NAV_SPEECH_EVENTS=0x07'
+            'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
+            'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION'
+          ) | Set-Content $proof -Encoding ascii
+
+          & "$root/verify_physical_boot_proof.ps1" -ProofPath $proof | Out-Host
+          & "$root/verify_physical_boot_proof.ps1" -ProofPath $proof -AudibleSpeakerConfirmed | Out-Host
+
+          function Assert-Rejected([string]$name,[string]$content){
+            $path=Join-Path $root "build/$name.txt"
+            Set-Content $path $content -Encoding ascii -NoNewline
+            $rejected=$false
+            try {
+              & "$root/verify_physical_boot_proof.ps1" -ProofPath $path -AudibleSpeakerConfirmed | Out-Null
+            } catch {
+              $rejected=$true
+              Write-Host "$name rejection: $($_.Exception.Message)"
+            }
+            if(-not $rejected){ throw "Verifier incorrectly accepted negative case: $name" }
+          }
+
+          $raw=Get-Content $proof -Raw
+          Assert-Rejected 'negative-internal-speaker' ($raw.Replace(
+            'PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS',
+            'PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=NOT_ESTABLISHED'
+          ))
+          Assert-Rejected 'negative-selector-mismatch' ($raw.Replace(
+            'HDA_SELECTOR_WRITES_APPLIED=0x01',
+            'HDA_SELECTOR_WRITES_APPLIED=0x00'
+          ))
+          Assert-Rejected 'negative-duplicate-field' ($raw + "`r`nPHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=NOT_ESTABLISHED`r`n")
+          'PHYSICAL_PROOF_VERIFIER_NEGATIVE_GATES=PASS'
+
       - name: Write package manifest
         run: |
           set -euo pipefail
@@ -221,8 +300,12 @@ jobs:
           INTERACTIVE_CONTROL=UP_DOWN_NAVIGATE_R_REPEAT_ESC_EXIT
           NAVIGATION_PROOF=UP_DOWN_HOME_END_PAGEUP_PAGEDOWN_R_ESC
           DMA_REUSE=REQUIRED
+          INTERNAL_SPEAKER_ROUTE=REQUIRED
+          HDA_ROUTE_READBACK=REQUIRED
+          SELECTOR_WRITE_COUNT_MATCH=REQUIRED
           PROOF_FILE=QEVARYNOX-PHYSICAL-PROOF.TXT
           AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION
+          FINAL_CLOSURE_REQUIRES=RUNTIME_INTERNAL_SPEAKER_ROUTE_PLUS_HUMAN_AUDIBLE_CONFIRMATION
           EOF
 
       - uses: actions/upload-artifact@v4

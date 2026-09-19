@@ -18,3 +18,7 @@ proof-DMA-reuse = HII_GRAPH_SPEECH_DMA_REUSE=PASS
 audible-speaker-proof = human confirmation remains required
 claim = a valid proof file after a real ASUS UEFI boot establishes native execution, analog HDA controller selection, live graph routing, selector programming and DMA progress
 claim = the proof file alone does not establish that the laptop speaker was audibly heard
+proof-internal-speaker-path = PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS + PHYSICAL_ASUS_M1603QA_CODEC=REALTEK_10EC_0256 + PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS
+proof-route-readback = HDA_ROUTE_POWER_D0=PASS + HDA_ROUTE_AMPLIFIERS=PASS + HDA_EAPD_POLICY=PASS + HDA_DAC_STREAM_READBACK=PASS + HDA_PIN_CONTROL_READBACK=PASS
+proof-selector-count = HDA_SELECTOR_WRITES_REQUIRED must equal HDA_SELECTOR_WRITES_APPLIED
+closure = audible confirmation is accepted only after machine-bound HDA runtime, internal-speaker path, route readbacks, DMA, and navigation all pass
