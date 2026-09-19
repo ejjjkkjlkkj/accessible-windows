@@ -1653,7 +1653,8 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     }
     marker("HDA_OUTPUT_PATH_CONFIGURATION=PASS");
     marker("SYNTH=ALLOPHONE_BDL_RUNTIME_TEXT_V1");
-    marker("SYNTH=GRAPHEME_ALLOPHONE_RUNTIME_TEXT_V2");\n    marker("SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3");
+    marker("SYNTH=GRAPHEME_ALLOPHONE_RUNTIME_TEXT_V2");
+    marker("SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3");
     marker("HII_PROMPT_MAX_CHARS=32");
     marker("HII_PROMPT_WORD_BOUNDARIES=PASS");
     marker("BDL_RUNTIME_TEXT_SCHEDULE=PASS");
