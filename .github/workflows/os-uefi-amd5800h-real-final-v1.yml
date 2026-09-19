@@ -20,9 +20,9 @@ permissions:
   contents: write
   actions: write
 
-# Closure gate: an active AMD hardware validation must survive later UEFI commits.
+# Each tested revision gets its own closure run; later commits cannot evict it.
 concurrency:
-  group: os-uefi-amd5800h-real-final-v2-${{ github.ref }}
+  group: os-uefi-amd5800h-real-final-v3-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -31,21 +31,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-      - name: Cancel superseded AMD closure runs
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          export current="$GITHUB_RUN_ID"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs?branch=os&per_page=100" --jq \
-            '.workflow_runs[] | select(.name=="os-uefi-amd5800h-real-final-v1") | select((.status=="queued" or .status=="pending" or .status=="in_progress") and (.id|tostring)!=env.current) | .id' \
-            | while read -r run; do
-                test -n "$run" || continue
-                echo "Cancelling superseded AMD closure run $run"
-                gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$run/cancel" >/dev/null || true
-              done
-          echo AMD_FINAL_SUPERSEDED_RUNS_PRUNED=PASS
       - name: Require proven UEFI accessibility dependencies
         shell: bash
         run: |
