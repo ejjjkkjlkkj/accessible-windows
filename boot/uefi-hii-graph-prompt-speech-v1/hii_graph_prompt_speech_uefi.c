@@ -311,6 +311,7 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"UEFI_SOURCE_BLOB=" QEV_SOURCE_BLOB "\r\n");
     proof_puts(proof,sizeof(proof),&n,"STATUS=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_PROMPT_SOURCE=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_CONTROLLER_SELECTION=");
     proof_puts(proof,sizeof(proof),&n,
         g_controller_preferred ? "PREFERRED_AMD_1022_15E3\r\n" : "GENERIC_CLASS_0403\r\n");
