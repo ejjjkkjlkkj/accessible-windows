@@ -10,9 +10,10 @@ expected-controller = PCI_VEN_1022_DEV_15E3
 expected-codec = HDAUDIO_VEN_10EC_DEV_0256
 expected-controller-selection = PREFERRED_AMD_1022_15E3
 expected-proof-file = QEVARYNOX-PHYSICAL-PROOF.TXT
-physical-controls = Up previous prompt; Down next prompt; Home first prompt; End last prompt; PageUp minus 5 prompts; PageDown plus 5 prompts; R repeat; Esc exit and persist proof
-proof-navigation = HII_GRAPH_NAV_UP=PASS + HII_GRAPH_NAV_DOWN=PASS + HII_GRAPH_NAV_HOME=PASS + HII_GRAPH_NAV_END=PASS + HII_GRAPH_NAV_PAGE_UP=PASS + HII_GRAPH_NAV_PAGE_DOWN=PASS + HII_GRAPH_NAV_REPEAT=PASS + HII_GRAPH_NAV_EXIT=PASS
+physical-controls = Up previous prompt; Down next prompt; Home first prompt; End last prompt; PageUp minus 5 prompts; PageDown plus 5 prompts; R repeat; Esc exits and persists proof only after all required spoken navigation events have passed
+proof-navigation = HII_GRAPH_NAV_UP=PASS + HII_GRAPH_NAV_DOWN=PASS + HII_GRAPH_NAV_HOME=PASS + HII_GRAPH_NAV_END=PASS + HII_GRAPH_NAV_PAGE_UP=PASS + HII_GRAPH_NAV_PAGE_DOWN=PASS + HII_GRAPH_NAV_REPEAT=PASS + HII_GRAPH_NAV_REQUIRED_EVENTS=PASS + HII_GRAPH_NAV_EXIT=PASS
 proof-navigation-speech-events = at least 7
+proof-navigation-incomplete-exit = HII_GRAPH_NAV_EXIT=BLOCKED_INCOMPLETE
 proof-DMA = HII_GRAPH_SPEECH_DMA=PASS + LPIB_PROGRESS=PASS
 proof-DMA-reuse = HII_GRAPH_SPEECH_DMA_REUSE=PASS
 audible-speaker-proof = human confirmation remains required
