@@ -1,8 +1,8 @@
-name: os-uefi-physical-boot-package-v1
+name: uefi-screenreader-convergence-physical-package
 
 on:
   push:
-    branches: [os]
+    branches: [uefi-screenreader-convergence-20260919]
     paths:
       - 'boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
       - 'boot/uefi-hii-graph-prompt-speech-v1/generate_units.py'
@@ -57,6 +57,12 @@ jobs:
           grep -aF 'HII_GRAPH_NAV_HELP_SPEECH_DMA=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_NAV_FORM_HEADING=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_REALTIME_EVENTS=0x' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_SPEECH_INTERRUPTS=0x' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_REALTIME=' "$out/BOOTX64.EFI"
           grep -aF 'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V2' "$out/BOOTX64.EFI"
           grep -aF 'HII_NAV_HELP_AND_TAB=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS' "$out/BOOTX64.EFI"
@@ -262,10 +268,13 @@ jobs:
             'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS'
             'HII_GRAPH_NAV_EXIT=PASS'
             'HII_GRAPH_NAV_SPEECH_EVENTS=0x07'
-            'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1'
+            'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V2'
             'HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS'
             'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS'
             'HII_GRAPH_NAV_SEMANTIC_QUESTION_EVENTS=0x07'
+            'HII_GRAPH_NAV_REALTIME_EVENTS=0x07'
+            'HII_GRAPH_NAV_SPEECH_INTERRUPTS=0x06'
+            'HII_GRAPH_NAV_REALTIME=PASS'
             'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
             'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION'
           ) | Set-Content $proof -Encoding ascii
@@ -311,6 +320,18 @@ jobs:
             'HII_GRAPH_NAV_SEMANTIC_QUESTION_EVENTS=0x07',
             'HII_GRAPH_NAV_SEMANTIC_QUESTION_EVENTS=0x00'
           ))
+          Assert-Rejected 'negative-realtime-focus-count' ($raw.Replace(
+            'HII_GRAPH_NAV_REALTIME_EVENTS=0x07',
+            'HII_GRAPH_NAV_REALTIME_EVENTS=0x06'
+          ))
+          Assert-Rejected 'negative-speech-interrupt-count' ($raw.Replace(
+            'HII_GRAPH_NAV_SPEECH_INTERRUPTS=0x06',
+            'HII_GRAPH_NAV_SPEECH_INTERRUPTS=0x00'
+          ))
+          Assert-Rejected 'negative-realtime-gate' ($raw.Replace(
+            'HII_GRAPH_NAV_REALTIME=PASS',
+            'HII_GRAPH_NAV_REALTIME=NOT_ESTABLISHED'
+          ))
           Assert-Rejected 'negative-duplicate-field' ($raw + "`r`nPHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=NOT_ESTABLISHED`r`n")
           Assert-Rejected 'negative-source-mismatch' ($raw.Replace(
             'UEFI_SOURCE_BLOB=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -341,11 +362,13 @@ jobs:
           CODEC_VERIFICATION=NATIVE_HDA_GET_PARAMETER_00
           INTERACTIVE_CONTROL=UP_DOWN_NAVIGATE_R_REPEAT_ESC_EXIT
           NAVIGATION_PROOF=UP_DOWN_HOME_END_PAGEUP_PAGEDOWN_R_ESC
-          NAVIGATION_OBJECT_MODEL=IFR_SEMANTIC_V1
+          NAVIGATION_OBJECT_MODEL=IFR_SEMANTIC_V2
           CONTROL_ROLE_ANNOUNCEMENT=REQUIRED
           QUESTION_IDENTITY=REQUIRED
           VARSTORE_IDENTITY=REQUIRED
           DIGITS_AND_COMMON_SYMBOLS=REQUIRED
+          REALTIME_FOCUS_SPEECH=REQUIRED
+          SPEECH_INTERRUPTION=REQUIRED
           DMA_REUSE=REQUIRED
           INTERNAL_SPEAKER_ROUTE=REQUIRED
           HDA_ROUTE_READBACK=REQUIRED
@@ -354,12 +377,13 @@ jobs:
           PROOF_BUFFER_OVERFLOW=FAIL_CLOSED
           PROOF_FILE=QEVARYNOX-PHYSICAL-PROOF.TXT
           AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION
-          FINAL_CLOSURE_REQUIRES=RUNTIME_INTERNAL_SPEAKER_ROUTE_PLUS_HUMAN_AUDIBLE_CONFIRMATION
+          NATIVE_READER_GATE_REQUIRES=RUNTIME_INTERNAL_SPEAKER_ROUTE_PLUS_REALTIME_NAV_PLUS_HUMAN_AUDIBLE_CONFIRMATION
+          CORE_SCREEN_READER_PARITY=REQUIRES_FIRMWARE_FOCUS_SYNC_AND_CONTROL_ACTIVATION
           EOF
 
       - uses: actions/upload-artifact@v4
         with:
-          name: os-uefi-physical-boot-package-v1
+          name: uefi-screenreader-convergence-physical-package
           path: |
             boot/uefi-physical-boot-v1/build/QEVARYNOX-AMD5800H-UEFI-SCREEN-READER.img
             boot/uefi-physical-boot-v1/build/BOOTX64.EFI
