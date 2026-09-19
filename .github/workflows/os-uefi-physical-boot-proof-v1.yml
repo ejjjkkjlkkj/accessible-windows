@@ -45,22 +45,70 @@ jobs:
           'PHYSICAL_HOST_UEFI=PASS'
           'PHYSICAL_HOST_SECURE_BOOT_DISABLED=PASS'
 
-      - name: Locate UEFI boot-media proof
+      - name: Locate or temporarily mount UEFI boot-media proof
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $name='QEVARYNOX-PHYSICAL-PROOF.TXT'
-          $found=@()
-          foreach($drive in @(Get-PSDrive -PSProvider FileSystem)){
-            if(-not $drive.Root){ continue }
-            $candidate=Join-Path $drive.Root $name
-            if(Test-Path -LiteralPath $candidate){
-              $found += (Resolve-Path -LiteralPath $candidate).Path
+
+          function Find-MountedProof {
+            $hits=@()
+            foreach($drive in @(Get-PSDrive -PSProvider FileSystem)){
+              if(-not $drive.Root){ continue }
+              $candidate=Join-Path $drive.Root $name
+              if(Test-Path -LiteralPath $candidate){
+                $hits += (Resolve-Path -LiteralPath $candidate).Path
+              }
             }
+            return @($hits)
           }
+
+          $found=@(Find-MountedProof)
           if($found.Count -eq 0){
-            throw "$name not found on any mounted filesystem. Keep the physical UEFI boot media attached and mounted."
+            $parts=@()
+            foreach($partition in @(Get-Partition -ErrorAction Stop)){
+              $volume=@($partition | Get-Volume -ErrorAction SilentlyContinue | Select-Object -First 1)
+              if($volume.Count -eq 1 -and [string]$volume[0].FileSystemLabel -eq 'QEVARYNOX'){
+                $parts += $partition
+              }
+            }
+            if($parts.Count -eq 0){
+              throw "$name not found and no QEVARYNOX volume is present. Keep the physical UEFI boot media attached."
+            }
+            if($parts.Count -ne 1){
+              throw "ambiguous QEVARYNOX boot media: found $($parts.Count) matching partitions"
+            }
+
+            $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+            $principal=[Security.Principal.WindowsPrincipal]::new($identity)
+            if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){
+              throw 'temporary ESP mounting requires the AMD-5800H-REAL runner to be elevated'
+            }
+
+            $part=$parts[0]
+            $mount=Join-Path $env:RUNNER_TEMP 'qevarynox-physical-proof'
+            if(Test-Path $mount){ Remove-Item $mount -Recurse -Force -ErrorAction Stop }
+            New-Item -ItemType Directory -Path $mount -Force | Out-Null
+            $accessPath=([IO.Path]::GetFullPath($mount)).TrimEnd('\') + '\'
+            Add-PartitionAccessPath -DiskNumber $part.DiskNumber -PartitionNumber $part.PartitionNumber -AccessPath $accessPath -ErrorAction Stop
+
+            "PHYSICAL_PROOF_TEMP_MOUNTED=true" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            "PHYSICAL_PROOF_TEMP_MOUNT=$accessPath" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            "PHYSICAL_PROOF_TEMP_DISK=$($part.DiskNumber)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            "PHYSICAL_PROOF_TEMP_PARTITION=$($part.PartitionNumber)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+            $boot=Join-Path $accessPath 'EFI\BOOT\BOOTX64.EFI'
+            $pending=Join-Path $accessPath 'QEVARYNOX-PENDING.TXT'
+            $candidate=Join-Path $accessPath $name
+            if(-not (Test-Path -LiteralPath $boot)){ throw "QEVARYNOX media missing EFI/BOOT/BOOTX64.EFI at $accessPath" }
+            if(-not (Test-Path -LiteralPath $pending)){ throw "QEVARYNOX media identity marker missing at $accessPath" }
+            if(-not (Test-Path -LiteralPath $candidate)){
+              throw "$name not written on the QEVARYNOX media. Native UEFI execution has not produced the closure witness yet."
+            }
+            $found=@((Resolve-Path -LiteralPath $candidate).Path)
+            'UEFI_BOOT_MEDIA_TEMP_MOUNT=PASS'
           }
+
           if($found.Count -ne 1){
             throw "ambiguous physical proof: found $($found.Count) copies: $($found -join ', ')"
           }
@@ -132,6 +180,29 @@ jobs:
             'PHYSICAL_HOST_FIRMWARE_MUTATION=false'
           ) | Set-Content "$root/postboot-result.txt" -Encoding ascii
           Get-Content "$root/postboot-result.txt"
+
+      - name: Cleanup temporary proof-media mount
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Continue'
+          if($env:PHYSICAL_PROOF_TEMP_MOUNTED -eq 'true'){
+            try {
+              Remove-PartitionAccessPath `
+                -DiskNumber ([int]$env:PHYSICAL_PROOF_TEMP_DISK) `
+                -PartitionNumber ([int]$env:PHYSICAL_PROOF_TEMP_PARTITION) `
+                -AccessPath $env:PHYSICAL_PROOF_TEMP_MOUNT `
+                -ErrorAction Stop
+              'UEFI_BOOT_MEDIA_TEMP_UNMOUNT=PASS'
+            } finally {
+              $dir=$env:PHYSICAL_PROOF_TEMP_MOUNT.TrimEnd('\')
+              if($dir -and (Test-Path $dir)){
+                Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+              }
+            }
+          } else {
+            'UEFI_BOOT_MEDIA_TEMP_UNMOUNT=NOT_REQUIRED'
+          }
 
       - uses: actions/upload-artifact@v4
         with:
