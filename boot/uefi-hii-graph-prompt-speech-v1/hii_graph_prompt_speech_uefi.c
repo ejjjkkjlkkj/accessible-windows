@@ -750,65 +750,69 @@ static void copy_bytes(volatile u8 *dst, const u8 *src, u32 len) {
 
 static int run_speech_dma(const char *text, u32 text_count) {
     if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 32u) return 0;
-    const u32 pcm_off = 0x1000;
-    if (!qev_unit_bank_len || qev_unit_bank_len > (128u * 4096u - pcm_off)) return 0;
+    const u32 pcm_off = 0x1000u;
+    const u32 dma_pages = 512u;
+    const u32 dma_bytes = dma_pages * 4096u;
+    if (!qev_unit_bank_len || pcm_off >= dma_bytes) return 0;
 
-    /* Interactive speech must not leak 128 DMA pages on every focus change.
-       Allocate the below-4GiB BDL/unit-bank arena once, then rebuild only the
-       active descriptors for each utterance. LVI bounds the valid descriptor
-       window, so stale descriptors beyond the new entry count are unreachable. */
+    /*
+     * Build each complete spoken label as one contiguous PCM buffer. Older
+     * builds emitted one HDA BDL entry per allophone; longer real HII labels
+     * exposed descriptor/alignment failures during rapid focus navigation.
+     * A single 4 KiB-aligned DMA buffer is simpler and deterministic.
+     */
     u64 base = g_speech_dma_base;
     if (!base) {
         base = 0xffffffffu;
-        if (g_allocate_pages(1, 4, 128, &base) != 0 || !base || base > 0xffffffffu) return 0;
+        if (g_allocate_pages(1, 4, dma_pages, &base) != 0 || !base || base > 0xffffffffu) return 0;
         g_speech_dma_base = base;
         ++g_speech_dma_allocations;
-        volatile u8 *pcm_init = (volatile u8 *)(usize)(base + pcm_off);
-        copy_bytes(pcm_init, qev_unit_bank, qev_unit_bank_len);
-        fence();
     }
 
-
     volatile u8 *bdl = (volatile u8 *)(usize)base;
-    u32 entries = 0;
+    volatile u8 *pcm = (volatile u8 *)(usize)(base + pcm_off);
     u32 total_bytes = 0;
+
     for (u32 i = 0; i < text_count; ++i) {
         u8 ch = (u8)text[i];
         if (ch == (u8)' ') {
-            if (entries >= 64u || qev_sil_unit_index >= qev_unit_count) return 0;
+            if (qev_sil_unit_index >= qev_unit_count) return 0;
             u32 ui = qev_sil_unit_index;
             u32 off = qev_unit_off[ui];
             u32 len = qev_unit_len[ui];
             if (!len || off > qev_unit_bank_len || len > qev_unit_bank_len - off) return 0;
-            volatile u8 *e = bdl + entries * 16u;
-            *(volatile u64 *)(e + 0x00) = base + pcm_off + off;
-            *(volatile u32 *)(e + 0x08) = len;
-            *(volatile u32 *)(e + 0x0c) = 0;
+            if (total_bytes > dma_bytes - pcm_off || len > dma_bytes - pcm_off - total_bytes) return 0;
+            copy_bytes(pcm + total_bytes, qev_unit_bank + off, len);
             total_bytes += len;
-            ++entries;
             continue;
         }
+
         if (ch < (u8)'a' || ch > (u8)'z') return 0;
         u32 li = (u32)(ch - (u8)'a');
         u32 n = qev_letter_unit_count[li];
         if (!n || n > 8u) return 0;
         for (u32 j = 0; j < n; ++j) {
-            if (entries >= 64u) return 0;
             u32 ui = qev_letter_units[li * 8u + j];
             if (ui >= qev_unit_count) return 0;
             u32 off = qev_unit_off[ui];
             u32 len = qev_unit_len[ui];
             if (!len || off > qev_unit_bank_len || len > qev_unit_bank_len - off) return 0;
-            volatile u8 *e = bdl + entries * 16u;
-            *(volatile u64 *)(e + 0x00) = base + pcm_off + off;
-            *(volatile u32 *)(e + 0x08) = len;
-            *(volatile u32 *)(e + 0x0c) = 0;
+            if (total_bytes > dma_bytes - pcm_off || len > dma_bytes - pcm_off - total_bytes) return 0;
+            copy_bytes(pcm + total_bytes, qev_unit_bank + off, len);
             total_bytes += len;
-            ++entries;
         }
     }
-    if (!entries || !total_bytes) return 0;
-    *(volatile u32 *)(bdl + (entries - 1u) * 16u + 0x0c) = 1;
+    if (!total_bytes) return 0;
+
+    /* HDA DMA buffers are safest on 128-byte boundaries. Pad with signed
+       PCM silence (zero) without changing any lexical audio content. */
+    u32 dma_payload = (total_bytes + 127u) & ~127u;
+    if (dma_payload < total_bytes || dma_payload > dma_bytes - pcm_off) return 0;
+    for (u32 i = total_bytes; i < dma_payload; ++i) pcm[i] = 0;
+
+    *(volatile u64 *)(bdl + 0x00) = base + pcm_off;
+    *(volatile u32 *)(bdl + 0x08) = dma_payload;
+    *(volatile u32 *)(bdl + 0x0c) = 1u;
     fence();
 
     u16 gcap = mmio16(0x00);
@@ -828,24 +832,21 @@ static int run_speech_dma(const char *text, u32 text_count) {
     while (timeout-- && (sd[0] & 1)) {}
     if (!timeout) return 0;
 
-    *(volatile u32 *)(sd + 0x08) = total_bytes;
-    *(volatile u16 *)(sd + 0x0c) = (u16)(entries - 1u);
+    *(volatile u32 *)(sd + 0x08) = dma_payload;
+    *(volatile u16 *)(sd + 0x0c) = 0u;
     *(volatile u16 *)(sd + 0x12) = 0x0011;
     *(volatile u32 *)(sd + 0x18) = (u32)base;
     *(volatile u32 *)(sd + 0x1c) = (u32)(base >> 32);
     fence();
 
-    /* Clear stale stream status before RUN. The final BDL entry carries IOC. */
     sd[3] = 0x1cu;
     sd[2] = 0x10;
     sd[0] = (u8)(sd[0] | 2u);
 
-    /* 48 kHz, signed 16-bit stereo = 192000 bytes/s.
-       The old fixed 700 ms stop truncated longer HII labels. Poll final IOC
-       until the real payload duration plus a 150 ms hardware guard expires. */
-    u64 play_us = (((u64)total_bytes * 125ull) + 23ull) / 24ull;
+    /* 48 kHz, signed 16-bit stereo = 192000 bytes/s. */
+    u64 play_us = (((u64)dma_payload * 125ull) + 23ull) / 24ull;
     play_us += 150000ull;
-    if (play_us > 8000000ull) {
+    if (play_us > 12000000ull) {
         sd[0] = (u8)(sd[0] & ~2u);
         return 0;
     }
