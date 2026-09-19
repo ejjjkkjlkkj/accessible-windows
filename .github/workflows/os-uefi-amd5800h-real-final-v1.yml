@@ -168,9 +168,13 @@ jobs:
     needs: build-graph-efi
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 50
+    defaults:
+      run:
+        working-directory: src
     steps:
       - uses: actions/checkout@v5
         with:
+          path: src
           fetch-depth: 8
           clean: false
 
@@ -186,7 +190,7 @@ jobs:
       - uses: actions/download-artifact@v5
         with:
           name: amd5800h-graph-efi
-          path: boot/uefi-amd5800h-real-final-v1/evidence
+          path: src/boot/uefi-amd5800h-real-final-v1/evidence
 
       - name: Bind exact physical runner and inventory host
         shell: pwsh
@@ -1419,7 +1423,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: os-uefi-amd5800h-real-final-v1
-          path: boot/uefi-amd5800h-real-final-v1/evidence
+          path: src/boot/uefi-amd5800h-real-final-v1/evidence
           if-no-files-found: error
 
       - name: Persist revision-bound AMD final proof
