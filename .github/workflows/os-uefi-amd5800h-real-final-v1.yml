@@ -1568,128 +1568,11 @@ jobs:
             $physicalInternalSpeaker='PASS'
           }
           if($physicalSource -eq $testedHiiGraphSource -and
-             $pb -match '(?m)^proof-audible-physical-speaker = HUMAN_CONFIRMED\s*          $lines += "proof-current-option-proof-blob = $testedCurrentProof"
-          $lines += "proof-platform-commit-proof-blob = $testedCommitProof"
-          $lines += "proof-secure-boot-proof-blob = $testedSecureBootProof"
-          $lines += "proof-hii-graph-proof-blob = $testedGraphProof"
-          $lines += "proof-physical-audio-proof-blob = $testedPhysicalAudioProof"
-          $lines += "proof-asus-preflight-proof-blob = $testedAsusPreflightProof"
-          $lines += "proof-physical-boot-proof-blob = $testedPhysicalBootProof"
-          $lines += 'proof-physical-asus-readonly-evidence = PASS'
-          $lines += "proof-physical-native-uefi = $physicalNative"
-          $lines += "proof-physical-hii-navigation = $physicalNavigation"
-          $lines += "proof-physical-internal-speaker-pin = $physicalInternalSpeaker"
-          $lines += "proof-physical-audible-speaker = $physicalAudible"
-          $lines += "proof-physical-core-screen-reader-parity = $physicalCoreParity"
-          $lines += "proof-physical-source-blob = $physicalSource"
-          $lines += 'proof-virtualization-suite = PASS'
-          $lines += "proof-run = $env:GITHUB_RUN_ID"
-          $lines += "proof-head-sha = $env:GITHUB_SHA"
-          $lines += "proof-runner = $env:RUNNER_NAME"
-          $lines += 'proof-all-efi-builds = PASS'
-          $lines += 'proof-determinism = PASS'
-          $lines += 'proof-PE-security = PASS'
-          $lines += 'proof-qemu-ovmf-runtime = PASS'
-          $lines += 'proof-qemu-keyboard-navigation = PASS'
-          $lines += 'proof-qemu-hda-speech = PASS'
-          $lines += 'proof-qemu-hda-controller-selection = GENERIC_CLASS_0403_FALLBACK_PASS'
-          $lines += 'proof-physical-target-hda-controller = PCI_VEN_1022_DEV_15E3'
-          $lines += 'proof-physical-target-codec = HDAUDIO_VEN_10EC_DEV_0256'
-          $lines += "proof-qemu-waveform = $qemuWave"
-          $lines += "proof-vmware-workstation = $vm"
-          $lines += "proof-vmware-hda-graph-speech = $vmSpeech"
-          $lines += "proof-vmware-integrated-hii-hda-speech = $vmIntegrated"
-          $lines += "proof-vmware-interactive-hii-navigation = $vmInteractive"
-          $lines += "proof-vmware-hda-controller-selection = $vmControllerSelection"
-          $lines += "proof-vmware-hda-codec-selection = $vmCodecSelection"
-          $lines += "proof-hyperv-generation2-uefi-execution = $hyperv"
-          $lines += "proof-hyperv-platform-result = $hypervPlatform"
-          $lines += "proof-hyperv-hda-speech = $hypervAudio"
-          $lines += 'proof-hyperv-false-audio-pass = BLOCKED'
-          $lines += 'proof-vmware-hii-source = live-integrated-hii-graph-prompt'
-          $lines += 'proof-physical-host-reboot = false'
-          $lines += 'proof-physical-host-firmware-mutation = false'
-          $lines += "proof-physical-pre-os-speaker = $physicalAudible"
-          $lines += 'proof-physical-boot-workflow-triggered-reboot = false'
-          $lines += "proof-downspeech-efi-sha256 = $sha"
-          $lines += "proof-manifest-sha256 = $manifest"
-          Set-Content $proof $lines -Encoding utf8
-          if(git diff --quiet -- $proof){ exit 0 }
-          git config user.name github-actions
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add $proof
-          git commit -m "Record AMD-5800H final UEFI screen reader proof [skip ci]"
-          for($i=0;$i -lt 3;$i++){
-            git push origin os
-            if($LASTEXITCODE -eq 0){ exit 0 }
-            git fetch origin os
-            git rebase origin/os
-            if($LASTEXITCODE -ne 0){ git rebase --abort; throw 'proof rebase failed' }
-          }
-          throw 'proof push failed'
-){
+             $pb -match '(?m)^proof-audible-physical-speaker = HUMAN_CONFIRMED\s*$'){
             $physicalAudible='HUMAN_CONFIRMED'
           }
           if($physicalSource -eq $testedHiiGraphSource -and
-             $pb -match '(?m)^proof-core-screen-reader-parity = PASS\s*          $lines += "proof-current-option-proof-blob = $testedCurrentProof"
-          $lines += "proof-platform-commit-proof-blob = $testedCommitProof"
-          $lines += "proof-secure-boot-proof-blob = $testedSecureBootProof"
-          $lines += "proof-hii-graph-proof-blob = $testedGraphProof"
-          $lines += "proof-physical-audio-proof-blob = $testedPhysicalAudioProof"
-          $lines += "proof-asus-preflight-proof-blob = $testedAsusPreflightProof"
-          $lines += "proof-physical-boot-proof-blob = $testedPhysicalBootProof"
-          $lines += 'proof-physical-asus-readonly-evidence = PASS'
-          $lines += "proof-physical-native-uefi = $physicalNative"
-          $lines += "proof-physical-hii-navigation = $physicalNavigation"
-          $lines += "proof-physical-internal-speaker-pin = $physicalInternalSpeaker"
-          $lines += "proof-physical-audible-speaker = $physicalAudible"
-          $lines += "proof-physical-source-blob = $physicalSource"
-          $lines += 'proof-virtualization-suite = PASS'
-          $lines += "proof-run = $env:GITHUB_RUN_ID"
-          $lines += "proof-head-sha = $env:GITHUB_SHA"
-          $lines += "proof-runner = $env:RUNNER_NAME"
-          $lines += 'proof-all-efi-builds = PASS'
-          $lines += 'proof-determinism = PASS'
-          $lines += 'proof-PE-security = PASS'
-          $lines += 'proof-qemu-ovmf-runtime = PASS'
-          $lines += 'proof-qemu-keyboard-navigation = PASS'
-          $lines += 'proof-qemu-hda-speech = PASS'
-          $lines += 'proof-qemu-hda-controller-selection = GENERIC_CLASS_0403_FALLBACK_PASS'
-          $lines += 'proof-physical-target-hda-controller = PCI_VEN_1022_DEV_15E3'
-          $lines += 'proof-physical-target-codec = HDAUDIO_VEN_10EC_DEV_0256'
-          $lines += "proof-qemu-waveform = $qemuWave"
-          $lines += "proof-vmware-workstation = $vm"
-          $lines += "proof-vmware-hda-graph-speech = $vmSpeech"
-          $lines += "proof-vmware-integrated-hii-hda-speech = $vmIntegrated"
-          $lines += "proof-vmware-interactive-hii-navigation = $vmInteractive"
-          $lines += "proof-vmware-hda-controller-selection = $vmControllerSelection"
-          $lines += "proof-vmware-hda-codec-selection = $vmCodecSelection"
-          $lines += "proof-hyperv-generation2-uefi-execution = $hyperv"
-          $lines += "proof-hyperv-platform-result = $hypervPlatform"
-          $lines += "proof-hyperv-hda-speech = $hypervAudio"
-          $lines += 'proof-hyperv-false-audio-pass = BLOCKED'
-          $lines += 'proof-vmware-hii-source = live-integrated-hii-graph-prompt'
-          $lines += 'proof-physical-host-reboot = false'
-          $lines += 'proof-physical-host-firmware-mutation = false'
-          $lines += "proof-physical-pre-os-speaker = $physicalAudible"
-          $lines += 'proof-physical-boot-workflow-triggered-reboot = false'
-          $lines += "proof-downspeech-efi-sha256 = $sha"
-          $lines += "proof-manifest-sha256 = $manifest"
-          Set-Content $proof $lines -Encoding utf8
-          if(git diff --quiet -- $proof){ exit 0 }
-          git config user.name github-actions
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add $proof
-          git commit -m "Record AMD-5800H final UEFI screen reader proof [skip ci]"
-          for($i=0;$i -lt 3;$i++){
-            git push origin os
-            if($LASTEXITCODE -eq 0){ exit 0 }
-            git fetch origin os
-            git rebase origin/os
-            if($LASTEXITCODE -ne 0){ git rebase --abort; throw 'proof rebase failed' }
-          }
-          throw 'proof push failed'
-){
+             $pb -match '(?m)^proof-core-screen-reader-parity = PASS\s*$'){
             $physicalCoreParity='PASS'
           }
 
@@ -1722,6 +1605,7 @@ jobs:
           $lines += "proof-physical-hii-navigation = $physicalNavigation"
           $lines += "proof-physical-internal-speaker-pin = $physicalInternalSpeaker"
           $lines += "proof-physical-audible-speaker = $physicalAudible"
+          $lines += "proof-physical-core-screen-reader-parity = $physicalCoreParity"
           $lines += "proof-physical-source-blob = $physicalSource"
           $lines += 'proof-virtualization-suite = PASS'
           $lines += "proof-run = $env:GITHUB_RUN_ID"
