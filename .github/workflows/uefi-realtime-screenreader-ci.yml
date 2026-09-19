@@ -194,6 +194,7 @@ jobs:
           tr -d '\r' < "$root/realtime-proof.txt" | grep -E '^HII_GRAPH_NAV_REALTIME_EVENTS=0x0[7-9A-F]$'
           tr -d '\r' < "$root/realtime-proof.txt" | grep -E '^HII_GRAPH_NAV_SPEECH_INTERRUPTS=0x0[1-9A-F]$'
           tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3'
           echo UEFI_REALTIME_NAVIGATION_PROOF=PASS
 
       - name: Validate audio waveform quality
@@ -1276,7 +1277,8 @@ jobs:
           foreach($marker in @(
             'HII_GRAPH_NAV_REALTIME=PASS',
             'HII_GRAPH_NAV_SEMANTIC_ROLE=PASS',
-            'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
+            'HII_GRAPH_SPEECH_DMA_REUSE=PASS',
+            'HII_GRAPH_SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3'
           )){
             if(-not $proofText.Contains($marker)){ throw "persistent proof marker missing: $marker" }
           }
