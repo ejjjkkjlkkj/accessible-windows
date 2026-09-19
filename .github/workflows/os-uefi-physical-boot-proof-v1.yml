@@ -195,7 +195,7 @@ jobs:
                 -ErrorAction Stop
               'UEFI_BOOT_MEDIA_TEMP_UNMOUNT=PASS'
             } finally {
-              $dir=$env:PHYSICAL_PROOF_TEMP_MOUNT.TrimEnd('\')
+              $dir=($env:PHYSICAL_PROOF_TEMP_MOUNT).TrimEnd('\')
               if($dir -and (Test-Path $dir)){
                 Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
               }
