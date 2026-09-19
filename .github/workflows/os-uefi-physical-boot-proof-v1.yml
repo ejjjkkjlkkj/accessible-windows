@@ -103,6 +103,7 @@ jobs:
             'LPIB_PROGRESS=PASS',
             'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS',
             'PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS',
+            'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS',
             'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION'
           )
           foreach($marker in $required){
