@@ -152,6 +152,9 @@ jobs:
             'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS',
             'PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS',
             'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS',
+            'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1',
+            'HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS',
+            'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS',
             'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION'
           )
           foreach($marker in $required){
@@ -174,6 +177,8 @@ jobs:
             'PHYSICAL_UEFI_READER_LOCAL_NAVIGATION=PASS'
             'PHYSICAL_UEFI_HII_NAVIGATION=PASS'
             'PHYSICAL_UEFI_HII_NAV_REQUIRED_EVENTS=PASS'
+            'PHYSICAL_UEFI_SEMANTIC_CONTROL_READING=PASS'
+            'PHYSICAL_UEFI_DIGITS_AND_COMMON_SYMBOLS=PASS'
             'PHYSICAL_UEFI_INTERNAL_SPEAKER_PIN=PASS'
             'PHYSICAL_UEFI_FIRMWARE_FOCUS_SYNC=PENDING'
             'PHYSICAL_UEFI_CONTROL_SEMANTICS=PENDING'
@@ -244,6 +249,8 @@ jobs:
           if($result -notmatch 'PHYSICAL_UEFI_HDA_DMA=PASS'){ throw 'native HDA DMA proof missing' }
           if($result -notmatch 'PHYSICAL_UEFI_HII_NAVIGATION=PASS'){ throw 'native HII navigation proof missing' }
           if($result -notmatch 'PHYSICAL_UEFI_HII_NAV_REQUIRED_EVENTS=PASS'){ throw 'complete HII navigation event proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_SEMANTIC_CONTROL_READING=PASS'){ throw 'semantic IFR control reading proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_DIGITS_AND_COMMON_SYMBOLS=PASS'){ throw 'digit and firmware-symbol speech proof missing' }
           if($result -notmatch 'PHYSICAL_UEFI_INTERNAL_SPEAKER_PIN=PASS'){ throw 'internal speaker pin proof missing' }
           $audible='PENDING_HUMAN_CONFIRMATION'
           if($result -match 'PHYSICAL_UEFI_AUDIBLE_SPEAKER=HUMAN_CONFIRMED'){ $audible='HUMAN_CONFIRMED' }
@@ -277,6 +284,8 @@ jobs:
           $lines += 'proof-reader-local-navigation = PASS'
           $lines += 'proof-hii-navigation = PASS'
           $lines += 'proof-hii-navigation-required-events = PASS'
+          $lines += 'proof-semantic-control-reading = PASS'
+          $lines += 'proof-digits-and-common-symbols = PASS'
           $lines += 'proof-internal-speaker-pin = PASS'
           $lines += 'proof-firmware-focus-sync = PENDING'
           $lines += 'proof-control-semantics = PENDING'
