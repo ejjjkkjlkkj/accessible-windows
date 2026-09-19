@@ -53,6 +53,7 @@ jobs:
           grep -aF 'HII_GRAPH_NAV_EXIT=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_NAV_SPEECH_DMA=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HII_GRAPH_SPEECH_DMA_REUSE=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_SPEECH_PACING=PASS' "$out/BOOTX64.EFI"
           grep -aF 'BOOT_MEDIA_PERSISTENT_PROOF=PASS' "$out/BOOTX64.EFI"
           grep -aF 'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$out/BOOTX64.EFI"
           grep -aF "UEFI_SOURCE_BLOB=$source_blob" "$out/BOOTX64.EFI"
