@@ -183,8 +183,30 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $evidence='boot/uefi-amd5800h-real-final-v1/evidence'
-          if(Test-Path $evidence){ Remove-Item $evidence -Recurse -Force }
+
+          # A cancelled Hyper-V gate can leave VM configuration files locked.
+          # Remove only QEVARYNOX test VMs from older runs before touching evidence.
+          Import-Module Hyper-V -ErrorAction SilentlyContinue
+          if(Get-Command Get-VM -ErrorAction SilentlyContinue){
+            $stale=@(Get-VM -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'QEV-UEFI-*' })
+            foreach($vm in $stale){
+              Stop-VM -VM $vm -TurnOff -Force -ErrorAction SilentlyContinue
+              Remove-VM -VM $vm -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          if(Test-Path $evidence){
+            for($attempt=1;$attempt -le 8 -and (Test-Path $evidence);$attempt++){
+              Remove-Item $evidence -Recurse -Force -ErrorAction SilentlyContinue
+              if(Test-Path $evidence){ Start-Sleep -Milliseconds (250 * $attempt) }
+            }
+            if(Test-Path $evidence){
+              $locked=@(Get-ChildItem $evidence -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 20 -ExpandProperty FullName)
+              throw "Unable to reset AMD evidence workspace after Hyper-V cleanup. Remaining: $($locked -join '; ')"
+            }
+          }
           New-Item -ItemType Directory -Force $evidence | Out-Null
+          'AMD5800H_STALE_HYPERV_CLEANUP=PASS'
           'AMD5800H_TARGETED_WORKSPACE_RESET=PASS'
 
       - uses: actions/download-artifact@v5
