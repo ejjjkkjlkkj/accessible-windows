@@ -47,6 +47,7 @@ jobs:
           grep -aF 'HII_GRAPH_NAV_SPEECH_TEXT=' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_REALTIME_CAPABLE=PASS' "$root/REALTIME.EFI"
+          grep -aF 'HII_GRAPH_SPEECH_PACING=PASS' "$root/REALTIME.EFI"
           echo UEFI_REALTIME_SCREENREADER_BUILD=PASS
 
       - name: Resolve OVMF
@@ -102,6 +103,7 @@ jobs:
 
           wait_marker(b'HII_GRAPH_NAV_READY=PASS\r\n')
           b=wait_marker(b'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA\r\n')
+          b=wait_marker(b'HII_GRAPH_SPEECH_PACING=PASS\r\n')
 
           end=time.time()+20
           while time.time()<end and not qmp.exists():
@@ -1239,6 +1241,7 @@ jobs:
             'HII_GRAPH_NAV_SEMANTIC_SPEECH=ROLE_PLUS_LABEL',
             'HII_GRAPH_NAV_ROLE=',
             'HII_GRAPH_NAV_SPEECH_TEXT=',
+            'HII_GRAPH_SPEECH_PACING=PASS',
             'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS',
             'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3',
             'HDA_CODEC_SELECTION=REALTEK_10EC_0256'
@@ -1255,6 +1258,7 @@ jobs:
             'HII_GRAPH_NAV_SEMANTIC_ROLE=PASS',
             'HII_GRAPH_NAV_ROLE=',
             'HII_GRAPH_NAV_SPEECH_TEXT=',
+            'HII_GRAPH_SPEECH_PACING=PASS',
             'BOOT_MEDIA_PERSISTENT_PROOF=PASS',
             'STATUS=PASS'
           )){
@@ -1277,6 +1281,7 @@ jobs:
             'qemu-ovmf-realtime-proof=PASS'
             'interruptible-speech=PASS'
             'hda-lpib-progress=PASS'
+            'speech-pacing=PASS'
             'physical-pc-artifact-gate=PASS'
             'physical-bare-metal-boot=NOT_EXECUTED_BY_THIS_JOB'
             'audible-speaker=REQUIRES_HUMAN_CONFIRMATION'
