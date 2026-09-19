@@ -34,6 +34,9 @@ jobs:
           root=boot/uefi-hii-graph-prompt-speech-v1
           python -m py_compile "$root/generate_units.py"
           python "$root/generate_units.py" "$root/realtime-units.c" "$root/realtime-units.txt"
+          grep -F 'letter-map=a-z-french-letter-names' "$root/realtime-units.txt"
+          grep -F 'speech-mode=clear-lettername-spelling-fr-v3' "$root/realtime-units.txt"
+          grep -F 'inter-letter-silence-ms=12-runtime-gap' "$root/realtime-units.txt"
           flags='--target=x86_64-pc-windows-msvc -DQEV_INTERACTIVE_NAV=1 -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
           clang $flags -c "$root/hii_graph_prompt_speech_uefi.c" -o "$root/realtime-main.obj"
           clang $flags -c "$root/realtime-units.c" -o "$root/realtime-units.obj"
@@ -249,6 +252,7 @@ jobs:
             boot/uefi-hii-graph-prompt-speech-v1/realtime.serial
             boot/uefi-hii-graph-prompt-speech-v1/realtime.wav
             boot/uefi-hii-graph-prompt-speech-v1/realtime-proof.txt
+            boot/uefi-hii-graph-prompt-speech-v1/realtime-units.txt
           if-no-files-found: error
 
 
@@ -1243,6 +1247,7 @@ jobs:
             'HII_GRAPH_NAV_ROLE=',
             'HII_GRAPH_NAV_SPEECH_TEXT=',
             'HII_GRAPH_SPEECH_PACING=PASS',
+            'SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3',
             'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS',
             'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3',
             'HDA_CODEC_SELECTION=REALTEK_10EC_0256'
@@ -1260,6 +1265,7 @@ jobs:
             'HII_GRAPH_NAV_ROLE=',
             'HII_GRAPH_NAV_SPEECH_TEXT=',
             'HII_GRAPH_SPEECH_PACING=PASS',
+            'SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3',
             'BOOT_MEDIA_PERSISTENT_PROOF=PASS',
             'STATUS=PASS'
           )){
@@ -1283,6 +1289,7 @@ jobs:
             'interruptible-speech=PASS'
             'hda-lpib-progress=PASS'
             'speech-pacing=PASS'
+            'speech-mode=clear-lettername-spelling-fr-v3'
             'physical-pc-artifact-gate=PASS'
             'physical-bare-metal-boot=NOT_EXECUTED_BY_THIS_JOB'
             'audible-speaker=REQUIRES_HUMAN_CONFIRMATION'
