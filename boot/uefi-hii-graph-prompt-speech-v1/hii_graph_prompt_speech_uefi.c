@@ -943,6 +943,7 @@ static int prompt_opcode(u8 op) {
             return 0;
     }
 }
+#ifdef QEV_INTERACTIVE_NAV
 static int question_opcode(u8 op) {
     switch (op) {
         case 0x05: case 0x06: case 0x07: case 0x08: case 0x0c:
@@ -970,6 +971,7 @@ static const char *nav_role_name(u8 op) {
         default: return "control";
     }
 }
+#endif
 static u16 fold_prompt_char(u16 ch) {
     if (ch >= (u16)'A' && ch <= (u16)'Z') return (u16)(ch + 32u);
     switch (ch) {
