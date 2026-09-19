@@ -1163,6 +1163,32 @@ jobs:
           $captureJob=$null
           $mounted=$false
 
+          function Read-SerialSnapshot([string]$path) {
+            if(-not (Test-Path $path)){ return '' }
+            try {
+              $fs=[System.IO.File]::Open(
+                $path,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::Read,
+                [System.IO.FileShare]::ReadWrite
+              )
+              try {
+                $reader=[System.IO.StreamReader]::new(
+                  $fs,
+                  [System.Text.Encoding]::ASCII,
+                  $false,
+                  4096,
+                  $true
+                )
+                try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+              } finally {
+                $fs.Dispose()
+              }
+            } catch {
+              return ''
+            }
+          }
+
           Import-Module Hyper-V -ErrorAction Stop
           foreach($cmd in @('New-VHD','Mount-VHD','Dismount-VHD','New-VM','Set-VMFirmware','Set-VMComPort','Get-VMHardDiskDrive','Start-VM','Stop-VM','Remove-VM')){
             if(-not (Get-Command $cmd -ErrorAction SilentlyContinue)){ throw "Hyper-V command missing: $cmd" }
@@ -1254,13 +1280,17 @@ jobs:
             do {
               Start-Sleep -Milliseconds 500
               if(Test-Path $serial){
-                try { $raw=[System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($serial)) } catch {}
+                $snapshot=Read-SerialSnapshot $serial
+                if($snapshot){ $raw=$snapshot }
                 if($raw -match 'HII_PROMPT_SPEECH_HDA=PASS' -or $raw -match 'STATUS=BLOCKED'){ break }
               }
             } while((Get-Date) -lt $deadline)
 
             if(-not $raw -and (Test-Path $serial)){
-              $raw=[System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($serial))
+              for($i=0;$i -lt 20 -and -not $raw;$i++){
+                $raw=Read-SerialSnapshot $serial
+                if(-not $raw){ Start-Sleep -Milliseconds 250 }
+              }
             }
             if($raw -notmatch 'QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V1'){
               throw "Hyper-V did not execute the UEFI reader. serial=$raw"
