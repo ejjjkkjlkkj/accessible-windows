@@ -45,6 +45,12 @@ jobs:
           grep -aF 'HII_GRAPH_NAV_KEY=R' "$root/NAV.EFI"
           grep -aF 'HII_GRAPH_NAV_KEY=ESC' "$root/NAV.EFI"
           grep -aF 'HII_GRAPH_NAV_SPEECH_DMA=PASS' "$root/NAV.EFI"
+          grep -aF 'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS' "$root/NAV.EFI"
+          grep -aF 'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1' "$root/NAV.EFI"
+          grep -aF 'HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS' "$root/NAV.EFI"
+          grep -aF 'HII_GRAPH_NAV_ROLE=' "$root/NAV.EFI"
+          grep -aF 'HII_GRAPH_NAV_QUESTION_ID=0x' "$root/NAV.EFI"
+          grep -aF 'HII_GRAPH_NAV_VARSTORE_ID=0x' "$root/NAV.EFI"
           grep -aF 'HII_GRAPH_SPEECH_DMA_REUSE=PASS' "$root/NAV.EFI"
           sha256sum "$root/NAV.EFI" | tee "$root/nav-build.sha256"
           echo HII_GRAPH_NAV_BUILD=PASS
@@ -179,12 +185,21 @@ jobs:
               b'HDA_GRAPH_SEARCH_LIVE=PASS\r\n',
               b'HDA_SELECTOR_APPLY_LIVE=PASS\r\n',
               b'HII_PROMPT_SPEECH_HDA=PASS\r\n',
+              b'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1\r\n',
+              b'HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS\r\n',
+              b'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS\r\n',
           ]
           for marker in required:
               if marker not in b:
                   raise SystemExit('missing '+repr(marker)+': '+repr(b[-20000:]))
           if b.count(b'HII_GRAPH_NAV_SPEECH_HDA=PASS\r\n') < 7:
               raise SystemExit('navigation HDA speech event count too low')
+          if b.count(b'HII_GRAPH_NAV_ROLE=') < 7:
+              raise SystemExit('semantic role announcements missing')
+          if b.count(b'HII_GRAPH_NAV_QUESTION_ID=0x') < 7:
+              raise SystemExit('semantic question identity missing')
+          if b.count(b'HII_GRAPH_NAV_VARSTORE_ID=0x') < 7:
+              raise SystemExit('semantic varstore identity missing')
           if b.count(b'HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n') < 7:
               raise SystemExit('navigation LPIB event count too low')
           print(b.decode('ascii','replace'))
