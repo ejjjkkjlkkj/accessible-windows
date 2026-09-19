@@ -43,10 +43,15 @@ jobs:
           grep -aF 'HII_GRAPH_NAV_KEY=PAGE_UP' "$root/NAV.EFI"
           grep -aF 'HII_GRAPH_NAV_KEY=PAGE_DOWN' "$root/NAV.EFI"
           grep -aF 'HII_GRAPH_NAV_KEY=R' "$root/NAV.EFI"
+          grep -aF 'HII_GRAPH_NAV_KEY=TAB' "$root/NAV.EFI"
+          grep -aF 'HII_GRAPH_NAV_KEY=HELP' "$root/NAV.EFI"
           grep -aF 'HII_GRAPH_NAV_KEY=ESC' "$root/NAV.EFI"
           grep -aF 'HII_GRAPH_NAV_SPEECH_DMA=PASS' "$root/NAV.EFI"
           grep -aF 'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS' "$root/NAV.EFI"
-          grep -aF 'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1' "$root/NAV.EFI"
+          grep -aF 'HII_GRAPH_NAV_HELP_SPEECH_DMA=PASS' "$root/NAV.EFI"
+          grep -aF 'HII_GRAPH_NAV_FORM_HEADING=PASS' "$root/NAV.EFI"
+          grep -aF 'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V2' "$root/NAV.EFI"
+          grep -aF 'HII_NAV_HELP_AND_TAB=PASS' "$root/NAV.EFI"
           grep -aF 'HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS' "$root/NAV.EFI"
           grep -aF 'HII_GRAPH_NAV_ROLE=' "$root/NAV.EFI"
           grep -aF 'HII_GRAPH_NAV_QUESTION_ID=0x' "$root/NAV.EFI"
@@ -175,6 +180,17 @@ jobs:
           wait_for(b'HII_GRAPH_NAV_SPEECH_DMA=PASS\r\n',7)
           wait_for(b'HII_GRAPH_SPEECH_DMA_REUSE=PASS\r\n',7)
 
+          send('tab')
+          wait_for(b'HII_GRAPH_NAV_KEY=TAB\r\n')
+          wait_for(b'HII_GRAPH_NAV_SPEECH_DMA=PASS\r\n',8)
+          wait_for(b'HII_GRAPH_SPEECH_DMA_REUSE=PASS\r\n',8)
+
+          send('h')
+          wait_for(b'HII_GRAPH_NAV_KEY=HELP\r\n')
+          wait_for(b'HII_GRAPH_NAV_HELP_SPEECH_DMA=PASS\r\n')
+          wait_for(b'HII_GRAPH_NAV_HELP_SPEECH_HDA=PASS\r\n')
+          wait_for(b'HII_GRAPH_NAV_HELP_LPIB_PROGRESS=PASS\r\n')
+
           send('esc')
           s.close()
 
@@ -185,22 +201,25 @@ jobs:
               b'HDA_GRAPH_SEARCH_LIVE=PASS\r\n',
               b'HDA_SELECTOR_APPLY_LIVE=PASS\r\n',
               b'HII_PROMPT_SPEECH_HDA=PASS\r\n',
-              b'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1\r\n',
+              b'HII_GRAPH_NAV_FORM_HEADING=PASS\r\n',
+              b'HII_GRAPH_NAV_HELP_SPEECH_DMA=PASS\r\n',
+              b'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V2\r\n',
+              b'HII_NAV_HELP_AND_TAB=PASS\r\n',
               b'HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS\r\n',
               b'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS\r\n',
           ]
           for marker in required:
               if marker not in b:
                   raise SystemExit('missing '+repr(marker)+': '+repr(b[-20000:]))
-          if b.count(b'HII_GRAPH_NAV_SPEECH_HDA=PASS\r\n') < 7:
+          if b.count(b'HII_GRAPH_NAV_SPEECH_HDA=PASS\r\n') < 8:
               raise SystemExit('navigation HDA speech event count too low')
-          if b.count(b'HII_GRAPH_NAV_ROLE=') < 7:
+          if b.count(b'HII_GRAPH_NAV_ROLE=') < 8:
               raise SystemExit('semantic role announcements missing')
-          if b.count(b'HII_GRAPH_NAV_QUESTION_ID=0x') < 7:
+          if b.count(b'HII_GRAPH_NAV_QUESTION_ID=0x') < 8:
               raise SystemExit('semantic question identity missing')
-          if b.count(b'HII_GRAPH_NAV_VARSTORE_ID=0x') < 7:
+          if b.count(b'HII_GRAPH_NAV_VARSTORE_ID=0x') < 8:
               raise SystemExit('semantic varstore identity missing')
-          if b.count(b'HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n') < 7:
+          if b.count(b'HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n') < 8:
               raise SystemExit('navigation LPIB event count too low')
           print(b.decode('ascii','replace'))
           print('HII_GRAPH_NAV_KEYBOARD=PASS')
@@ -221,8 +240,12 @@ jobs:
           tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_NAV_PAGE_UP=PASS'
           tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_NAV_PAGE_DOWN=PASS'
           tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_NAV_REPEAT=PASS'
+          tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_NAV_TAB=PASS'
+          tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_NAV_HELP=PASS'
           tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_NAV_EXIT=PASS'
-          tr -d '\r' < "$root/nav-proof.txt" | grep -E '^HII_GRAPH_NAV_SPEECH_EVENTS=0x0[7-9A-F]$'
+          tr -d '\r' < "$root/nav-proof.txt" | grep -E '^HII_GRAPH_NAV_SPEECH_EVENTS=0x0[8-9A-F]$'
+          tr -d '\r' < "$root/nav-proof.txt" | grep -E '^HII_GRAPH_NAV_HELP_EVENTS=0x0[1-9A-F]$'
+          tr -d '\r' < "$root/nav-proof.txt" | grep -E '^HII_GRAPH_NAV_FORM_HEADINGS=0x0[1-9A-F]$'
           tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
           tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
           echo HII_GRAPH_NAV_PERSISTENT_PROOF=PASS
