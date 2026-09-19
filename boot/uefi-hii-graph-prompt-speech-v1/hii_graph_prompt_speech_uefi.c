@@ -146,9 +146,13 @@ static u8 g_nav_prompt_total;
 static u8 g_nav_prompt_index;
 static u8 g_nav_event_mask;
 static u8 g_nav_speech_events;
-#define NAV_SEEN_UP   0x01u
-#define NAV_SEEN_DOWN 0x02u
-#define NAV_SEEN_R    0x04u
+#define NAV_SEEN_UP        0x01u
+#define NAV_SEEN_DOWN      0x02u
+#define NAV_SEEN_R         0x04u
+#define NAV_SEEN_HOME      0x08u
+#define NAV_SEEN_END       0x10u
+#define NAV_SEEN_PAGE_UP   0x20u
+#define NAV_SEEN_PAGE_DOWN 0x40u
 #endif
 
 static inline void outb(u16 port, u8 value) {
@@ -287,6 +291,14 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_DOWN) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_REPEAT=");
     proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_R) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_HOME=");
+    proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_HOME) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_END=");
+    proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_END) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_PAGE_UP=");
+    proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_PAGE_UP) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_PAGE_DOWN=");
+    proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_PAGE_DOWN) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_EXIT=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SPEECH_EVENTS=0x");
     proof_hex8(proof,sizeof(proof),&n,g_nav_speech_events);
@@ -1083,6 +1095,29 @@ static int wait_navigation_keys(void *system_table) {
                 g_nav_event_mask |= NAV_SEEN_DOWN;
                 u8 next = (u8)(g_nav_prompt_index + 1u);
                 if (next >= g_nav_prompt_total) next = 0;
+                nav_prompt_load(next);
+                speak = 1;
+            } else if (key.scan_code == 0x0005u) {
+                marker("HII_GRAPH_NAV_KEY=HOME");
+                g_nav_event_mask |= NAV_SEEN_HOME;
+                nav_prompt_load(0u);
+                speak = 1;
+            } else if (key.scan_code == 0x0006u) {
+                marker("HII_GRAPH_NAV_KEY=END");
+                g_nav_event_mask |= NAV_SEEN_END;
+                nav_prompt_load((u8)(g_nav_prompt_total - 1u));
+                speak = 1;
+            } else if (key.scan_code == 0x0009u) {
+                marker("HII_GRAPH_NAV_KEY=PAGE_UP");
+                g_nav_event_mask |= NAV_SEEN_PAGE_UP;
+                u8 next = g_nav_prompt_index > 5u ? (u8)(g_nav_prompt_index - 5u) : 0u;
+                nav_prompt_load(next);
+                speak = 1;
+            } else if (key.scan_code == 0x000au) {
+                marker("HII_GRAPH_NAV_KEY=PAGE_DOWN");
+                g_nav_event_mask |= NAV_SEEN_PAGE_DOWN;
+                u8 next = (u8)(g_nav_prompt_index + 5u);
+                if (next >= g_nav_prompt_total) next = (u8)(g_nav_prompt_total - 1u);
                 nav_prompt_load(next);
                 speak = 1;
             }
