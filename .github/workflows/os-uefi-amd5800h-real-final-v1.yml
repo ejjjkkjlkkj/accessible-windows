@@ -172,6 +172,20 @@ jobs:
           $bios=Get-CimInstance Win32_BIOS
           if ([string]$cs.Model -notmatch 'M1603QA') { throw "unexpected model: $($cs.Model)" }
           if ([string]$cpu.Name -notmatch '5800H') { throw "unexpected cpu: $($cpu.Name)" }
+
+          $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+          $principal=[Security.Principal.WindowsPrincipal]::new($identity)
+          if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){
+            throw "AMD-5800H-REAL runner must be started from an elevated Administrator console"
+          }
+          if(-not (Get-Module -ListAvailable -Name Hyper-V | Select-Object -First 1)){
+            throw 'Hyper-V PowerShell module is not installed'
+          }
+          $vmms=Get-Service vmms -ErrorAction Stop
+          if($vmms.Status -ne 'Running'){
+            throw "Hyper-V VMMS is not running: $($vmms.Status)"
+          }
+
           New-Item -ItemType Directory -Force boot/uefi-amd5800h-real-final-v1/evidence | Out-Null
           @(
             "runner=$env:RUNNER_NAME"
@@ -179,6 +193,9 @@ jobs:
             "model=$($cs.Model)"
             "cpu=$($cpu.Name)"
             "bios=$($bios.SMBIOSBIOSVersion)"
+            "administrator=PASS"
+            "hyperv-module=PASS"
+            "hyperv-vmms=PASS"
             "host-binding=PASS"
             "physical-host-reboot=false"
             "physical-host-firmware-mutation=false"
