@@ -13,6 +13,10 @@ on:
       - 'boot/uefi-hii-graph-prompt-speech-v1/generate_units.py'
       - 'boot/uefi-native-speech-v1/build_uefi_native_speech.py'
       - 'boot/uefi-amd5800h-real-final-v1/os-uefi-amd5800h-real-final-v1.labproof'
+      - 'boot/uefi-hii-current-option-speech-v1/os-uefi-hii-current-option-speech-v1.labproof'
+      - 'boot/uefi-hii-platform-commit-v1/os-uefi-hii-platform-commit-v1.labproof'
+      - 'boot/uefi-secure-boot-v1/os-uefi-secure-boot-v1.labproof'
+      - 'boot/uefi-hii-graph-prompt-speech-v1/os-uefi-hii-graph-prompt-speech-v1.labproof'
       - '.github/workflows/os-uefi-amd5800h-real-final-v1.yml'
   workflow_dispatch:
 
@@ -1077,11 +1081,19 @@ jobs:
           $promptBuilder='boot/uefi-hii-prompt-speech-v1/build_uefi_hii_prompt_speech.py'
           $hiiGraphSource='boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
           $hiiGraphGenerator='boot/uefi-hii-graph-prompt-speech-v1/generate_units.py'
+          $currentProof='boot/uefi-hii-current-option-speech-v1/os-uefi-hii-current-option-speech-v1.labproof'
+          $commitProof='boot/uefi-hii-platform-commit-v1/os-uefi-hii-platform-commit-v1.labproof'
+          $secureBootProof='boot/uefi-secure-boot-v1/os-uefi-secure-boot-v1.labproof'
+          $graphProof='boot/uefi-hii-graph-prompt-speech-v1/os-uefi-hii-graph-prompt-speech-v1.labproof'
           $workflow='.github/workflows/os-uefi-amd5800h-real-final-v1.yml'
           $testedBuilder=(git rev-parse "$($env:GITHUB_SHA):$builder").Trim()
           $testedPromptBuilder=(git rev-parse "$($env:GITHUB_SHA):$promptBuilder").Trim()
           $testedHiiGraphSource=(git rev-parse "$($env:GITHUB_SHA):$hiiGraphSource").Trim()
           $testedHiiGraphGenerator=(git rev-parse "$($env:GITHUB_SHA):$hiiGraphGenerator").Trim()
+          $testedCurrentProof=(git rev-parse "$($env:GITHUB_SHA):$currentProof").Trim()
+          $testedCommitProof=(git rev-parse "$($env:GITHUB_SHA):$commitProof").Trim()
+          $testedSecureBootProof=(git rev-parse "$($env:GITHUB_SHA):$secureBootProof").Trim()
+          $testedGraphProof=(git rev-parse "$($env:GITHUB_SHA):$graphProof").Trim()
           $testedWorkflow=(git rev-parse "$($env:GITHUB_SHA):$workflow").Trim()
           git fetch origin os
           git checkout -B os origin/os
@@ -1089,6 +1101,10 @@ jobs:
           if($testedPromptBuilder -ne (git rev-parse "origin/os:$promptBuilder").Trim()){ 'AMD_FINAL_STALE_PROMPT_BUILDER=SKIP'; exit 0 }
           if($testedHiiGraphSource -ne (git rev-parse "origin/os:$hiiGraphSource").Trim()){ 'AMD_FINAL_STALE_HII_GRAPH_SOURCE=SKIP'; exit 0 }
           if($testedHiiGraphGenerator -ne (git rev-parse "origin/os:$hiiGraphGenerator").Trim()){ 'AMD_FINAL_STALE_HII_GRAPH_GENERATOR=SKIP'; exit 0 }
+          if($testedCurrentProof -ne (git rev-parse "origin/os:$currentProof").Trim()){ 'AMD_FINAL_STALE_CURRENT_OPTION_PROOF=SKIP'; exit 0 }
+          if($testedCommitProof -ne (git rev-parse "origin/os:$commitProof").Trim()){ 'AMD_FINAL_STALE_PLATFORM_COMMIT_PROOF=SKIP'; exit 0 }
+          if($testedSecureBootProof -ne (git rev-parse "origin/os:$secureBootProof").Trim()){ 'AMD_FINAL_STALE_SECURE_BOOT_PROOF=SKIP'; exit 0 }
+          if($testedGraphProof -ne (git rev-parse "origin/os:$graphProof").Trim()){ 'AMD_FINAL_STALE_HII_GRAPH_PROOF=SKIP'; exit 0 }
           if($testedWorkflow -ne (git rev-parse "origin/os:$workflow").Trim()){ 'AMD_FINAL_STALE_WORKFLOW=SKIP'; exit 0 }
           $lines=Get-Content $proof | Where-Object { $_ -notmatch '^proof(-| = )' }
           $vm='NOT_FOUND'
