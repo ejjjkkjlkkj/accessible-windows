@@ -62,6 +62,7 @@ struct Geometry {
     root_sectors: usize,
     data_start: usize,
     fat_sectors: usize,
+    data_clusters: usize,
 }
 
 fn parse_geometry(boot: &[u8; SECTOR_SIZE]) -> Option<Geometry> {
@@ -71,13 +72,25 @@ fn parse_geometry(boot: &[u8; SECTOR_SIZE]) -> Option<Geometry> {
     let num_fats = boot[0x10] as usize;
     let root_entries = read_u16(boot, 0x11) as usize;
     let fat_sectors = read_u16(boot, 0x16) as usize;
+    let total_sectors_16 = read_u16(boot, 0x13) as usize;
+    let total_sectors = if total_sectors_16 != 0 {
+        total_sectors_16
+    } else {
+        read_u32(boot, 0x20) as usize
+    };
     if sector_size != SECTOR_SIZE || sectors_per_cluster == 0 || fat_sectors == 0 || num_fats == 0 {
         return None;
     }
     let fat_start = reserved;
-    let root_start = reserved + num_fats * fat_sectors;
+    let root_start = reserved.checked_add(num_fats.checked_mul(fat_sectors)?)?;
     let root_sectors = (root_entries * 32).div_ceil(sector_size);
-    let data_start = root_start + root_sectors;
+    let data_start = root_start.checked_add(root_sectors)?;
+    let data_sectors = total_sectors.checked_sub(data_start)?;
+    let data_clusters = data_sectors / sectors_per_cluster;
+    let fat_entries = fat_sectors.checked_mul(sector_size)? / 2;
+    if data_clusters == 0 || data_clusters.checked_add(2)? > fat_entries {
+        return None;
+    }
     Some(Geometry {
         sector_size,
         sectors_per_cluster,
@@ -86,6 +99,7 @@ fn parse_geometry(boot: &[u8; SECTOR_SIZE]) -> Option<Geometry> {
         root_sectors,
         data_start,
         fat_sectors,
+        data_clusters,
     })
 }
 
@@ -320,6 +334,9 @@ pub fn write_file<S: SectorSource + SectorSink>(
 
     // Find the first free FAT entry (value 0) at cluster index >= 2.
     let entries_per_sector = SECTOR_SIZE / 2;
+    let max_cluster_exclusive = 2usize
+        .checked_add(geometry.data_clusters)
+        .ok_or("geometry_overflow")?;
     let mut free_cluster = 0usize;
     let mut sector = [0u8; SECTOR_SIZE];
     'scan: for fat_sector in 0..geometry.fat_sectors {
@@ -330,6 +347,9 @@ pub fn write_file<S: SectorSource + SectorSink>(
             let cluster = fat_sector * entries_per_sector + i;
             if cluster < 2 {
                 continue;
+            }
+            if cluster >= max_cluster_exclusive {
+                break 'scan;
             }
             if read_u16(&sector, i * 2) == 0 {
                 free_cluster = cluster;
