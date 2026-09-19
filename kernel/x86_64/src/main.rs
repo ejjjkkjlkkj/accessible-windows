@@ -1504,7 +1504,12 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
             debug_write("AW_RING3_PREEMPT_SKIPPED reason=timer-or-memory-not-ready\n");
         }
         prove_device_interrupt_routing(handoff);
-        bring_up_secondary_processors(handoff);
+        // SMP reads x2APIC MSRs and shares the kernel-owned page tables.
+        if timer_ready && memory_ready {
+            bring_up_secondary_processors(handoff);
+        } else {
+            debug_write("AW_SMP_UNAVAILABLE reason=timer-or-memory-not-ready\n");
+        }
         prove_per_cpu_state();
         clock::prove();
         // Read the wall-clock date/time from the CMOS RTC (read-only, safe on any

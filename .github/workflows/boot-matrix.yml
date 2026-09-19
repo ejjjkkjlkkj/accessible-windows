@@ -218,6 +218,7 @@ jobs:
           if grep -qF "AW_APIC_TIMER_UNAVAILABLE" "$LOG"; then
             grep -F "AW_PREEMPT_SKIPPED reason=timer-not-proven" "$LOG"
             grep -F "AW_RING3_PREEMPT_SKIPPED" "$LOG"
+            grep -F "AW_SMP_UNAVAILABLE reason=timer-or-memory-not-ready" "$LOG"
             ! grep -qF "AW_PREEMPT_BEGIN" "$LOG"
           else
             grep -F "AW_APIC_TIMER_DELIVERY_PROOF_OK" "$LOG"
