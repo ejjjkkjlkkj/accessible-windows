@@ -12,6 +12,8 @@ on:
 permissions:
   contents: write
 
+# Revalidate physical ASUS/ALC256 inventory after the latest native HDA routing changes.
+
 jobs:
   amd5800h-audio-inventory:
     runs-on: self-hosted
