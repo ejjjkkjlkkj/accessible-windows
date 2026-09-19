@@ -533,7 +533,7 @@ static int apply_route(u8 pin, u8 dac, u8 *applied_out) {
 }
 
 static u32 widget_amp_cap(u8 nid, u8 param) {
-    if (nid >= MAX_NID || g_afg == INVALID_NID) return INVALID_RESP;
+    if (g_afg == INVALID_NID) return INVALID_RESP;
     if (g_widget_cap[nid] & 0x08u) return get_param(nid, param);
     return get_param(g_afg, param);
 }
