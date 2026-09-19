@@ -284,6 +284,10 @@ jobs:
             b"ROUTE_CONFIG=PASS\r\n",
             b"COMMIT_CONFIRMATION_SPEECH_HDA=PASS\r\n",
             b"HII_CANCEL_NO_ROUTE=PASS\r\n",
+            b"HDA_ROUTE_POWER_D0=PASS\r\n",
+            b"HDA_EAPD_POLICY=PASS\r\n",
+            b"HDA_DAC_STREAM_READBACK=PASS\r\n",
+            b"HDA_PIN_CONTROL_READBACK=PASS\r\n",
           ]
           for p in root.glob("*.EFI"):
               image=p.read_bytes()
@@ -642,6 +646,10 @@ jobs:
               b"BOOT_MEDIA_PERSISTENT_PROOF=PASS\r\n",
               b"HDA_GRAPH_SEARCH_LIVE=PASS\r\n",
               b"HDA_SELECTOR_APPLY_LIVE=PASS\r\n",
+              b"HDA_ROUTE_POWER_D0=PASS\r\n",
+              b"HDA_EAPD_POLICY=PASS\r\n",
+              b"HDA_DAC_STREAM_READBACK=PASS\r\n",
+              b"HDA_PIN_CONTROL_READBACK=PASS\r\n",
               b"HII_PROMPT_SPEECH_HDA=PASS\r\n",
           ]:
               if marker not in b:
@@ -716,6 +724,9 @@ jobs:
           if(-not ($raw -match 'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403' -and
                    $raw -match 'HDA_GRAPH_SEARCH_LIVE=PASS' -and
                    $raw -match 'HDA_SELECTOR_APPLY_LIVE=PASS' -and
+                   $raw -match 'HDA_ROUTE_POWER_D0=PASS' -and
+                   $raw -match 'HDA_DAC_STREAM_READBACK=PASS' -and
+                   $raw -match 'HDA_PIN_CONTROL_READBACK=PASS' -and
                    $raw -match 'HDA_OUTPUT_PATH_CONFIGURATION=PASS' -and
                    $raw -match 'LPIB_PROGRESS=PASS' -and
                    $raw -match 'STATUS=PASS')){
@@ -797,6 +808,10 @@ jobs:
             'HDA_GRAPH_SEARCH_LIVE=PASS',
             'HDA_SELECTOR_APPLY_LIVE=PASS',
             'HDA_SELECTOR_PLAN=PASS',
+            'HDA_ROUTE_POWER_D0=PASS',
+            'HDA_EAPD_POLICY=PASS',
+            'HDA_DAC_STREAM_READBACK=PASS',
+            'HDA_PIN_CONTROL_READBACK=PASS',
             'HDA_OUTPUT_PATH_CONFIGURATION=PASS',
             'BDL_RUNTIME_TEXT_SCHEDULE=PASS',
             'HII_GRAPH_SPEECH_DMA=PASS',
