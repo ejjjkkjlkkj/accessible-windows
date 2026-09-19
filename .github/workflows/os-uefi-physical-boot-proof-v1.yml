@@ -171,9 +171,17 @@ jobs:
             'PHYSICAL_UEFI_HDA_ROUTE=PASS'
             'PHYSICAL_UEFI_HDA_DMA=PASS'
             'PHYSICAL_UEFI_LPIB_PROGRESS=PASS'
+            'PHYSICAL_UEFI_READER_LOCAL_NAVIGATION=PASS'
             'PHYSICAL_UEFI_HII_NAVIGATION=PASS'
             'PHYSICAL_UEFI_HII_NAV_REQUIRED_EVENTS=PASS'
             'PHYSICAL_UEFI_INTERNAL_SPEAKER_PIN=PASS'
+            'PHYSICAL_UEFI_FIRMWARE_FOCUS_SYNC=PENDING'
+            'PHYSICAL_UEFI_CONTROL_SEMANTICS=PENDING'
+            'PHYSICAL_UEFI_CONTROL_ACTIVATION=PENDING'
+            'PHYSICAL_UEFI_FORM_HIERARCHY=PENDING'
+            'PHYSICAL_UEFI_ALPHANUMERIC_SPEECH=PENDING'
+            'PHYSICAL_UEFI_SPEECH_INTERRUPT=PENDING'
+            'PHYSICAL_UEFI_CORE_SCREEN_READER_PARITY=PENDING'
             "PHYSICAL_UEFI_AUDIBLE_SPEAKER=$audible"
             "PHYSICAL_UEFI_PROOF_SHA256=$sha"
             'PHYSICAL_HOST_REBOOT_BY_WORKFLOW=false'
@@ -243,7 +251,16 @@ jobs:
           if(-not $sha){ throw 'physical UEFI proof SHA missing' }
 
           $lines=Get-Content $proof | Where-Object { $_ -notmatch '^proof(-| = )' }
-          $lines += if($audible -eq 'HUMAN_CONFIRMED'){'proof = PASS'}else{'proof = HDA_RUNTIME_PASS_AUDIBLE_PENDING'}
+          # Current physical reader navigation is a reader-local HII prompt list.
+          # Do not claim NVDA-like/core screen-reader parity until focus synchronization,
+          # control semantics/activation, hierarchy, alphanumeric speech and interruption
+          # have independent runtime proof on the physical firmware.
+          $coreParity='PENDING'
+          $lines += if($audible -eq 'HUMAN_CONFIRMED'){
+            'proof = HDA_RUNTIME_AND_AUDIBLE_PASS_CORE_SCREEN_READER_PARITY_PENDING'
+          } else {
+            'proof = HDA_RUNTIME_PASS_AUDIBLE_AND_CORE_SCREEN_READER_PARITY_PENDING'
+          }
           $lines += "proof-run = $env:GITHUB_RUN_ID"
           $lines += "proof-head-sha = $env:GITHUB_SHA"
           $lines += "proof-runner = $env:RUNNER_NAME"
@@ -257,9 +274,17 @@ jobs:
           $lines += 'proof-hda-route = PASS'
           $lines += 'proof-hda-dma = PASS'
           $lines += 'proof-lpib-progress = PASS'
+          $lines += 'proof-reader-local-navigation = PASS'
           $lines += 'proof-hii-navigation = PASS'
           $lines += 'proof-hii-navigation-required-events = PASS'
           $lines += 'proof-internal-speaker-pin = PASS'
+          $lines += 'proof-firmware-focus-sync = PENDING'
+          $lines += 'proof-control-semantics = PENDING'
+          $lines += 'proof-control-activation = PENDING'
+          $lines += 'proof-form-hierarchy = PENDING'
+          $lines += 'proof-alphanumeric-speech = PENDING'
+          $lines += 'proof-speech-interrupt = PENDING'
+          $lines += "proof-core-screen-reader-parity = $coreParity"
           $lines += "proof-audible-physical-speaker = $audible"
           $lines += 'proof-workflow-triggered-reboot = false'
           $lines += 'proof-firmware-mutation = false'
