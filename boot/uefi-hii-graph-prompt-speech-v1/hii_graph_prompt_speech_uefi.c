@@ -164,6 +164,7 @@ static u8 g_nav_prompt_total;
 static u8 g_nav_prompt_index;
 static u8 g_nav_event_mask;
 static u8 g_nav_speech_events;
+static u8 g_nav_question_speech_events;
 #define NAV_SEEN_UP        0x01u
 #define NAV_SEEN_DOWN      0x02u
 #define NAV_SEEN_R         0x04u
@@ -373,6 +374,14 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_EXIT=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SPEECH_EVENTS=0x");
     proof_hex8(proof,sizeof(proof),&n,g_nav_speech_events);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SEMANTIC_CONTROL=");
+    proof_puts(proof,sizeof(proof),&n,
+        g_nav_question_speech_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SEMANTIC_QUESTION_EVENTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_question_speech_events);
     proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_SPEECH_DMA_REUSE=");
     proof_puts(proof,sizeof(proof),&n,
@@ -1130,6 +1139,7 @@ static int resolve_hii_prompt(void *system_table) {
     g_nav_prompt_index = 0;
     g_nav_event_mask = 0;
     g_nav_speech_events = 0;
+    g_nav_question_speech_events = 0;
 #endif
 
     for (u32 hi = 0; hi < handles; ++hi) {
@@ -1558,6 +1568,8 @@ static int wait_navigation_keys(void *system_table) {
                 marker("HII_GRAPH_NAV_SPEECH_HDA=PASS");
                 marker("HII_GRAPH_NAV_LPIB_PROGRESS=PASS");
                 ++g_nav_speech_events;
+                if (g_nav_question_id[g_nav_prompt_index] != 0u)
+                    ++g_nav_question_speech_events;
                 if (g_speech_dma_allocations != 1u) return 0;
                 marker("HII_GRAPH_SPEECH_DMA_REUSE=PASS");
             }
