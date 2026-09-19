@@ -808,6 +808,140 @@ jobs:
             if($p -and -not $p.HasExited){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
           }
 
+      - name: Execute isolated PlatformDxe commit on AMD-5800H-REAL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $ev='boot/uefi-hii-platform-commit-v1/pc-runner-evidence'
+          $commit=Join-Path $ev 'INTERACT-COMMIT.EFI'
+          $verify=Join-Path $ev 'INTERACT-VERIFY.EFI'
+          foreach($p in @($commit,$verify)){ if(-not (Test-Path $p)){ throw "missing $p" } }
+
+          $rt=Join-Path $ev 'pc-interaction'
+          if(Test-Path $rt){ Remove-Item $rt -Recurse -Force }
+          New-Item -ItemType Directory -Force (Join-Path $rt 'esp\EFI\BOOT') | Out-Null
+          Copy-Item $commit (Join-Path $rt 'esp\EFI\BOOT\BOOTX64.EFI')
+          Copy-Item $env:OVMF_CODE_PC (Join-Path $rt 'OVMF_CODE.fd')
+          Copy-Item $env:OVMF_VARS_PC (Join-Path $rt 'OVMF_VARS.fd')
+
+          function Wait-Serial([string]$Path,[string]$Needle,[int]$Seconds=55){
+            $deadline=[DateTime]::UtcNow.AddSeconds($Seconds)
+            do {
+              Start-Sleep -Milliseconds 100
+              [string]$raw=''
+              if(Test-Path $Path){
+                $v=Get-Content $Path -Raw -ErrorAction SilentlyContinue
+                if($null -ne $v){ $raw=[string]$v }
+              }
+              if($raw -match 'STATUS=BLOCKED'){ throw "firmware blocked waiting $Needle : $raw" }
+              if($raw.Contains($Needle)){ return $raw }
+            } while([DateTime]::UtcNow -lt $deadline)
+            throw "timeout waiting $Needle"
+          }
+
+          function Send-Monitor([string]$Command){
+            $client=[Net.Sockets.TcpClient]::new()
+            try {
+              $deadline=[DateTime]::UtcNow.AddSeconds(10)
+              do {
+                try { $client.Connect('127.0.0.1',45454); break } catch { Start-Sleep -Milliseconds 100 }
+              } while([DateTime]::UtcNow -lt $deadline)
+              if(-not $client.Connected){ throw 'QEMU monitor connection failed' }
+              $stream=$client.GetStream()
+              $line=$Command + [Environment]::NewLine
+              $bytes=[Text.Encoding]::ASCII.GetBytes($line)
+              $stream.Write($bytes,0,$bytes.Length)
+              $stream.Flush()
+              Start-Sleep -Milliseconds 100
+            } finally { $client.Dispose() }
+          }
+
+          $serial=Join-Path $rt 'commit.serial'
+          $wav=Join-Path $rt 'commit.wav'
+          $stderr=Join-Path $rt 'commit.stderr.txt'
+          $args=@(
+            '-machine','q35,accel=tcg','-m','192M','-vga','std',
+            '-drive',"if=pflash,format=raw,readonly=on,file=$rt\OVMF_CODE.fd",
+            '-drive',"if=pflash,format=raw,file=$rt\OVMF_VARS.fd",
+            '-drive',"format=raw,file=fat:rw:$rt\esp",
+            '-audiodev',"wav,id=aud,path=$wav,out.frequency=48000,out.channels=2",
+            '-device','ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0',
+            '-device','hda-micro,bus=hda0.0,cad=0,audiodev=aud,mixer=on',
+            '-display','none',
+            '-monitor','tcp:127.0.0.1:45454,server=on,wait=off',
+            '-serial',"file:$serial",
+            '-parallel','none','-net','none','-no-reboot','-no-shutdown'
+          )
+          $p=Start-Process -FilePath $env:QEMU_EXE -ArgumentList $args -PassThru -WindowStyle Hidden -RedirectStandardError $stderr
+          try {
+            $raw=Wait-Serial $serial 'HII_NAVIGATION_KEY=WAIT_DOWN'
+            if(-not $raw.Contains('PLATFORM_WRITABLE_TARGET=PASS')){ throw 'PlatformDxe target missing' }
+            $initial=[regex]::Matches($raw,'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})') | Select-Object -Last 1
+            if(-not $initial.Success){ throw 'initial value missing' }
+
+            Send-Monitor 'sendkey down'
+            $raw=Wait-Serial $serial 'HII_COMMIT_KEY=WAIT_ENTER'
+            if(-not $raw.Contains('NAV_FOCUS_SPEECH_HDA=PASS')){ throw 'focus speech missing' }
+            if($raw.Contains('ROUTE_CONFIG=PASS')){ throw 'RouteConfig happened before ENTER' }
+            $target=[regex]::Matches($raw,'NAV_NEXT_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})') | Select-Object -Last 1
+            $label=[regex]::Matches($raw,'NAV_FOCUS_OPTION_TEXT=([^\r\n]+)') | Select-Object -Last 1
+            if(-not ($target.Success -and $label.Success)){ throw 'focused target identity missing' }
+            if($initial.Groups[1].Value -eq $target.Groups[1].Value){ throw 'DOWN did not select another value' }
+
+            Send-Monitor 'sendkey ret'
+            $raw=Wait-Serial $serial 'STATUS=PASS'
+            foreach($marker in @('HII_COMMIT_KEY=PASS','BLOCK_TO_CONFIG=PASS','ROUTE_CONFIG=PASS','COMMIT_CONFIRMATION_SPEECH_HDA=PASS')){
+              if(-not $raw.Contains($marker)){ throw "commit marker missing: $marker" }
+            }
+          } finally {
+            if($p -and -not $p.HasExited){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+          if(-not (Test-Path $wav) -or (Get-Item $wav).Length -le 10000){ throw 'interaction WAV missing or too small' }
+
+          Copy-Item $verify (Join-Path $rt 'esp\EFI\BOOT\BOOTX64.EFI') -Force
+          $post=Join-Path $rt 'post.serial'
+          $posterr=Join-Path $rt 'post.stderr.txt'
+          $args2=@(
+            '-machine','q35,accel=tcg','-m','192M','-vga','std',
+            '-drive',"if=pflash,format=raw,readonly=on,file=$rt\OVMF_CODE.fd",
+            '-drive',"if=pflash,format=raw,file=$rt\OVMF_VARS.fd",
+            '-drive',"format=raw,file=fat:rw:$rt\esp",
+            '-audiodev','none,id=noaudio',
+            '-device','ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0',
+            '-device','hda-micro,bus=hda0.0,cad=0,audiodev=noaudio,mixer=on',
+            '-display','none','-monitor','none',
+            '-serial',"file:$post",
+            '-parallel','none','-net','none','-no-reboot','-no-shutdown'
+          )
+          $p2=Start-Process -FilePath $env:QEMU_EXE -ArgumentList $args2 -PassThru -WindowStyle Hidden -RedirectStandardError $posterr
+          try {
+            $postRaw=Wait-Serial $post 'STATUS=PASS'
+            $current=[regex]::Matches($postRaw,'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})') | Select-Object -Last 1
+            $selected=[regex]::Matches($postRaw,'SELECTED_OPTION_TEXT=([^\r\n]+)') | Select-Object -Last 1
+            if(-not ($current.Success -and $selected.Success)){ throw 'post-commit state missing' }
+            if($current.Groups[1].Value -ne $target.Groups[1].Value){ throw 'same-VARS committed value not persistent' }
+            if($selected.Groups[1].Value.Trim() -ne $label.Groups[1].Value.Trim()){ throw 'same-VARS committed label not persistent' }
+
+            @(
+              'runner=AMD-5800H-REAL'
+              'execution=QEMU_OVMF_ISOLATED_VARS_ON_PHYSICAL_PC'
+              "initial-raw8=$($initial.Groups[1].Value)"
+              "target-raw8=$($target.Groups[1].Value)"
+              "target-label=$($label.Groups[1].Value.Trim())"
+              'focus-speech=PASS'
+              'enter-gate=PASS'
+              'route-config-after-enter=PASS'
+              'confirmation-speech=PASS'
+              'same-vars-reboot-persistence=PASS'
+              'physical-asus-uefi-write=false'
+              'result=PASS'
+            ) | Set-Content (Join-Path $ev 'pc-platform-interaction.txt') -Encoding utf8
+            'UEFI_PLATFORM_INTERACTION_PC_RUNTIME=PASS'
+          } finally {
+            if($p2 -and -not $p2.HasExited){ Stop-Process -Id $p2.Id -Force -ErrorAction SilentlyContinue }
+          }
+
       - name: Gate realtime EFI artifact on the physical PC
         shell: pwsh
         run: |
@@ -886,4 +1020,5 @@ jobs:
           path: |
             src/boot/uefi-hii-graph-prompt-speech-v1/pc-runner-evidence/
             src/boot/uefi-hii-current-option-speech-v1/pc-runner-evidence/
+            src/boot/uefi-hii-platform-commit-v1/pc-runner-evidence/
           if-no-files-found: error
