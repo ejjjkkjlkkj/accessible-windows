@@ -2,7 +2,7 @@ name: uefi-realtime-screenreader-ci
 
 on:
   push:
-    branches: [uefi-realtime-screenreader-20260919]
+    branches: [uefi-realtime-screenreader-20260919, uefi-realtime-integration-20260919]
     paths:
       - 'boot/uefi-hii-graph-prompt-speech-v1/**'
       - 'boot/uefi-native-speech-v1/build_uefi_native_speech.py'
@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld qemu-system-x86 ovmf dosfstools mtools
+          sudo apt-get install -y clang lld qemu-system-x86 ovmf dosfstools mtools gdisk
 
       - name: Validate generator and build interruptible screen reader
         run: |
@@ -245,6 +245,18 @@ jobs:
           print('UEFI_REALTIME_WAVEFORM=PASS')
           print('UEFI_REALTIME_AUDIO_QUALITY=PASS')
 
+      - name: Build flashable GPT USB image
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-graph-prompt-speech-v1
+          out="$root/accessible-windows-uefi-screenreader-usb-x86_64.img"
+          bash scripts/build-uefi-screenreader-usb-image.sh "$root/REALTIME.EFI" "$out"
+          test -s "$out"
+          test -s "$out.sha256"
+          sgdisk --verify "$out"
+          grep -F "  $out" "$out.sha256"
+          echo UEFI_SCREENREADER_USB_ARTIFACT=PASS
+
       - uses: actions/upload-artifact@v4
         with:
           name: uefi-realtime-screenreader
@@ -254,6 +266,8 @@ jobs:
             boot/uefi-hii-graph-prompt-speech-v1/realtime.wav
             boot/uefi-hii-graph-prompt-speech-v1/realtime-proof.txt
             boot/uefi-hii-graph-prompt-speech-v1/realtime-units.txt
+            boot/uefi-hii-graph-prompt-speech-v1/accessible-windows-uefi-screenreader-usb-x86_64.img
+            boot/uefi-hii-graph-prompt-speech-v1/accessible-windows-uefi-screenreader-usb-x86_64.img.sha256
           if-no-files-found: error
 
 
