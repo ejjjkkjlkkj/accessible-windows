@@ -544,6 +544,125 @@ jobs:
           & $env:PYTHON_EXE $script $root | Tee-Object (Join-Path $root 'qemu-result.txt')
           if($LASTEXITCODE -ne 0){ throw 'QEMU UEFI screen reader runtime failed' }
 
+      - name: Extended HII graph navigation on AMD host QEMU
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path 'boot/uefi-amd5800h-real-final-v1/evidence').Path
+          $efi=Join-Path $root 'hii-graph-nav.EFI'
+          if(-not (Test-Path $efi)){ throw 'interactive HII graph EFI artifact missing' }
+          $esp=Join-Path $root 'nav-esp.raw'
+          & $env:PYTHON_EXE (Join-Path $root 'make_fat16.py') $efi $esp | Out-File (Join-Path $root 'nav-fat16-build.txt') -Encoding utf8
+          if($LASTEXITCODE -ne 0){ throw 'interactive HII graph FAT16 creation failed' }
+          Copy-Item $env:OVMF_VARS (Join-Path $root 'nav-vars.fd') -Force
+          $script=Join-Path $root 'qemu_nav_test.py'
+          @'
+          from pathlib import Path
+          import atexit,json,os,socket,subprocess,sys,time
+          root=Path(sys.argv[1])
+          serial=root/"qemu-nav.serial"
+          serial.unlink(missing_ok=True)
+          qemu=os.environ["QEMU_EXE"]
+          qargs=[
+              qemu,
+              "-machine","q35,accel=tcg","-m","192M",
+              "-drive",f"if=pflash,format=raw,readonly=on,file={os.environ['OVMF_CODE']}",
+              "-drive",f"if=pflash,format=raw,file={root/'nav-vars.fd'}",
+              "-drive",f"file={root/'nav-esp.raw'},format=raw",
+              "-audiodev",f"wav,id=aud,path={root/'qemu-nav.wav'},out.frequency=48000,out.channels=2",
+              "-device","ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0",
+              "-device","hda-micro,bus=hda0.0,cad=0,audiodev=aud,mixer=on",
+              "-display","none","-monitor","none",
+              "-qmp","tcp:127.0.0.1:45556,server=on,wait=off",
+              "-serial",f"file:{serial}",
+              "-parallel","none","-net","none","-no-reboot","-no-shutdown",
+          ]
+          proc=subprocess.Popen(qargs,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+          atexit.register(lambda: proc.poll() is None and proc.kill())
+
+          def raw():
+              return serial.read_bytes() if serial.exists() else b""
+
+          def wait_for(marker,count=1,timeout=60):
+              end=time.time()+timeout
+              while time.time()<end:
+                  b=raw()
+                  if b"STATUS=BLOCKED\r\n" in b:
+                      raise SystemExit("navigation blocked: "+repr(b[-20000:]))
+                  if b.count(marker)>=count:
+                      return b
+                  time.sleep(.05)
+              raise SystemExit("navigation timeout "+repr(marker)+": "+repr(raw()[-20000:]))
+
+          b=wait_for(b"HII_GRAPH_NAV_READY=PASS\r\n")
+          if b"HII_GRAPH_NAV_TOTAL=0x" not in b:
+              raise SystemExit("navigation prompt total missing")
+
+          for _ in range(120):
+              try:
+                  sock=socket.create_connection(("127.0.0.1",45556),.5); break
+              except OSError:
+                  time.sleep(.1)
+          else:
+              raise SystemExit("QMP unavailable")
+          f=sock.makefile("rwb",buffering=0)
+          json.loads(f.readline())
+          f.write((json.dumps({"execute":"qmp_capabilities"})+"\r\n").encode())
+          while True:
+              m=json.loads(f.readline())
+              if "return" in m: break
+
+          def send(key):
+              f.write((json.dumps({"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":key}],"hold-time":50}})+"\r\n").encode())
+              while True:
+                  m=json.loads(f.readline())
+                  if "return" in m: return
+                  if "error" in m: raise SystemExit("QMP send-key error: "+repr(m))
+
+          sequence=[
+              ("down",b"HII_GRAPH_NAV_KEY=DOWN\r\n"),
+              ("up",b"HII_GRAPH_NAV_KEY=UP\r\n"),
+              ("end",b"HII_GRAPH_NAV_KEY=END\r\n"),
+              ("home",b"HII_GRAPH_NAV_KEY=HOME\r\n"),
+              ("pgdn",b"HII_GRAPH_NAV_KEY=PAGE_DOWN\r\n"),
+              ("pgup",b"HII_GRAPH_NAV_KEY=PAGE_UP\r\n"),
+              ("r",b"HII_GRAPH_NAV_KEY=R\r\n"),
+          ]
+          for idx,(key,marker) in enumerate(sequence,1):
+              send(key)
+              wait_for(marker)
+              wait_for(b"HII_GRAPH_NAV_SPEECH_DMA=PASS\r\n",idx)
+              wait_for(b"HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n",idx)
+              wait_for(b"HII_GRAPH_SPEECH_DMA_REUSE=PASS\r\n",idx)
+
+          send("esc")
+          b=wait_for(b"STATUS=PASS\r\n")
+          for marker in [
+              b"HII_GRAPH_NAV_EXIT=PASS\r\n",
+              b"BOOT_MEDIA_PERSISTENT_PROOF=PASS\r\n",
+              b"HDA_GRAPH_SEARCH_LIVE=PASS\r\n",
+              b"HDA_SELECTOR_APPLY_LIVE=PASS\r\n",
+              b"HII_PROMPT_SPEECH_HDA=PASS\r\n",
+          ]:
+              if marker not in b:
+                  raise SystemExit("missing "+repr(marker)+": "+repr(b[-20000:]))
+          print("AMD5800H_QEMU_EXTENDED_HII_NAV=PASS")
+          print("AMD5800H_QEMU_EXTENDED_HII_NAV_SPEECH_EVENTS=7")
+          print("AMD5800H_QEMU_EXTENDED_HII_NAV_DMA_REUSE=PASS")
+
+          f.write((json.dumps({"execute":"quit"})+"\r\n").encode())
+          f.close()
+          sock.close()
+          try:
+              proc.wait(timeout=10)
+          except subprocess.TimeoutExpired:
+              proc.kill()
+              proc.wait(timeout=5)
+              raise SystemExit("QEMU navigation VM did not exit")
+          '@ | Set-Content $script -Encoding utf8
+          & $env:PYTHON_EXE $script $root | Tee-Object (Join-Path $root 'qemu-nav-result.txt')
+          if($LASTEXITCODE -ne 0){ throw 'AMD extended HII navigation runtime failed' }
+
       - name: VMware Workstation multi-hop HDA graph probe
         shell: pwsh
         run: |
