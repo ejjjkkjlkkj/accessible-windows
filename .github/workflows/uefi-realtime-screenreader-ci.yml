@@ -216,8 +216,177 @@ jobs:
           if-no-files-found: error
 
 
+  semantic-current-value:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install current-value UEFI runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+
+      - name: Build deterministic live current-value speech EFI
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-current-option-speech-v1
+          python "$root/build_uefi_hii_current_option_speech.py" "$root/CURRENTVALUE.EFI" | tee "$root/current-value-build.log"
+          python "$root/build_uefi_hii_current_option_speech.py" "$root/CURRENTVALUE-2.EFI" > "$root/current-value-build-2.log"
+          cmp "$root/CURRENTVALUE.EFI" "$root/CURRENTVALUE-2.EFI"
+          rm -f "$root/CURRENTVALUE-2.EFI"
+          grep -F 'OS_UEFI_HII_CURRENT_OPTION_SPEECH_BUILD=PASS' "$root/current-value-build.log"
+          python - <<'PY'
+          from pathlib import Path
+          image=Path('boot/uefi-hii-current-option-speech-v1/CURRENTVALUE.EFI').read_bytes()
+          assert image[:2] == b'MZ'
+          for marker in [
+              b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\r\n',
+              b'CONFIG_TO_BLOCK=PASS\r\n',
+              b'CURRENT_VALUE_READ=PASS\r\n',
+              b'SELECTED_OPTION_CURRENT_MATCH=PASS\r\n',
+              b'CURRENT_OPTION_SOURCE=PASS\r\n',
+              b'CURRENT_OPTION_SPOKEN_PREFIX=PASS\r\n',
+              b'CURRENT_OPTION_SPEECH_HDA=PASS\r\n',
+          ]:
+              assert marker in image, marker
+          print('UEFI_CURRENT_VALUE_STATIC=PASS')
+          PY
+
+      - name: Resolve OVMF for current-value runtime
+        run: |
+          set -euo pipefail
+          CODE=''; VARS=''
+          for pair in \
+            '/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd' \
+            '/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd' \
+            '/usr/share/edk2/ovmf/OVMF_CODE.fd|/usr/share/edk2/ovmf/OVMF_VARS.fd'
+          do
+            IFS='|' read -r code vars <<< "$pair"
+            if test -f "$code" -a -f "$vars"; then CODE="$code"; VARS="$vars"; break; fi
+          done
+          test -n "$CODE" -a -n "$VARS"
+          printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-hii-current-option-speech-v1/current-value-ovmf.env
+
+      - name: Read and speak live selected value
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-current-option-speech-v1
+          source "$root/current-value-ovmf.env"
+          cp "$VARS" "$root/current-value-vars.fd"
+          rm -rf "$root/current-value-esp"
+          mkdir -p "$root/current-value-esp/EFI/BOOT"
+          cp "$root/CURRENTVALUE.EFI" "$root/current-value-esp/EFI/BOOT/BOOTX64.EFI"
+          rm -f "$root/current-value.serial" "$root/current-value.wav" "$root/semantic-current-value.txt"
+
+          qemu-system-x86_64 \
+            -machine q35,accel=tcg -m 192M \
+            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,file="$root/current-value-vars.fd" \
+            -drive format=raw,file=fat:rw:"$root/current-value-esp" \
+            -audiodev wav,id=aud,path="$root/current-value.wav",out.frequency=48000,out.channels=2 \
+            -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0 \
+            -device hda-micro,bus=hda0.0,cad=0,audiodev=aud,mixer=on \
+            -display none -monitor none \
+            -serial file:"$root/current-value.serial" \
+            -parallel none -net none -no-reboot -no-shutdown &
+          qpid=$!
+          trap 'kill $qpid 2>/dev/null || true' EXIT
+
+          python - <<'PY'
+          from pathlib import Path
+          import re,time
+          root=Path('boot/uefi-hii-current-option-speech-v1')
+          p=root/'current-value.serial'
+          required=[
+              b'CONFIG_ROUTING_EXPORT_CONFIG=PASS\r\n',
+              b'CONFIG_TO_BLOCK=PASS\r\n',
+              b'CURRENT_VALUE_READ=PASS\r\n',
+              b'SELECTED_OPTION_CHILD_MATCH=PASS\r\n',
+              b'SELECTED_OPTION_CURRENT_MATCH=PASS\r\n',
+              b'SELECTED_OPTION_LABEL_BINDING=PASS\r\n',
+              b'CURRENT_OPTION_SOURCE=PASS\r\n',
+              b'CURRENT_OPTION_SPOKEN_PREFIX=PASS\r\n',
+              b'LPIB_PROGRESS=PASS\r\n',
+              b'CURRENT_OPTION_SPEECH_HDA=PASS\r\n',
+              b'STATUS=PASS\r\n',
+          ]
+          end=time.time()+45
+          while time.time()<end:
+              raw=p.read_bytes() if p.exists() else b''
+              if b'STATUS=BLOCKED\r\n' in raw:
+                  raise SystemExit('current-value firmware blocked: '+repr(raw[-20000:]))
+              if all(x in raw for x in required):
+                  question=re.search(br'QUESTION_TEXT=([^\r\n]+)',raw)
+                  value_label=re.search(br'SELECTED_OPTION_TEXT=([^\r\n]+)',raw)
+                  current=re.search(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
+                  selected=re.search(br'SELECTED_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})',raw)
+                  spoken=re.search(br'CURRENT_OPTION_SPOKEN_PREFIX=([a-z0-9]{1,8})\r\nCURRENT_OPTION_SPOKEN_PREFIX=PASS',raw)
+                  assert all([question,value_label,current,selected,spoken]), raw[-20000:]
+                  assert current.group(1)==selected.group(1),(current.group(1),selected.group(1))
+                  q=question.group(1).decode('ascii','replace').strip()
+                  v=value_label.group(1).decode('ascii','replace').strip()
+                  s=spoken.group(1).decode('ascii')
+                  assert q and v and s,(q,v,s)
+                  root.joinpath('semantic-current-value.txt').write_text(
+                      'semantic-role = choice\n'
+                      f'label = {q}\n'
+                      f'value-label = {v}\n'
+                      f'current-raw8-hex = {current.group(1).decode()}\n'
+                      f'spoken-value-prefix = {s}\n'
+                      'read-service = HII Config Routing ExportConfig plus ConfigToBlock\n'
+                      'setting-mutation = false\n'
+                      'result = PASS\n'
+                  )
+                  print('UEFI_CURRENT_VALUE_READ=PASS')
+                  print('UEFI_CURRENT_VALUE_LABEL='+v)
+                  print('UEFI_CURRENT_VALUE_SPEECH=PASS')
+                  print('UEFI_SEMANTIC_ROLE_LABEL_VALUE=PASS')
+                  break
+              time.sleep(.05)
+          else:
+              raise SystemExit('timeout current-value speech: '+repr((p.read_bytes() if p.exists() else b'')[-20000:]))
+          PY
+
+          sleep 1
+          kill $qpid 2>/dev/null || true
+          wait $qpid 2>/dev/null || true
+          trap - EXIT
+
+      - name: Validate current-value waveform
+        shell: python
+        run: |
+          from pathlib import Path
+          import struct,wave
+          p=Path('boot/uefi-hii-current-option-speech-v1/current-value.wav')
+          assert p.exists() and p.stat().st_size > 10000,p
+          with wave.open(str(p),'rb') as w:
+              assert w.getnchannels()==2
+              assert w.getframerate()==48000
+              assert w.getsampwidth()==2
+              raw=w.readframes(w.getnframes())
+          vals=struct.unpack('<'+'h'*(len(raw)//2),raw)
+          peak=max(abs(v) for v in vals)
+          active=sum(abs(v)>=500 for v in vals)
+          assert peak>=5000,peak
+          assert active>=3000,active
+          print(f'current-value-peak={peak} current-value-active={active}')
+          print('UEFI_CURRENT_VALUE_WAVEFORM=PASS')
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefi-semantic-current-value
+          path: |
+            boot/uefi-hii-current-option-speech-v1/CURRENTVALUE.EFI
+            boot/uefi-hii-current-option-speech-v1/current-value.serial
+            boot/uefi-hii-current-option-speech-v1/current-value.wav
+            boot/uefi-hii-current-option-speech-v1/semantic-current-value.txt
+          if-no-files-found: error
+
+
   realtime-amd5800h-real:
-    needs: realtime-nav
+    needs: [realtime-nav, semantic-current-value]
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 25
     defaults:
@@ -233,6 +402,11 @@ jobs:
         with:
           name: uefi-realtime-screenreader
           path: src/boot/uefi-hii-graph-prompt-speech-v1/pc-runner-evidence
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: uefi-semantic-current-value
+          path: src/boot/uefi-hii-current-option-speech-v1/pc-runner-evidence
 
       - name: Bind exact ASUS Ryzen physical runner
         shell: pwsh
@@ -313,6 +487,114 @@ jobs:
 
           'UEFI_REALTIME_PC_HDA_IDENTITY=PASS'
 
+      - name: Discover QEMU and OVMF on AMD-5800H-REAL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          function FirstExisting([string[]]$paths){
+            foreach($p in $paths){
+              if($p -and (Test-Path $p)){ return (Resolve-Path $p).Path }
+            }
+            return $null
+          }
+          $qemu=FirstExisting @(
+            'C:\Program Files\qemu\qemu-system-x86_64.exe',
+            'C:\Program Files (x86)\qemu\qemu-system-x86_64.exe',
+            ((Get-Command qemu-system-x86_64.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
+          )
+          if(-not $qemu){ throw 'QEMU x86_64 not found on AMD-5800H-REAL' }
+          $share=Join-Path (Split-Path $qemu -Parent) 'share'
+          $fds=@()
+          if(Test-Path $share){ $fds=@(Get-ChildItem $share -Recurse -File -Filter '*.fd' -ErrorAction SilentlyContinue) }
+          $code=@($fds | Where-Object { $_.Name -match '(?i)x86_64.*code|OVMF_CODE' } | Select-Object -First 1)
+          $vars=@($fds | Where-Object { $_.Name -match '(?i)(i386|x86).*vars' -and $_.Name -notmatch '(?i)arm|aarch64' } | Select-Object -First 1)
+          if($code.Count -eq 0 -or $vars.Count -eq 0){ throw "OVMF CODE/VARS not found under $share" }
+          "QEMU_EXE=$qemu" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "OVMF_CODE_PC=$($code[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "OVMF_VARS_PC=$($vars[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          & $qemu --version | Select-Object -First 1
+          'UEFI_CURRENT_VALUE_PC_QEMU_DISCOVERY=PASS'
+
+      - name: Execute live current-value speech on AMD-5800H-REAL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $ev='boot/uefi-hii-current-option-speech-v1/pc-runner-evidence'
+          $efi=Join-Path $ev 'CURRENTVALUE.EFI'
+          if(-not (Test-Path $efi)){ throw "missing $efi" }
+
+          $rt=Join-Path $ev 'pc-runtime'
+          if(Test-Path $rt){ Remove-Item $rt -Recurse -Force }
+          New-Item -ItemType Directory -Force (Join-Path $rt 'esp\EFI\BOOT') | Out-Null
+          Copy-Item $efi (Join-Path $rt 'esp\EFI\BOOT\BOOTX64.EFI')
+          Copy-Item $env:OVMF_CODE_PC (Join-Path $rt 'OVMF_CODE.fd')
+          Copy-Item $env:OVMF_VARS_PC (Join-Path $rt 'OVMF_VARS.fd')
+
+          $serial=Join-Path $rt 'current-value-pc.serial'
+          $wav=Join-Path $rt 'current-value-pc.wav'
+          $args=@(
+            '-machine','q35,accel=tcg',
+            '-m','192M',
+            '-drive',"if=pflash,format=raw,readonly=on,file=$rt\OVMF_CODE.fd",
+            '-drive',"if=pflash,format=raw,file=$rt\OVMF_VARS.fd",
+            '-drive',"format=raw,file=fat:rw:$rt\esp",
+            '-audiodev',"wav,id=aud,path=$wav,out.frequency=48000,out.channels=2",
+            '-device','ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0',
+            '-device','hda-micro,bus=hda0.0,cad=0,audiodev=aud,mixer=on',
+            '-display','none','-monitor','none',
+            '-serial',"file:$serial",
+            '-parallel','none','-net','none','-no-reboot','-no-shutdown'
+          )
+          $p=Start-Process -FilePath $env:QEMU_EXE -ArgumentList $args -PassThru -WindowStyle Hidden
+          try {
+            $deadline=[DateTime]::UtcNow.AddSeconds(50)
+            $raw=''
+            do {
+              Start-Sleep -Milliseconds 100
+              if(Test-Path $serial){ $raw=Get-Content $serial -Raw -ErrorAction SilentlyContinue }
+              if($raw -match 'STATUS=BLOCKED'){ throw "PC QEMU current-value firmware blocked: $raw" }
+            } while([DateTime]::UtcNow -lt $deadline -and $raw -notmatch 'STATUS=PASS')
+
+            foreach($marker in @(
+              'CONFIG_ROUTING_EXPORT_CONFIG=PASS',
+              'CONFIG_TO_BLOCK=PASS',
+              'CURRENT_VALUE_READ=PASS',
+              'SELECTED_OPTION_CURRENT_MATCH=PASS',
+              'SELECTED_OPTION_LABEL_BINDING=PASS',
+              'CURRENT_OPTION_SOURCE=PASS',
+              'CURRENT_OPTION_SPOKEN_PREFIX=PASS',
+              'LPIB_PROGRESS=PASS',
+              'CURRENT_OPTION_SPEECH_HDA=PASS',
+              'STATUS=PASS'
+            )){
+              if(-not $raw.Contains($marker)){ throw "PC current-value marker missing: $marker" }
+            }
+            $current=[regex]::Match($raw,'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})')
+            $selected=[regex]::Match($raw,'SELECTED_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})')
+            $question=[regex]::Match($raw,'QUESTION_TEXT=([^\r\n]+)')
+            $value=[regex]::Match($raw,'SELECTED_OPTION_TEXT=([^\r\n]+)')
+            if(-not ($current.Success -and $selected.Success -and $question.Success -and $value.Success)){ throw 'PC current-value identity fields missing' }
+            if($current.Groups[1].Value -ne $selected.Groups[1].Value){ throw 'PC current value does not match selected option' }
+            if(-not (Test-Path $wav) -or (Get-Item $wav).Length -le 10000){ throw 'PC current-value WAV missing or too small' }
+
+            @(
+              'runner=AMD-5800H-REAL'
+              'execution=QEMU_OVMF_ON_PHYSICAL_PC'
+              'semantic-role=choice'
+              "label=$($question.Groups[1].Value.Trim())"
+              "value-label=$($value.Groups[1].Value.Trim())"
+              "current-raw8-hex=$($current.Groups[1].Value)"
+              'current-value-read=PASS'
+              'current-value-speech-hda=PASS'
+              'setting-mutation=false'
+              'result=PASS'
+            ) | Set-Content (Join-Path $ev 'pc-current-value.txt') -Encoding utf8
+            'UEFI_CURRENT_VALUE_PC_RUNTIME=PASS'
+            'UEFI_SEMANTIC_ROLE_LABEL_VALUE_PC=PASS'
+          } finally {
+            if($p -and -not $p.HasExited){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          }
+
       - name: Gate realtime EFI artifact on the physical PC
         shell: pwsh
         run: |
@@ -388,5 +670,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: uefi-realtime-screenreader-amd5800h-real
-          path: src/boot/uefi-hii-graph-prompt-speech-v1/pc-runner-evidence/
+          path: |
+            src/boot/uefi-hii-graph-prompt-speech-v1/pc-runner-evidence/
+            src/boot/uefi-hii-current-option-speech-v1/pc-runner-evidence/
           if-no-files-found: error
