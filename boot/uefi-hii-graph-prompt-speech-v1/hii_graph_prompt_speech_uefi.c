@@ -29,6 +29,7 @@ extern const u32 qev_unit_bank_len;
 extern const u32 qev_unit_off[];
 extern const u32 qev_unit_len[];
 extern const u32 qev_unit_count;
+extern const u32 qev_sil_unit_index;
 extern const u8 qev_letter_unit_count[];
 extern const u8 qev_letter_units[];
 
@@ -781,6 +782,22 @@ static int run_speech_dma(const char *text, u32 text_count) {
             if (entries >= 64u) return 0;
             u32 ui = qev_letter_units[li * 8u + j];
             if (ui >= qev_unit_count) return 0;
+            u32 off = qev_unit_off[ui];
+            u32 len = qev_unit_len[ui];
+            if (!len || off > qev_unit_bank_len || len > qev_unit_bank_len - off) return 0;
+            volatile u8 *e = bdl + entries * 16u;
+            *(volatile u64 *)(e + 0x00) = base + pcm_off + off;
+            *(volatile u32 *)(e + 0x08) = len;
+            *(volatile u32 *)(e + 0x0c) = 0;
+            total_bytes += len;
+            ++entries;
+        }
+        /* Spelled HII text needs a perceptual boundary between graphemes.
+           Worst case remains bounded: 8*w(7 units) + 7 pauses = 63 BDL
+           entries, below the existing 64-entry safety limit. */
+        if (i + 1u < text_count) {
+            if (entries >= 64u || qev_sil_unit_index >= qev_unit_count) return 0;
+            u32 ui = qev_sil_unit_index;
             u32 off = qev_unit_off[ui];
             u32 len = qev_unit_len[ui];
             if (!len || off > qev_unit_bank_len || len > qev_unit_bank_len - off) return 0;
