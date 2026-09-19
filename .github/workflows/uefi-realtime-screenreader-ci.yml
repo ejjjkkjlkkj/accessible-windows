@@ -100,9 +100,8 @@ jobs:
                   time.sleep(.005)
               raise SystemExit('timeout '+repr(marker)+': '+repr(raw()[-20000:]))
 
-          b=wait_marker(b'HII_GRAPH_NAV_READY=PASS\r\n')
-          if b'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA\r\n' not in b:
-              raise SystemExit('realtime mode marker missing')
+          wait_marker(b'HII_GRAPH_NAV_READY=PASS\r\n')
+          b=wait_marker(b'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA\r\n')
 
           end=time.time()+20
           while time.time()<end and not qmp.exists():
