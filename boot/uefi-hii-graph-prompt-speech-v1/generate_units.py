@@ -6,32 +6,35 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 SOURCE=ROOT/'boot'/'uefi-native-speech-v1'/'build_uefi_native_speech.py'
 LETTER_UNITS={
+ # Runtime grapheme-to-allophone map. This is intentionally word-like rather
+ # than spelling letter names so focus changes sound like labels, not an
+ # alphabet exercise. Context-sensitive cases are kept conservative.
  'a':('a',),
- 'b':('b','e'),
- 'c':('s','e'),
- 'd':('d','e'),
+ 'b':('b',),
+ 'c':('k',),
+ 'd':('d',),
  'e':('e',),
- 'f':('e','f'),
- 'g':('zh','e'),
- 'h':('a','sh'),
+ 'f':('f',),
+ 'g':('g',),
+ 'h':('sil',),
  'i':('i',),
- 'j':('zh','i'),
- 'k':('k','a'),
- 'l':('e','l'),
- 'm':('e','m'),
- 'n':('e','n'),
+ 'j':('zh',),
+ 'k':('k',),
+ 'l':('l',),
+ 'm':('m',),
+ 'n':('n',),
  'o':('o',),
- 'p':('p','e'),
- 'q':('k','u'),
- 'r':('e','r'),
- 's':('e','s'),
- 't':('t','e'),
+ 'p':('p',),
+ 'q':('k',),
+ 'r':('r',),
+ 's':('s',),
+ 't':('t',),
  'u':('u',),
- 'v':('v','e'),
- 'w':('d','u','b','l','e','v','e'),
- 'x':('i','k','s'),
- 'y':('i','g','r','e','k'),
- 'z':('z','e','d'),
+ 'v':('v',),
+ 'w':('w',),
+ 'x':('k','s'),
+ 'y':('i',),
+ 'z':('z',),
 }
 
 def load_source():
@@ -42,12 +45,18 @@ def load_source():
     spec.loader.exec_module(module)
     return module
 
-def convert(raw: bytes) -> bytes:
+def convert(raw: bytes, source_rate: int) -> bytes:
+    if source_rate <= 0 or 48000 % source_rate:
+        raise SystemExit(f'unsupported source sample rate: {source_rate}')
+    factor=48000//source_rate
     out=bytearray()
-    for sample in raw:
-        signed=max(-32768,min(32767,(sample-128)*180))
-        frame=struct.pack('<hh',signed,signed)
-        out += frame*6
+    for i,sample in enumerate(raw):
+        a=max(-32768,min(32767,(sample-128)*180))
+        nxt=raw[i+1] if i+1 < len(raw) else sample
+        b=max(-32768,min(32767,(nxt-128)*180))
+        for phase in range(factor):
+            signed=a + ((b-a)*phase)//factor
+            out += struct.pack('<hh',signed,signed)
     return bytes(out)
 
 def arr_u8(name, values, cols=16):
@@ -69,7 +78,7 @@ def main():
     speech=load_source()
     names=sorted({'sil'} | {u for seq in LETTER_UNITS.values() for u in seq})
     source_units=speech.make_units()
-    converted={n:convert(source_units[n]) for n in names}
+    converted={n:convert(source_units[n], speech.SAMPLE_RATE) for n in names}
     offsets=[]; lengths=[]; bank=bytearray()
     for n in names:
         offsets.append(len(bank)); lengths.append(len(converted[n])); bank += converted[n]
@@ -104,9 +113,9 @@ def main():
         f'bank-bytes={len(bank)}\n'
         f'bank-sha256={hashlib.sha256(bank).hexdigest()}\n'
         'letter-map=a-z\n'
-        'max-input-graphemes=8\n'
+        'max-input-graphemes=32\n'
         'max-units-per-letter=8\n'
-        'inter-letter-silence-ms=65\n'
+        'inter-letter-silence-ms=0\n'\n        'word-silence-ms=65\n'\n        'speech-mode=grapheme-allophone-v2\n'
         'full-utterance-asset=false\n'
     )
     print('HII_GRAPH_PROMPT_UNIT_GENERATION=PASS')

@@ -8,7 +8,7 @@ from pathlib import Path
 
 TEXT_RVA = 0x1000
 DATA_RVA = 0x4000
-SAMPLE_RATE = 8000
+SAMPLE_RATE = 16000
 UNIT_MS = 105
 TAU = 6.283185307179586
 
@@ -28,7 +28,7 @@ UNIT_SPECS = {
     "r":  ("r", 80,  (420, 1450, 2200)),
     "l":  ("l", 85,  (390, 1500, 2400)),
     "w":  ("v", 75,  (330, 900, 2200)),
-    # Keep every spectral target below 0.45*Fs (3.6 kHz at 8 kHz).
+    # Keep every spectral target below 0.45*Fs (7.2 kHz at 16 kHz).
     # The previous 3.9-6.5 kHz targets aliased into the speech band and made
     # sibilants/plosives sound like unrelated low-frequency noise.
     "s":  ("f", 100, (2200, 3000, 3600)),
@@ -574,7 +574,7 @@ def main() -> None:
     print("OS_UEFI_NATIVE_SPEECH_BUILD=PASS")
     print("image-sha256=" + hashlib.sha256(image).hexdigest())
     print("bytes=" + str(len(image)))
-    print("sample-rate=8000")
+    print("sample-rate=" + str(SAMPLE_RATE))
     print("speech-units=" + str(len(units)))
     print("largest-unit-bytes=" + str(max(map(len, units.values()))))
     print("full-utterance-pcm-assets=0")

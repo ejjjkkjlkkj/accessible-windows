@@ -144,12 +144,12 @@ static const efi_guid g_simple_fs_guid =
 
 static u8 g_hii_package[1024u * 1024u];
 static void *g_hii_handles[256];
-static char g_prompt_text[9];
+static char g_prompt_text[33];
 static u32 g_prompt_count;
 
 #ifdef QEV_INTERACTIVE_NAV
 #define MAX_HII_NAV_PROMPTS 32
-static char g_nav_prompts[MAX_HII_NAV_PROMPTS][9];
+static char g_nav_prompts[MAX_HII_NAV_PROMPTS][33];
 static u8 g_nav_prompt_lengths[MAX_HII_NAV_PROMPTS];
 static u8 g_nav_prompt_total;
 static u8 g_nav_prompt_index;
@@ -749,7 +749,7 @@ static void copy_bytes(volatile u8 *dst, const u8 *src, u32 len) {
 }
 
 static int run_speech_dma(const char *text, u32 text_count) {
-    if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 8u) return 0;
+    if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 32u) return 0;
     const u32 pcm_off = 0x1000;
     if (!qev_unit_bank_len || qev_unit_bank_len > (128u * 4096u - pcm_off)) return 0;
 
@@ -774,14 +774,9 @@ static int run_speech_dma(const char *text, u32 text_count) {
     u32 total_bytes = 0;
     for (u32 i = 0; i < text_count; ++i) {
         u8 ch = (u8)text[i];
-        if (ch < (u8)'a' || ch > (u8)'z') return 0;
-        u32 li = (u32)(ch - (u8)'a');
-        u32 n = qev_letter_unit_count[li];
-        if (!n || n > 8u) return 0;
-        for (u32 j = 0; j < n; ++j) {
-            if (entries >= 64u) return 0;
-            u32 ui = qev_letter_units[li * 8u + j];
-            if (ui >= qev_unit_count) return 0;
+        if (ch == (u8)' ') {
+            if (entries >= 64u || qev_sil_unit_index >= qev_unit_count) return 0;
+            u32 ui = qev_sil_unit_index;
             u32 off = qev_unit_off[ui];
             u32 len = qev_unit_len[ui];
             if (!len || off > qev_unit_bank_len || len > qev_unit_bank_len - off) return 0;
@@ -791,13 +786,16 @@ static int run_speech_dma(const char *text, u32 text_count) {
             *(volatile u32 *)(e + 0x0c) = 0;
             total_bytes += len;
             ++entries;
+            continue;
         }
-        /* Spelled HII text needs a perceptual boundary between graphemes.
-           Worst case remains bounded: 8*w(7 units) + 7 pauses = 63 BDL
-           entries, below the existing 64-entry safety limit. */
-        if (i + 1u < text_count) {
-            if (entries >= 64u || qev_sil_unit_index >= qev_unit_count) return 0;
-            u32 ui = qev_sil_unit_index;
+        if (ch < (u8)'a' || ch > (u8)'z') return 0;
+        u32 li = (u32)(ch - (u8)'a');
+        u32 n = qev_letter_unit_count[li];
+        if (!n || n > 8u) return 0;
+        for (u32 j = 0; j < n; ++j) {
+            if (entries >= 64u) return 0;
+            u32 ui = qev_letter_units[li * 8u + j];
+            if (ui >= qev_unit_count) return 0;
             u32 off = qev_unit_off[ui];
             u32 len = qev_unit_len[ui];
             if (!len || off > qev_unit_bank_len || len > qev_unit_bank_len - off) return 0;
@@ -880,13 +878,37 @@ static int prompt_opcode(u8 op) {
             return 0;
     }
 }
+static u16 fold_prompt_char(u16 ch) {
+    if (ch >= (u16)'A' && ch <= (u16)'Z') return (u16)(ch + 32u);
+    switch (ch) {
+        case 0x00c0: case 0x00c1: case 0x00c2: case 0x00c3:
+        case 0x00c4: case 0x00c5: case 0x00e0: case 0x00e1:
+        case 0x00e2: case 0x00e3: case 0x00e4: case 0x00e5: return (u16)'a';
+        case 0x00c7: case 0x00e7: return (u16)'c';
+        case 0x00c8: case 0x00c9: case 0x00ca: case 0x00cb:
+        case 0x00e8: case 0x00e9: case 0x00ea: case 0x00eb: return (u16)'e';
+        case 0x00cc: case 0x00cd: case 0x00ce: case 0x00cf:
+        case 0x00ec: case 0x00ed: case 0x00ee: case 0x00ef: return (u16)'i';
+        case 0x00d2: case 0x00d3: case 0x00d4: case 0x00d5:
+        case 0x00d6: case 0x00f2: case 0x00f3: case 0x00f4:
+        case 0x00f5: case 0x00f6: return (u16)'o';
+        case 0x00d9: case 0x00da: case 0x00db: case 0x00dc:
+        case 0x00f9: case 0x00fa: case 0x00fb: case 0x00fc: return (u16)'u';
+        case 0x0178: case 0x00ff: return (u16)'y';
+        default: return ch;
+    }
+}
 static int normalize_prompt(const u16 *text, char *out, u32 *count_out) {
     u32 n = 0;
-    for (u32 i = 0; i < 127u && text[i]; ++i) {
-        u16 ch = text[i];
-        if (ch >= (u16)'A' && ch <= (u16)'Z') ch = (u16)(ch + 32u);
+    u8 pending_space = 0;
+    for (u32 i = 0; i < 127u && text[i] && n < 32u; ++i) {
+        u16 ch = fold_prompt_char(text[i]);
         if (ch >= (u16)'a' && ch <= (u16)'z') {
-            if (n < 8u) out[n++] = (char)ch;
+            if (pending_space && n && n < 32u) out[n++] = ' ';
+            if (n < 32u) out[n++] = (char)ch;
+            pending_space = 0;
+        } else if (n) {
+            pending_space = 1;
         }
     }
     out[n] = 0;
@@ -914,7 +936,7 @@ static int get_hii_string(hii_string_protocol *str, void *handle, u16 token, cha
 
 #ifdef QEV_INTERACTIVE_NAV
 static int nav_prompt_add(const char *text, u32 count) {
-    if (!text || !count || count > 8u) return 0;
+    if (!text || !count || count > 32u) return 0;
     for (u8 i = 0; i < g_nav_prompt_total; ++i) {
         if (g_nav_prompt_lengths[i] != (u8)count) continue;
         u32 same = 1;
@@ -992,7 +1014,7 @@ static int resolve_hii_prompt(void *system_table) {
                     if (prompt_opcode(op) && oplen >= 4u) {
                         u16 token = rd16(q + 2);
 #ifdef QEV_INTERACTIVE_NAV
-                        char candidate[9];
+                        char candidate[33];
                         u32 candidate_count = 0;
                         if (token && get_hii_string(str, handle, token, candidate, &candidate_count)) {
                             nav_prompt_add(candidate, candidate_count);
@@ -1435,6 +1457,9 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     }
     marker("HDA_OUTPUT_PATH_CONFIGURATION=PASS");
     marker("SYNTH=ALLOPHONE_BDL_RUNTIME_TEXT_V1");
+    marker("SYNTH=GRAPHEME_ALLOPHONE_RUNTIME_TEXT_V2");
+    marker("HII_PROMPT_MAX_CHARS=32");
+    marker("HII_PROMPT_WORD_BOUNDARIES=PASS");
     marker("BDL_RUNTIME_TEXT_SCHEDULE=PASS");
 
     if (!run_speech_dma(g_prompt_text, g_prompt_count)) {
