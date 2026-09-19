@@ -46,6 +46,32 @@ jobs:
                 gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$run/cancel" >/dev/null || true
               done
           echo AMD_FINAL_SUPERSEDED_RUNS_PRUNED=PASS
+      - name: Require proven UEFI accessibility dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          current='boot/uefi-hii-current-option-speech-v1/os-uefi-hii-current-option-speech-v1.labproof'
+          commit='boot/uefi-hii-platform-commit-v1/os-uefi-hii-platform-commit-v1.labproof'
+          secure='boot/uefi-secure-boot-v1/os-uefi-secure-boot-v1.labproof'
+          graph='boot/uefi-hii-graph-prompt-speech-v1/os-uefi-hii-graph-prompt-speech-v1.labproof'
+          for p in "$current" "$commit" "$secure" "$graph"; do
+            test -s "$p"
+            grep -Fx 'proof = PASS' "$p"
+          done
+          grep -Fx 'proof-live-current-option-identity = PASS' "$current"
+          grep -Fx 'proof-current-label-hardcoded = false' "$current"
+          grep -Fx 'proof-route-config = PASS' "$commit"
+          grep -Fx 'proof-confirmation-speech = PASS' "$commit"
+          grep -Fx 'proof-reboot-persistence = PASS' "$commit"
+          grep -Fx 'proof-secure-boot-enforcement = PASS' "$secure"
+          grep -Fx 'proof-unsigned-negative-control = PASS' "$secure"
+          grep -Fx 'proof-signed-positive-control = PASS' "$secure"
+          grep -Fx 'proof-HII-prompt-speech-HDA = PASS' "$graph"
+          echo UEFI_ACCESSIBILITY_DEPENDENCIES=PASS
+          echo HII_CURRENT_VALUE_PROOF=PASS
+          echo HII_PERSISTENT_COMMIT_PROOF=PASS
+          echo OVMF_SECURE_BOOT_PROOF=PASS
+
       - name: Build deterministic multi-hop HDA graph EFI
         run: |
           set -euo pipefail
@@ -1028,6 +1054,9 @@ jobs:
             'OS-UEFI-AMD5800H-REAL-FINAL-V1'
             'AMD5800H_REAL_BINDING=PASS'
             'ALL_EFI_BUILDS=PASS'
+            'HII_CURRENT_VALUE_PROOF=PASS'
+            'HII_PERSISTENT_COMMIT_PROOF=PASS'
+            'OVMF_SECURE_BOOT_PROOF=PASS'
             'EFI_DETERMINISM=PASS'
             'PE_SECURITY=PASS'
             'QEMU_OVMF_UEFI_SCREEN_READER=PASS'
