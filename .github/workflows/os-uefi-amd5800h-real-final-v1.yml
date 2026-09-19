@@ -172,6 +172,9 @@ jobs:
             ((Get-Command vmware.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
           )
 
+          if(-not $vmrun){ throw 'VMware Workstation vmrun.exe not found on AMD-5800H-REAL' }
+          if(-not $vmware){ throw 'VMware Workstation vmware.exe not found on AMD-5800H-REAL' }
+
           "PYTHON_EXE=$py" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "QEMU_EXE=$qemu" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "QEMU_IMG_EXE=$qimg" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
@@ -190,8 +193,9 @@ jobs:
             "vmware=$vmware"
           ) | Set-Content boot/uefi-amd5800h-real-final-v1/evidence/tools.txt -Encoding utf8
           & $qemu --version | Select-Object -First 1
-          if($vmrun){ & $vmrun | Select-Object -First 2 }
+          & $vmrun | Select-Object -First 2
           'AMD5800H_TOOL_DISCOVERY=PASS'
+          'VMWARE_WORKSTATION_REQUIRED=PASS'
 
       - name: Build every final reader mode and prove determinism
         shell: pwsh
@@ -531,10 +535,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $root=(Resolve-Path 'boot/uefi-amd5800h-real-final-v1/evidence').Path
-          if(-not $env:VMRUN_EXE -or -not (Test-Path $env:VMRUN_EXE)){
-            'VMWARE_GRAPH=NOT_FOUND' | Set-Content (Join-Path $root 'vmware-graph-result.txt') -Encoding ascii
-            exit 0
-          }
+          if(-not $env:VMRUN_EXE -or -not (Test-Path $env:VMRUN_EXE)){ throw 'VMware Workstation vmrun.exe missing' }
           $graph=Join-Path $root 'graph.EFI'
           if(-not (Test-Path $graph)){ throw 'downloaded graph.EFI missing' }
           $rawDisk=Join-Path $root 'vmware-graph-esp.raw'
@@ -598,10 +599,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $root=(Resolve-Path 'boot/uefi-amd5800h-real-final-v1/evidence').Path
-          if(-not $env:VMRUN_EXE -or -not (Test-Path $env:VMRUN_EXE)){
-            'VMWARE_WORKSTATION=NOT_FOUND' | Tee-Object (Join-Path $root 'vmware-result.txt')
-            exit 0
-          }
+          if(-not $env:VMRUN_EXE -or -not (Test-Path $env:VMRUN_EXE)){ throw 'VMware Workstation vmrun.exe missing' }
           $fatBuilder=Join-Path $root 'make_fat16.py'
           $efi=Join-Path $root 'hii-graph.EFI'
           if(-not (Test-Path $efi)){ throw 'integrated hii-graph.EFI artifact missing' }
@@ -704,14 +702,15 @@ jobs:
           $root=(Resolve-Path 'boot/uefi-amd5800h-real-final-v1/evidence').Path
           $result=Join-Path $root 'hyperv-result.txt'
           $serial=Join-Path $root 'hyperv.serial'
-          $vhdx=Join-Path $root 'hyperv-uefi.vhdx'
+          $vmPath=Join-Path $root "hyperv-vm-$env:GITHUB_RUN_ID"
+          $vhdx=Join-Path $vmPath 'hyperv-uefi.vhdx'
           $vmName="QEV-UEFI-$env:GITHUB_RUN_ID"
           $pipeName="qev-uefi-$env:GITHUB_RUN_ID"
           $captureJob=$null
           $mounted=$false
 
           Import-Module Hyper-V -ErrorAction Stop
-          foreach($cmd in @('New-VHD','Mount-VHD','Dismount-VHD','New-VM','Set-VMFirmware','Set-VMComPort','Start-VM','Stop-VM','Remove-VM')){
+          foreach($cmd in @('New-VHD','Mount-VHD','Dismount-VHD','New-VM','Set-VMFirmware','Set-VMComPort','Get-VMHardDiskDrive','Start-VM','Stop-VM','Remove-VM')){
             if(-not (Get-Command $cmd -ErrorAction SilentlyContinue)){ throw "Hyper-V command missing: $cmd" }
           }
           $vmms=Get-Service vmms -ErrorAction Stop
@@ -720,7 +719,9 @@ jobs:
           try {
             Get-VM -Name $vmName -ErrorAction SilentlyContinue | Stop-VM -TurnOff -Force -ErrorAction SilentlyContinue
             Get-VM -Name $vmName -ErrorAction SilentlyContinue | Remove-VM -Force -ErrorAction SilentlyContinue
-            Remove-Item $vhdx,$serial -Force -ErrorAction SilentlyContinue
+            Remove-Item $vmPath -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item $serial -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force $vmPath | Out-Null
 
             New-VHD -Path $vhdx -SizeBytes 128MB -Dynamic | Out-Null
             $vhd=Mount-VHD -Path $vhdx -PassThru
@@ -738,22 +739,35 @@ jobs:
             Dismount-VHD -Path $vhdx
             $mounted=$false
 
-            New-VM -Name $vmName -Generation 2 -MemoryStartupBytes 256MB -VHDPath $vhdx -Path $root | Out-Null
+            New-VM -Name $vmName -Generation 2 -MemoryStartupBytes 256MB -VHDPath $vhdx -Path $vmPath | Out-Null
             Set-VMFirmware -VMName $vmName -EnableSecureBoot Off
             Set-VMProcessor -VMName $vmName -Count 1
             Set-VMComPort -VMName $vmName -Number 1 -Path "\\.\pipe\$pipeName"
+            $bootDisk=Get-VMHardDiskDrive -VMName $vmName | Select-Object -First 1
+            if(-not $bootDisk){ throw 'Hyper-V boot disk not attached' }
+            Set-VMFirmware -VMName $vmName -FirstBootDevice $bootDisk
 
             $captureJob=Start-Job -ScriptBlock {
               param($pipeName,$serialPath)
-              $server=[System.IO.Pipes.NamedPipeServerStream]::new(
+              $client=[System.IO.Pipes.NamedPipeClientStream]::new(
+                '.',
                 $pipeName,
                 [System.IO.Pipes.PipeDirection]::In,
-                1,
-                [System.IO.Pipes.PipeTransmissionMode]::Byte,
                 [System.IO.Pipes.PipeOptions]::Asynchronous
               )
               try {
-                $server.WaitForConnection()
+                $connected=$false
+                for($i=0;$i -lt 90 -and -not $connected;$i++){
+                  try {
+                    $client.Connect(500)
+                    $connected=$client.IsConnected
+                  } catch [System.TimeoutException] {
+                    Start-Sleep -Milliseconds 100
+                  } catch {
+                    Start-Sleep -Milliseconds 100
+                  }
+                }
+                if(-not $connected){ throw "Hyper-V COM named pipe connection timeout: $pipeName" }
                 $file=[System.IO.File]::Open(
                   $serialPath,
                   [System.IO.FileMode]::Create,
@@ -763,7 +777,7 @@ jobs:
                 try {
                   $buf=New-Object byte[] 4096
                   while($true){
-                    $n=$server.Read($buf,0,$buf.Length)
+                    $n=$client.Read($buf,0,$buf.Length)
                     if($n -le 0){ break }
                     $file.Write($buf,0,$n)
                     $file.Flush()
@@ -772,7 +786,7 @@ jobs:
                   $file.Dispose()
                 }
               } finally {
-                $server.Dispose()
+                $client.Dispose()
               }
             } -ArgumentList $pipeName,$serial
 
@@ -831,7 +845,7 @@ jobs:
               Remove-Job $captureJob -Force -ErrorAction SilentlyContinue
             }
             Get-VM -Name $vmName -ErrorAction SilentlyContinue | Remove-VM -Force -ErrorAction SilentlyContinue
-            Remove-Item $vhdx -Force -ErrorAction SilentlyContinue
+            Remove-Item $vmPath -Recurse -Force -ErrorAction SilentlyContinue
           }
 
       - name: Final evidence manifest
@@ -857,6 +871,8 @@ jobs:
             'QEMU_HDA_SPEECH=PASS'
             'QEMU_HDA_DMA_PROGRESS=PASS'
             'QEMU_HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403'
+            'VMWARE_WORKSTATION_REQUIRED=PASS'
+            'HYPERV_GENERATION2_REQUIRED=PASS'
             'PHYSICAL_TARGET_HDA_CONTROLLER=PCI_VEN_1022_DEV_15E3'
             'PHYSICAL_TARGET_CODEC=HDAUDIO_VEN_10EC_DEV_0256'
             'PHYSICAL_TARGET_CODEC_VERIFICATION=NATIVE_HDA_GET_PARAMETER_00'
