@@ -1,6 +1,13 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod image;
+
+pub use image::{
+    AWKN_IMAGE_HEADER_BYTES, AWKN_IMAGE_MAGIC, AWKN_IMAGE_VERSION, AwknImageHeader,
+    ImageHeaderError,
+};
+
 pub const KERNEL_HANDOFF_MAGIC: u64 = 0x4157_4b48_4f46_4631;
 pub const KERNEL_HANDOFF_ABI_VERSION: u32 = 4;
 pub const HANDOFF_FLAG_FRAMEBUFFER_PRESENT: u64 = 1 << 0;

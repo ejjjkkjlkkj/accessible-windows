@@ -1,4 +1,40 @@
-use crate::{MappingError, PageTable, PageTableEntry, PageTableFlags, PhysicalFrame, VirtualPage};
+use crate::{
+    MappingError, PageTable, PageTableEntry, PageTableFlags, PhysicalFrame, VirtualAddress,
+    VirtualPage,
+};
+
+/// Size of one 2 MiB leaf mapping.
+pub const HUGE_PAGE_2M_SIZE: u64 = 2 * 1024 * 1024;
+/// Size of one 1 GiB leaf mapping.
+pub const HUGE_PAGE_1G_SIZE: u64 = 1024 * 1024 * 1024;
+
+/// Granularity of a leaf mapping in the hierarchy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LeafSize {
+    Size4KiB,
+    Size2MiB,
+    Size1GiB,
+}
+
+impl LeafSize {
+    #[must_use]
+    pub const fn bytes(self) -> u64 {
+        match self {
+            Self::Size4KiB => crate::PAGE_SIZE,
+            Self::Size2MiB => HUGE_PAGE_2M_SIZE,
+            Self::Size1GiB => HUGE_PAGE_1G_SIZE,
+        }
+    }
+}
+
+/// A leaf mapping found by [`OfflinePageTableBuilder::resolve`], at whatever
+/// granularity it happens to use.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResolvedLeaf {
+    pub frame: PhysicalFrame,
+    pub flags: PageTableFlags,
+    pub size: LeafSize,
+}
 
 /// Supplies physical frames for page-table storage.
 ///
@@ -109,6 +145,138 @@ impl<const TABLES: usize> OfflinePageTableBuilder<TABLES> {
         self.tables[pt].map_4k_leaf(page.pt_index(), frame, flags)
     }
 
+    /// Map one 2 MiB region with a PD huge leaf.
+    ///
+    /// Used for the bulk of an identity window: a 2 MiB leaf costs one entry
+    /// instead of 512, which is what makes a full low-memory map affordable at
+    /// bootstrap, while still being fine-grained enough to leave holes for the
+    /// regions that need 4 KiB permissions.
+    pub fn map_2m<A: FrameAllocator>(
+        &mut self,
+        allocator: &mut A,
+        address: VirtualAddress,
+        frame: PhysicalFrame,
+        flags: PageTableFlags,
+    ) -> Result<(), MappingError> {
+        self.map_huge(allocator, address, frame, flags, LeafSize::Size2MiB)
+    }
+
+    /// Map one 1 GiB region with a PDPT huge leaf.
+    pub fn map_1g<A: FrameAllocator>(
+        &mut self,
+        allocator: &mut A,
+        address: VirtualAddress,
+        frame: PhysicalFrame,
+        flags: PageTableFlags,
+    ) -> Result<(), MappingError> {
+        self.map_huge(allocator, address, frame, flags, LeafSize::Size1GiB)
+    }
+
+    fn map_huge<A: FrameAllocator>(
+        &mut self,
+        allocator: &mut A,
+        address: VirtualAddress,
+        frame: PhysicalFrame,
+        flags: PageTableFlags,
+        size: LeafSize,
+    ) -> Result<(), MappingError> {
+        let span = size.bytes();
+        if !address.value().is_multiple_of(span) || !frame.start_address().is_multiple_of(span) {
+            return Err(MappingError::Unaligned);
+        }
+        let frame = Self::validate_frame(frame, self.physical_address_bits)?;
+        let user_accessible = flags.contains(PageTableFlags::USER_ACCESSIBLE);
+
+        let (parent, entry_index) = match size {
+            LeafSize::Size1GiB => (
+                self.ensure_child_table(0, address.pml4_index(), user_accessible, allocator)?,
+                address.pdpt_index(),
+            ),
+            LeafSize::Size2MiB => {
+                let pdpt =
+                    self.ensure_child_table(0, address.pml4_index(), user_accessible, allocator)?;
+                (
+                    self.ensure_child_table(
+                        pdpt,
+                        address.pdpt_index(),
+                        user_accessible,
+                        allocator,
+                    )?,
+                    address.pd_index(),
+                )
+            }
+            LeafSize::Size4KiB => return Err(MappingError::Unaligned),
+        };
+
+        let current = self.tables[parent]
+            .entry(entry_index)
+            .ok_or(MappingError::InvalidAddress)?;
+        if current.is_present() {
+            return Err(MappingError::AlreadyMapped);
+        }
+
+        let leaf = PageTableEntry::from_frame(
+            frame,
+            flags
+                .union(PageTableFlags::PRESENT)
+                .union(PageTableFlags::HUGE_PAGE),
+        );
+        if !self.tables[parent].set_entry(entry_index, leaf) {
+            return Err(MappingError::InvalidAddress);
+        }
+        Ok(())
+    }
+
+    /// Resolve whichever leaf covers `address`, at any granularity.
+    ///
+    /// This is how a mixed-granularity map is audited: the caller can assert
+    /// that a given address really is mapped with the permissions it intended,
+    /// without having to know whether the mapping came out as a 4 KiB, 2 MiB or
+    /// 1 GiB leaf.
+    pub fn resolve(&self, address: VirtualAddress) -> Result<ResolvedLeaf, MappingError> {
+        let pdpt = self.child_table_index(0, address.pml4_index())?;
+
+        let pdpt_entry = self.tables[pdpt]
+            .entry(address.pdpt_index())
+            .ok_or(MappingError::InvalidAddress)?;
+        if !pdpt_entry.is_present() {
+            return Err(MappingError::NotMapped);
+        }
+        if pdpt_entry.flags().contains(PageTableFlags::HUGE_PAGE) {
+            return self.leaf(pdpt_entry, LeafSize::Size1GiB);
+        }
+
+        let pd = self.child_table_index(pdpt, address.pdpt_index())?;
+        let pd_entry = self.tables[pd]
+            .entry(address.pd_index())
+            .ok_or(MappingError::InvalidAddress)?;
+        if !pd_entry.is_present() {
+            return Err(MappingError::NotMapped);
+        }
+        if pd_entry.flags().contains(PageTableFlags::HUGE_PAGE) {
+            return self.leaf(pd_entry, LeafSize::Size2MiB);
+        }
+
+        let pt = self.child_table_index(pd, address.pd_index())?;
+        let pt_entry = self.tables[pt]
+            .entry(address.pt_index())
+            .ok_or(MappingError::InvalidAddress)?;
+        if !pt_entry.is_present() {
+            return Err(MappingError::NotMapped);
+        }
+        self.leaf(pt_entry, LeafSize::Size4KiB)
+    }
+
+    fn leaf(&self, entry: PageTableEntry, size: LeafSize) -> Result<ResolvedLeaf, MappingError> {
+        let frame = PhysicalFrame::new(entry.frame_address(), self.physical_address_bits)
+            .ok_or(MappingError::InvalidAddress)?;
+        Ok(ResolvedLeaf {
+            frame,
+            flags: entry.flags(),
+            size,
+        })
+    }
+
     /// Resolve a 4 KiB mapping from the inactive hierarchy.
     pub fn resolve_4k(&self, page: VirtualPage) -> Result<ResolvedMapping, MappingError> {
         let pdpt = self.child_table_index(0, page.pml4_index())?;
@@ -142,6 +310,13 @@ impl<const TABLES: usize> OfflinePageTableBuilder<TABLES> {
             .ok_or(MappingError::InvalidAddress)?;
 
         if current.is_present() {
+            // A huge leaf already covers this whole sub-tree; walking into it
+            // as if it were a table pointer would reinterpret mapped memory as
+            // page tables.
+            if current.flags().contains(PageTableFlags::HUGE_PAGE) {
+                return Err(MappingError::AlreadyMapped);
+            }
+
             let child_frame =
                 PhysicalFrame::new(current.frame_address(), self.physical_address_bits)
                     .ok_or(MappingError::InvalidAddress)?;
@@ -230,6 +405,162 @@ impl<const TABLES: usize> OfflinePageTableBuilder<TABLES> {
     ) -> Result<PhysicalFrame, MappingError> {
         PhysicalFrame::new(frame.start_address(), physical_address_bits)
             .ok_or(MappingError::InvalidAddress)
+    }
+}
+
+#[cfg(test)]
+mod mixed_granularity_tests {
+    use super::*;
+
+    struct Frames {
+        next: u64,
+    }
+
+    impl FrameAllocator for Frames {
+        fn allocate_frame(&mut self) -> Option<PhysicalFrame> {
+            let frame = PhysicalFrame::new(self.next, 52)?;
+            self.next += crate::PAGE_SIZE;
+            Some(frame)
+        }
+    }
+
+    fn builder() -> (OfflinePageTableBuilder<8>, Frames) {
+        let mut frames = Frames { next: 0x1000_0000 };
+        let builder = OfflinePageTableBuilder::<8>::new(52, &mut frames).unwrap();
+        (builder, frames)
+    }
+
+    fn address(value: u64) -> VirtualAddress {
+        VirtualAddress::new(value).unwrap()
+    }
+
+    fn frame(value: u64) -> PhysicalFrame {
+        PhysicalFrame::new(value, 52).unwrap()
+    }
+
+    const RW_NX: PageTableFlags = PageTableFlags::WRITABLE.union(PageTableFlags::NO_EXECUTE);
+
+    #[test]
+    fn resolves_a_one_gib_leaf() {
+        let (mut builder, mut frames) = builder();
+        builder
+            .map_1g(&mut frames, address(1 << 30), frame(1 << 30), RW_NX)
+            .unwrap();
+
+        let leaf = builder.resolve(address((1 << 30) + 0x1234)).unwrap();
+        assert_eq!(leaf.size, LeafSize::Size1GiB);
+        assert_eq!(leaf.frame.start_address(), 1 << 30);
+        assert!(leaf.flags.contains(PageTableFlags::NO_EXECUTE));
+        assert!(leaf.flags.contains(PageTableFlags::HUGE_PAGE));
+    }
+
+    #[test]
+    fn resolves_a_two_mib_leaf() {
+        let (mut builder, mut frames) = builder();
+        builder
+            .map_2m(&mut frames, address(0x40_0000), frame(0x40_0000), RW_NX)
+            .unwrap();
+
+        let leaf = builder.resolve(address(0x40_1000)).unwrap();
+        assert_eq!(leaf.size, LeafSize::Size2MiB);
+        assert_eq!(leaf.frame.start_address(), 0x40_0000);
+    }
+
+    #[test]
+    fn four_kib_leaves_coexist_with_huge_leaves() {
+        let (mut builder, mut frames) = builder();
+        // 2 MiB for the bulk, 4 KiB inside a different 2 MiB region.
+        builder
+            .map_2m(&mut frames, address(0x40_0000), frame(0x40_0000), RW_NX)
+            .unwrap();
+        builder
+            .map_4k(
+                &mut frames,
+                VirtualPage::new(0x20_1000).unwrap(),
+                frame(0x20_1000),
+                PageTableFlags::empty(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            builder.resolve(address(0x40_0fff)).unwrap().size,
+            LeafSize::Size2MiB
+        );
+        let text = builder.resolve(address(0x20_1abc)).unwrap();
+        assert_eq!(text.size, LeafSize::Size4KiB);
+        assert!(!text.flags.contains(PageTableFlags::WRITABLE));
+        assert!(!text.flags.contains(PageTableFlags::NO_EXECUTE));
+    }
+
+    #[test]
+    fn an_unmapped_hole_stays_unmapped() {
+        let (mut builder, mut frames) = builder();
+        builder
+            .map_4k(
+                &mut frames,
+                VirtualPage::new(0x20_2000).unwrap(),
+                frame(0x20_2000),
+                RW_NX,
+            )
+            .unwrap();
+
+        // The guard page next to it was never mapped.
+        assert_eq!(
+            builder.resolve(address(0x20_1000)),
+            Err(MappingError::NotMapped)
+        );
+    }
+
+    #[test]
+    fn rejects_misaligned_huge_mappings() {
+        let (mut builder, mut frames) = builder();
+        assert_eq!(
+            builder.map_2m(&mut frames, address(0x40_1000), frame(0x40_0000), RW_NX),
+            Err(MappingError::Unaligned)
+        );
+        assert_eq!(
+            builder.map_1g(&mut frames, address(1 << 30), frame(0x40_0000), RW_NX),
+            Err(MappingError::Unaligned)
+        );
+    }
+
+    #[test]
+    fn refuses_to_split_or_overwrite_an_existing_huge_leaf() {
+        let (mut builder, mut frames) = builder();
+        builder
+            .map_2m(&mut frames, address(0x40_0000), frame(0x40_0000), RW_NX)
+            .unwrap();
+
+        assert_eq!(
+            builder.map_2m(&mut frames, address(0x40_0000), frame(0x40_0000), RW_NX),
+            Err(MappingError::AlreadyMapped)
+        );
+        assert_eq!(
+            builder.map_4k(
+                &mut frames,
+                VirtualPage::new(0x40_0000).unwrap(),
+                frame(0x40_0000),
+                RW_NX
+            ),
+            Err(MappingError::AlreadyMapped)
+        );
+    }
+
+    #[test]
+    fn one_gib_and_two_mib_leaves_do_not_collide() {
+        let (mut builder, mut frames) = builder();
+        builder
+            .map_1g(&mut frames, address(1 << 30), frame(1 << 30), RW_NX)
+            .unwrap();
+        assert_eq!(
+            builder.map_2m(
+                &mut frames,
+                address((1 << 30) + 0x20_0000),
+                frame((1 << 30) + 0x20_0000),
+                RW_NX
+            ),
+            Err(MappingError::AlreadyMapped)
+        );
     }
 }
 

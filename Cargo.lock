@@ -28,6 +28,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aw-braille"
+version = "0.1.0"
+
+[[package]]
 name = "aw-fs-core"
 version = "0.1.0"
 
@@ -113,6 +117,13 @@ name = "aw-runtime-sources"
 version = "0.1.0"
 
 [[package]]
+name = "aw-screen-reader"
+version = "0.1.0"
+dependencies = [
+ "aw-accessibility",
+]
+
+[[package]]
 name = "aw-storefs"
 version = "0.1.0"
 dependencies = [
@@ -126,6 +137,10 @@ dependencies = [
  "aw-kernel-core",
  "aw-memory",
 ]
+
+[[package]]
+name = "aw-x86-interrupts"
+version = "0.1.0"
 
 [[package]]
 name = "aw-x86-paging"

@@ -23,16 +23,31 @@ Accessible Windows is **x86-64/x64 only**. ARM and ARM64 are out of scope for th
 Bootstrap phase. The repository currently contains:
 
 - an x86-64 UEFI executable under `boot/uefi`;
-- a separate x86-64 freestanding kernel image;
-- UEFI memory-map and GOP/display discovery;
+- a separate x86-64 freestanding kernel, loaded at the fixed base its `AWKN`
+  image header declares;
+- GDT with segment reload, a full 256-entry IDT, TSS/IST and recoverable
+  exception handling;
+- kernel-owned page tables enforcing W^X, NX and a guard page below the
+  double-fault stack, with CR0.WP and CR4.SMEP/SMAP/UMIP enabled;
+- Local APIC timer interrupts with a monotonic tick counter;
+- device interrupts routed through an I/O APIC using the MADT's interrupt
+  source overrides, and MSI delivered straight into the local APIC;
+- SMP bring-up, with every application processor on its own GDT, TSS and IST;
+- UEFI memory-map and GOP/display discovery, ACPI/PCIe ECAM enumeration;
 - a GPT disk-image builder with a FAT32 EFI System Partition;
-- an OVMF/QEMU smoke test that executes the real disk image and enters the native kernel after `ExitBootServices`;
-- a `no_std` kernel/boot contract crate;
-- a `no_std` accessibility semantic model crate;
+- a QEMU/OVMF proof suite that asserts what the CPU actually did, not what
+  compiled - see [docs/KERNEL-BOOT-PROOFS.md](docs/KERNEL-BOOT-PROOFS.md);
+- `no_std` crates for the kernel/boot contract and the accessibility semantic
+  model;
+- a native screen-reader announcement engine that turns that semantic model
+  into the exact utterance spoken for each control, proven on the boot path by
+  voicing the installer's first screen (nonvisual delivery evidence);
 - architecture and accessibility specifications;
 - x64-only Rust CI on Linux, Windows and Intel macOS.
 
-The generated disk image is a boot prototype, not an operating-system installer yet.
+There is no scheduler, no user mode, no driver stack, no filesystem and no user
+interface yet, so there is nothing to install: the generated disk image is a
+boot prototype, not an operating-system installer.
 
 ## Initial target
 
@@ -58,11 +73,15 @@ crates/
 docs/
   ARCHITECTURE.md
   ACCESSIBILITY.md
+  KERNEL-BOOT-PROOFS.md What counts as evidence, and what is proved today
   ROADMAP.md
   LEGAL.md
   REAL-HARDWARE-TEST.md
 scripts/
   build-uefi-disk.sh    Builds the GPT/FAT32 UEFI disk image
+  Invoke-KernelBoot.ps1 Builds one kernel configuration and boots it in QEMU
+  Invoke-BootProofs.ps1 Asserts the markers every configuration must produce
+  verify-windows.ps1    Host quality gates, then all boot proofs
 ```
 
 ## Build workspace
@@ -82,17 +101,19 @@ With PowerShell 7, Rust (including `llvm-tools-preview` and the
 `x86_64-unknown-none` / `x86_64-unknown-uefi` targets), and QEMU installed:
 
 ```powershell
-pwsh -NoProfile -File C:\accessible-windows\scripts\verify-windows.ps1
+pwsh -NoProfile -File scripts\verify-windows.ps1
 ```
 
 The script locates the repository relative to itself, checks formatting, runs
-workspace checks/tests/Clippy, builds the UEFI loader and native kernel, and boots
-fresh files under QEMU TCG with its bundled EDK2 firmware. Use `-Qemu` to override
-the default `C:\Program Files\qemu\qemu-system-x86_64.exe` path. Every run stores
-its own firmware variables, boot files and debug log under `target/windows-verify`.
-Missing dependencies, failed commands or missing required boot markers fail the
-script. The idle kernel is stopped after 30 seconds (`-BootTimeoutSeconds` overrides
-this). This virtual-FAT smoke test does not validate the raw GPT image, installation,
+workspace checks/tests/Clippy plus Clippy on the kernel crate for every feature
+combination it ships, then hands over to `scripts\Invoke-BootProofs.ps1`, which
+builds and boots each kernel configuration under QEMU TCG with the bundled EDK2
+firmware and asserts its required and forbidden markers. Use `-Qemu` to override
+the default `C:\Program Files\qemu\qemu-system-x86_64.exe` path, or `-ProofsOnly`
+to skip the host gates. Evidence for each run is kept under
+`target/boot-evidence/<configuration>/`.
+
+This virtual-FAT proof suite does not validate the raw GPT image, installation,
 physical hardware, or completion of the operating-system roadmap.
 
 ```bash
@@ -117,6 +138,27 @@ Expected disk image:
 ```text
 build/accessible-windows-uefi-x86_64.img
 ```
+
+On Windows (or any host with only PowerShell 7, Rust and Python 3, no imaging
+tools), build a bootable GPT + FAT16 ESP image and prove it boots under
+QEMU/OVMF with:
+
+```powershell
+pwsh -NoProfile -File scripts\Build-BootableImage.ps1 -Verify
+```
+
+Expected disk image:
+
+```text
+dist/accessible-windows-uefi-x86_64.img
+```
+
+`-Verify` boots the image and requires the `AW_NATIVE_KERNEL_IDLE` marker with
+no CPU exception or panic. The FAT filesystem and GPT wrapper are assembled by
+`scripts/build_bootable_image.py` with no external tools. Boot it directly with
+`qemu-system-x86_64 ... -drive format=raw,file=dist/accessible-windows-uefi-x86_64.img`,
+or write it to a USB stick (for example Rufus in DD/image mode, or `dd`) and
+boot it through the firmware's UEFI removable-media entry.
 
 The image is intended for controlled boot testing. It is not yet an installer and must not be written over a disk containing data you need.
 
