@@ -152,13 +152,309 @@ jobs:
             'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS',
             'PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS',
             'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS',
-            'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1',
+            'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V2',
+            'HII_GRAPH_NAV_REALTIME=PASS',
             'HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS',
             'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS',
             'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION'
           )
           foreach($marker in $required){
             if($lines -notcontains $marker){ throw "physical UEFI proof missing: $marker" }
+          }
+          if($raw -notmatch '(?m)^HII_GRAPH_NAV_REALTIME_EVENTS=0x0[7-9A-F]          Copy-Item -LiteralPath $env:PHYSICAL_PROOF_PATH -Destination "$root/QEVARYNOX-PHYSICAL-PROOF.TXT" -Force
+          $sha=(Get-FileHash -LiteralPath $env:PHYSICAL_PROOF_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
+          $audible=if("$env:AUDIBLE_SPEAKER_CONFIRMED" -eq 'true'){'HUMAN_CONFIRMED'}else{'PENDING_HUMAN_CONFIRMATION'}
+          @(
+            'OS-UEFI-PHYSICAL-BOOT-PROOF-V1'
+            'PHYSICAL_UEFI_NATIVE_EXECUTION=PASS'
+            "PHYSICAL_UEFI_SOURCE_BLOB=$expectedSource"
+            'PHYSICAL_UEFI_HII_SOURCE=PASS'
+            'PHYSICAL_UEFI_HDA_CONTROLLER=AMD_1022_15E3'
+            'PHYSICAL_UEFI_CODEC=REALTEK_10EC_0256'
+            'PHYSICAL_UEFI_HDA_GRAPH=PASS'
+            'PHYSICAL_UEFI_HDA_ROUTE=PASS'
+            'PHYSICAL_UEFI_HDA_DMA=PASS'
+            'PHYSICAL_UEFI_LPIB_PROGRESS=PASS'
+            'PHYSICAL_UEFI_READER_LOCAL_NAVIGATION=PASS'
+            'PHYSICAL_UEFI_HII_NAVIGATION=PASS'
+            'PHYSICAL_UEFI_HII_NAV_REQUIRED_EVENTS=PASS'
+            'PHYSICAL_UEFI_SEMANTIC_CONTROL_READING=PASS'
+            'PHYSICAL_UEFI_DIGITS_AND_COMMON_SYMBOLS=PASS'
+            'PHYSICAL_UEFI_INTERNAL_SPEAKER_PIN=PASS'
+            'PHYSICAL_UEFI_FIRMWARE_FOCUS_SYNC=PENDING'
+            'PHYSICAL_UEFI_CONTROL_SEMANTICS=PENDING'
+            'PHYSICAL_UEFI_CONTROL_ACTIVATION=PENDING'
+            'PHYSICAL_UEFI_FORM_HIERARCHY=PENDING'
+            'PHYSICAL_UEFI_ALPHANUMERIC_SPEECH=PENDING'
+            'PHYSICAL_UEFI_SPEECH_INTERRUPT=PASS'
+            'PHYSICAL_UEFI_CORE_SCREEN_READER_PARITY=PENDING'
+            "PHYSICAL_UEFI_AUDIBLE_SPEAKER=$audible"
+            "PHYSICAL_UEFI_PROOF_SHA256=$sha"
+            'PHYSICAL_HOST_REBOOT_BY_WORKFLOW=false'
+            'PHYSICAL_HOST_FIRMWARE_MUTATION=false'
+          ) | Set-Content "$root/postboot-result.txt" -Encoding ascii
+          Get-Content "$root/postboot-result.txt"
+
+      - name: Cleanup temporary proof-media mount
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Continue'
+          if($env:PHYSICAL_PROOF_TEMP_MOUNTED -eq 'true'){
+            try {
+              Remove-PartitionAccessPath `
+                -DiskNumber ([int]$env:PHYSICAL_PROOF_TEMP_DISK) `
+                -PartitionNumber ([int]$env:PHYSICAL_PROOF_TEMP_PARTITION) `
+                -AccessPath $env:PHYSICAL_PROOF_TEMP_MOUNT `
+                -ErrorAction Stop
+              'UEFI_BOOT_MEDIA_TEMP_UNMOUNT=PASS'
+            } finally {
+              $dir=($env:PHYSICAL_PROOF_TEMP_MOUNT).TrimEnd('\')
+              if($dir -and (Test-Path $dir)){
+                Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+              }
+            }
+          } else {
+            'UEFI_BOOT_MEDIA_TEMP_UNMOUNT=NOT_REQUIRED'
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: os-uefi-physical-boot-proof-v1
+          path: boot/uefi-physical-boot-proof-v1/evidence
+          if-no-files-found: error
+
+      - name: Persist revision-bound physical UEFI proof
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $proof='boot/uefi-physical-boot-proof-v1/os-uefi-physical-boot-proof-v1.labproof'
+          $workflow='.github/workflows/os-uefi-physical-boot-proof-v1.yml'
+          $source='boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
+          $verifier='boot/uefi-physical-boot-v1/verify_physical_boot_proof.ps1'
+          $evidence='boot/uefi-physical-boot-proof-v1/evidence/postboot-result.txt'
+          $testedVerifier=(git rev-parse "$($env:GITHUB_SHA):$verifier").Trim()
+          $testedProof=(git rev-parse "$($env:GITHUB_SHA):$proof").Trim()
+          $testedWorkflow=(git rev-parse "$($env:GITHUB_SHA):$workflow").Trim()
+          $testedSource=(git rev-parse "$($env:GITHUB_SHA):$source").Trim()
+          git fetch origin os
+          git checkout -B os origin/os
+          if($testedProof -ne (git rev-parse "origin/os:$proof").Trim()){ 'PHYSICAL_UEFI_STALE_PROOF=SKIP'; exit 0 }
+          if($testedVerifier -ne (git rev-parse "origin/os:$verifier").Trim()){ 'PHYSICAL_UEFI_STALE_VERIFIER=SKIP'; exit 0 }
+          if($testedWorkflow -ne (git rev-parse "origin/os:$workflow").Trim()){ 'PHYSICAL_UEFI_STALE_WORKFLOW=SKIP'; exit 0 }
+          if($testedSource -ne (git rev-parse "origin/os:$source").Trim()){ 'PHYSICAL_UEFI_STALE_SOURCE=SKIP'; exit 0 }
+
+          $result=Get-Content $evidence -Raw
+          if($result -notmatch 'PHYSICAL_UEFI_NATIVE_EXECUTION=PASS'){ throw 'native UEFI execution proof missing' }
+          if($result -notmatch "PHYSICAL_UEFI_SOURCE_BLOB=$testedSource"){ throw 'physical UEFI source provenance mismatch' }
+          if($result -notmatch 'PHYSICAL_UEFI_HDA_DMA=PASS'){ throw 'native HDA DMA proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_HII_NAVIGATION=PASS'){ throw 'native HII navigation proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_HII_NAV_REQUIRED_EVENTS=PASS'){ throw 'complete HII navigation event proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_SEMANTIC_CONTROL_READING=PASS'){ throw 'semantic IFR control reading proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_DIGITS_AND_COMMON_SYMBOLS=PASS'){ throw 'digit and firmware-symbol speech proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_INTERNAL_SPEAKER_PIN=PASS'){ throw 'internal speaker pin proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_SPEECH_INTERRUPT=PASS'){ throw 'physical interruptible speech proof missing' }
+          $audible='PENDING_HUMAN_CONFIRMATION'
+          if($result -match 'PHYSICAL_UEFI_AUDIBLE_SPEAKER=HUMAN_CONFIRMED'){ $audible='HUMAN_CONFIRMED' }
+          $sha=([regex]::Match($result,'PHYSICAL_UEFI_PROOF_SHA256=([0-9a-f]{64})')).Groups[1].Value
+          if(-not $sha){ throw 'physical UEFI proof SHA missing' }
+
+          $lines=Get-Content $proof | Where-Object { $_ -notmatch '^proof(-| = )' }
+          # Current physical reader navigation is still a reader-local HII/IFR model.
+          # Realtime focus speech and interruption are now independently provable, but
+          # do not claim NVDA-like/core parity until firmware focus synchronization,
+          # real control activation, hierarchy and alphanumeric runtime coverage pass.
+          $coreParity='PENDING'
+          $lines += if($audible -eq 'HUMAN_CONFIRMED'){
+            'proof = HDA_RUNTIME_AND_AUDIBLE_PASS_CORE_SCREEN_READER_PARITY_PENDING'
+          } else {
+            'proof = HDA_RUNTIME_PASS_AUDIBLE_AND_CORE_SCREEN_READER_PARITY_PENDING'
+          }
+          $lines += "proof-run = $env:GITHUB_RUN_ID"
+          $lines += "proof-head-sha = $env:GITHUB_SHA"
+          $lines += "proof-runner = $env:RUNNER_NAME"
+          $lines += "proof-source-blob = $testedSource"
+          $lines += "proof-boot-media-sha256 = $sha"
+          $lines += 'proof-native-uefi-execution = PASS'
+          $lines += 'proof-hii-source = PASS'
+          $lines += 'proof-controller = AMD_1022_15E3'
+          $lines += 'proof-codec = REALTEK_10EC_0256'
+          $lines += 'proof-hda-graph = PASS'
+          $lines += 'proof-hda-route = PASS'
+          $lines += 'proof-hda-dma = PASS'
+          $lines += 'proof-lpib-progress = PASS'
+          $lines += 'proof-reader-local-navigation = PASS'
+          $lines += 'proof-hii-navigation = PASS'
+          $lines += 'proof-hii-navigation-required-events = PASS'
+          $lines += 'proof-semantic-control-reading = PASS'
+          $lines += 'proof-digits-and-common-symbols = PASS'
+          $lines += 'proof-internal-speaker-pin = PASS'
+          $lines += 'proof-firmware-focus-sync = PENDING'
+          $lines += 'proof-control-semantics = PENDING'
+          $lines += 'proof-control-activation = PENDING'
+          $lines += 'proof-form-hierarchy = PENDING'
+          $lines += 'proof-alphanumeric-speech = PENDING'
+          $lines += 'proof-speech-interrupt = PASS'
+          $lines += "proof-core-screen-reader-parity = $coreParity"
+          $lines += "proof-audible-physical-speaker = $audible"
+          $lines += 'proof-workflow-triggered-reboot = false'
+          $lines += 'proof-firmware-mutation = false'
+          Set-Content $proof $lines -Encoding utf8
+          if(git diff --quiet -- $proof){ 'PHYSICAL_UEFI_PROOF_ALREADY_CURRENT=PASS'; exit 0 }
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $proof
+          git commit -m "Record native physical UEFI screen reader proof"
+          git push origin os
+){
+            throw 'physical UEFI proof has fewer than 7 realtime focus speech events'
+          }
+          if($raw -notmatch '(?m)^HII_GRAPH_NAV_SPEECH_INTERRUPTS=0x0[1-9A-F]          Copy-Item -LiteralPath $env:PHYSICAL_PROOF_PATH -Destination "$root/QEVARYNOX-PHYSICAL-PROOF.TXT" -Force
+          $sha=(Get-FileHash -LiteralPath $env:PHYSICAL_PROOF_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
+          $audible=if("$env:AUDIBLE_SPEAKER_CONFIRMED" -eq 'true'){'HUMAN_CONFIRMED'}else{'PENDING_HUMAN_CONFIRMATION'}
+          @(
+            'OS-UEFI-PHYSICAL-BOOT-PROOF-V1'
+            'PHYSICAL_UEFI_NATIVE_EXECUTION=PASS'
+            "PHYSICAL_UEFI_SOURCE_BLOB=$expectedSource"
+            'PHYSICAL_UEFI_HII_SOURCE=PASS'
+            'PHYSICAL_UEFI_HDA_CONTROLLER=AMD_1022_15E3'
+            'PHYSICAL_UEFI_CODEC=REALTEK_10EC_0256'
+            'PHYSICAL_UEFI_HDA_GRAPH=PASS'
+            'PHYSICAL_UEFI_HDA_ROUTE=PASS'
+            'PHYSICAL_UEFI_HDA_DMA=PASS'
+            'PHYSICAL_UEFI_LPIB_PROGRESS=PASS'
+            'PHYSICAL_UEFI_READER_LOCAL_NAVIGATION=PASS'
+            'PHYSICAL_UEFI_HII_NAVIGATION=PASS'
+            'PHYSICAL_UEFI_HII_NAV_REQUIRED_EVENTS=PASS'
+            'PHYSICAL_UEFI_SEMANTIC_CONTROL_READING=PASS'
+            'PHYSICAL_UEFI_DIGITS_AND_COMMON_SYMBOLS=PASS'
+            'PHYSICAL_UEFI_INTERNAL_SPEAKER_PIN=PASS'
+            'PHYSICAL_UEFI_FIRMWARE_FOCUS_SYNC=PENDING'
+            'PHYSICAL_UEFI_CONTROL_SEMANTICS=PENDING'
+            'PHYSICAL_UEFI_CONTROL_ACTIVATION=PENDING'
+            'PHYSICAL_UEFI_FORM_HIERARCHY=PENDING'
+            'PHYSICAL_UEFI_ALPHANUMERIC_SPEECH=PENDING'
+            'PHYSICAL_UEFI_SPEECH_INTERRUPT=PENDING'
+            'PHYSICAL_UEFI_CORE_SCREEN_READER_PARITY=PENDING'
+            "PHYSICAL_UEFI_AUDIBLE_SPEAKER=$audible"
+            "PHYSICAL_UEFI_PROOF_SHA256=$sha"
+            'PHYSICAL_HOST_REBOOT_BY_WORKFLOW=false'
+            'PHYSICAL_HOST_FIRMWARE_MUTATION=false'
+          ) | Set-Content "$root/postboot-result.txt" -Encoding ascii
+          Get-Content "$root/postboot-result.txt"
+
+      - name: Cleanup temporary proof-media mount
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Continue'
+          if($env:PHYSICAL_PROOF_TEMP_MOUNTED -eq 'true'){
+            try {
+              Remove-PartitionAccessPath `
+                -DiskNumber ([int]$env:PHYSICAL_PROOF_TEMP_DISK) `
+                -PartitionNumber ([int]$env:PHYSICAL_PROOF_TEMP_PARTITION) `
+                -AccessPath $env:PHYSICAL_PROOF_TEMP_MOUNT `
+                -ErrorAction Stop
+              'UEFI_BOOT_MEDIA_TEMP_UNMOUNT=PASS'
+            } finally {
+              $dir=($env:PHYSICAL_PROOF_TEMP_MOUNT).TrimEnd('\')
+              if($dir -and (Test-Path $dir)){
+                Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+              }
+            }
+          } else {
+            'UEFI_BOOT_MEDIA_TEMP_UNMOUNT=NOT_REQUIRED'
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: os-uefi-physical-boot-proof-v1
+          path: boot/uefi-physical-boot-proof-v1/evidence
+          if-no-files-found: error
+
+      - name: Persist revision-bound physical UEFI proof
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $proof='boot/uefi-physical-boot-proof-v1/os-uefi-physical-boot-proof-v1.labproof'
+          $workflow='.github/workflows/os-uefi-physical-boot-proof-v1.yml'
+          $source='boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
+          $verifier='boot/uefi-physical-boot-v1/verify_physical_boot_proof.ps1'
+          $evidence='boot/uefi-physical-boot-proof-v1/evidence/postboot-result.txt'
+          $testedVerifier=(git rev-parse "$($env:GITHUB_SHA):$verifier").Trim()
+          $testedProof=(git rev-parse "$($env:GITHUB_SHA):$proof").Trim()
+          $testedWorkflow=(git rev-parse "$($env:GITHUB_SHA):$workflow").Trim()
+          $testedSource=(git rev-parse "$($env:GITHUB_SHA):$source").Trim()
+          git fetch origin os
+          git checkout -B os origin/os
+          if($testedProof -ne (git rev-parse "origin/os:$proof").Trim()){ 'PHYSICAL_UEFI_STALE_PROOF=SKIP'; exit 0 }
+          if($testedVerifier -ne (git rev-parse "origin/os:$verifier").Trim()){ 'PHYSICAL_UEFI_STALE_VERIFIER=SKIP'; exit 0 }
+          if($testedWorkflow -ne (git rev-parse "origin/os:$workflow").Trim()){ 'PHYSICAL_UEFI_STALE_WORKFLOW=SKIP'; exit 0 }
+          if($testedSource -ne (git rev-parse "origin/os:$source").Trim()){ 'PHYSICAL_UEFI_STALE_SOURCE=SKIP'; exit 0 }
+
+          $result=Get-Content $evidence -Raw
+          if($result -notmatch 'PHYSICAL_UEFI_NATIVE_EXECUTION=PASS'){ throw 'native UEFI execution proof missing' }
+          if($result -notmatch "PHYSICAL_UEFI_SOURCE_BLOB=$testedSource"){ throw 'physical UEFI source provenance mismatch' }
+          if($result -notmatch 'PHYSICAL_UEFI_HDA_DMA=PASS'){ throw 'native HDA DMA proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_HII_NAVIGATION=PASS'){ throw 'native HII navigation proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_HII_NAV_REQUIRED_EVENTS=PASS'){ throw 'complete HII navigation event proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_SEMANTIC_CONTROL_READING=PASS'){ throw 'semantic IFR control reading proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_DIGITS_AND_COMMON_SYMBOLS=PASS'){ throw 'digit and firmware-symbol speech proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_INTERNAL_SPEAKER_PIN=PASS'){ throw 'internal speaker pin proof missing' }
+          $audible='PENDING_HUMAN_CONFIRMATION'
+          if($result -match 'PHYSICAL_UEFI_AUDIBLE_SPEAKER=HUMAN_CONFIRMED'){ $audible='HUMAN_CONFIRMED' }
+          $sha=([regex]::Match($result,'PHYSICAL_UEFI_PROOF_SHA256=([0-9a-f]{64})')).Groups[1].Value
+          if(-not $sha){ throw 'physical UEFI proof SHA missing' }
+
+          $lines=Get-Content $proof | Where-Object { $_ -notmatch '^proof(-| = )' }
+          # Current physical reader navigation is a reader-local HII prompt list.
+          # Do not claim NVDA-like/core screen-reader parity until focus synchronization,
+          # control semantics/activation, hierarchy, alphanumeric speech and interruption
+          # have independent runtime proof on the physical firmware.
+          $coreParity='PENDING'
+          $lines += if($audible -eq 'HUMAN_CONFIRMED'){
+            'proof = HDA_RUNTIME_AND_AUDIBLE_PASS_CORE_SCREEN_READER_PARITY_PENDING'
+          } else {
+            'proof = HDA_RUNTIME_PASS_AUDIBLE_AND_CORE_SCREEN_READER_PARITY_PENDING'
+          }
+          $lines += "proof-run = $env:GITHUB_RUN_ID"
+          $lines += "proof-head-sha = $env:GITHUB_SHA"
+          $lines += "proof-runner = $env:RUNNER_NAME"
+          $lines += "proof-source-blob = $testedSource"
+          $lines += "proof-boot-media-sha256 = $sha"
+          $lines += 'proof-native-uefi-execution = PASS'
+          $lines += 'proof-hii-source = PASS'
+          $lines += 'proof-controller = AMD_1022_15E3'
+          $lines += 'proof-codec = REALTEK_10EC_0256'
+          $lines += 'proof-hda-graph = PASS'
+          $lines += 'proof-hda-route = PASS'
+          $lines += 'proof-hda-dma = PASS'
+          $lines += 'proof-lpib-progress = PASS'
+          $lines += 'proof-reader-local-navigation = PASS'
+          $lines += 'proof-hii-navigation = PASS'
+          $lines += 'proof-hii-navigation-required-events = PASS'
+          $lines += 'proof-semantic-control-reading = PASS'
+          $lines += 'proof-digits-and-common-symbols = PASS'
+          $lines += 'proof-internal-speaker-pin = PASS'
+          $lines += 'proof-firmware-focus-sync = PENDING'
+          $lines += 'proof-control-semantics = PENDING'
+          $lines += 'proof-control-activation = PENDING'
+          $lines += 'proof-form-hierarchy = PENDING'
+          $lines += 'proof-alphanumeric-speech = PENDING'
+          $lines += 'proof-speech-interrupt = PENDING'
+          $lines += "proof-core-screen-reader-parity = $coreParity"
+          $lines += "proof-audible-physical-speaker = $audible"
+          $lines += 'proof-workflow-triggered-reboot = false'
+          $lines += 'proof-firmware-mutation = false'
+          Set-Content $proof $lines -Encoding utf8
+          if(git diff --quiet -- $proof){ 'PHYSICAL_UEFI_PROOF_ALREADY_CURRENT=PASS'; exit 0 }
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $proof
+          git commit -m "Record native physical UEFI screen reader proof"
+          git push origin os
+){
+            throw 'physical UEFI proof did not establish interruptible speech'
           }
           Copy-Item -LiteralPath $env:PHYSICAL_PROOF_PATH -Destination "$root/QEVARYNOX-PHYSICAL-PROOF.TXT" -Force
           $sha=(Get-FileHash -LiteralPath $env:PHYSICAL_PROOF_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
