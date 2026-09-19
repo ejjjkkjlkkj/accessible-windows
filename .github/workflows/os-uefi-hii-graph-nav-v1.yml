@@ -207,7 +207,8 @@ jobs:
           tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_NAV_PAGE_DOWN=PASS'
           tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_NAV_REPEAT=PASS'
           tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_NAV_EXIT=PASS'
-          tr -d '\r' < "$root/nav-proof.txt" | grep -E '^HII_GRAPH_NAV_SPEECH_EVENTS=0x0[7-9A-F]          tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
+          tr -d '\r' < "$root/nav-proof.txt" | grep -E '^HII_GRAPH_NAV_SPEECH_EVENTS=0x0[7-9A-F]$'
+          tr -d '\r' < "$root/nav-proof.txt" | grep -F 'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
           echo HII_GRAPH_NAV_PERSISTENT_PROOF=PASS
 
       - name: Validate navigation waveform
