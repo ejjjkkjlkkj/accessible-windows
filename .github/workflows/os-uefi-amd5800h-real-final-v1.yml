@@ -77,8 +77,8 @@ jobs:
           grep -Fx 'proof-signed-positive-control = PASS' "$secure"
           grep -Fx 'proof-HII-prompt-speech-HDA = PASS' "$graph"
           grep -Fx 'proof-physical-UEFI-speech = not-established' "$physicalAudio"
-          grep -F 'proof-analog-controller-instance-id = ' "$physicalAudio" | grep -F 'VEN_1022&DEV_15E3'
-          grep -F 'proof-analog-codec-instance-id = ' "$physicalAudio" | grep -F 'VEN_10EC&DEV_0256'
+          grep -F 'proof-primary-controller-instance-id = ' "$physicalAudio" | grep -F 'VEN_1022&DEV_15E3'
+          grep -F 'proof-primary-codec-instance-id = ' "$physicalAudio" | grep -F 'VEN_10EC&DEV_0256'
           grep -Fx 'proof-hardware-identity = PASS' "$asusPreflight"
           grep -Fx 'proof-uefi-presence = PASS' "$asusPreflight"
           grep -Fx 'proof-audio-inventory = PASS' "$asusPreflight"
