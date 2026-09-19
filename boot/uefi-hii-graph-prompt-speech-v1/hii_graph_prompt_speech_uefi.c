@@ -176,6 +176,7 @@ static u8 g_nav_form_headings;
 #define NAV_SEEN_END       0x10u
 #define NAV_SEEN_PAGE_UP   0x20u
 #define NAV_SEEN_PAGE_DOWN 0x40u
+#define NAV_SEEN_TAB       0x80u
 #define NAV_REQUIRED_MASK  (NAV_SEEN_UP | NAV_SEEN_DOWN | NAV_SEEN_R | \
                             NAV_SEEN_HOME | NAV_SEEN_END | NAV_SEEN_PAGE_UP | \
                             NAV_SEEN_PAGE_DOWN)
@@ -371,6 +372,10 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_PAGE_UP) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_PAGE_DOWN=");
     proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_PAGE_DOWN) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_TAB=");
+    proof_puts(proof,sizeof(proof),&n,(g_nav_event_mask & NAV_SEEN_TAB) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_HELP=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_help_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_REQUIRED_EVENTS=");
     proof_puts(proof,sizeof(proof),&n,
         ((g_nav_event_mask & NAV_REQUIRED_MASK) == NAV_REQUIRED_MASK &&
@@ -1572,6 +1577,7 @@ static int wait_navigation_keys(void *system_table) {
             }
             if (key.unicode_char == 0x0009u) {
                 marker("HII_GRAPH_NAV_KEY=TAB");
+                g_nav_event_mask |= NAV_SEEN_TAB;
                 u8 next = (u8)(g_nav_prompt_index + 1u);
                 if (next >= g_nav_prompt_total) next = 0;
                 nav_prompt_load(next);
