@@ -200,6 +200,7 @@ jobs:
           set +e
           timeout 45s qemu-system-x86_64 \
             -machine q35 \
+            -cpu max \
             -m 256M \
             -display none \
             -serial none \
@@ -236,6 +237,11 @@ jobs:
           grep -F "AW_PAGING_BASELINE_OK" uefi-debug.log
           grep -F "AW_NATIVE_FRAMEBUFFER_WRITE_OK" uefi-debug.log
           grep -F "AW_NATIVE_KERNEL_IDLE" uefi-debug.log
+          grep -F "AW_VMM_IDENTITY_MAP_OK" uefi-debug.log
+          if [ "$QEMU_STATUS" -ne 0 ] && [ "$QEMU_STATUS" -ne 124 ]; then
+            echo "Unexpected QEMU status: $QEMU_STATUS" >&2
+            exit "$QEMU_STATUS"
+          fi
 
       - name: Generate checksums
         shell: bash

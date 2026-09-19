@@ -836,7 +836,7 @@ const APIC_TIMER_REQUIRED_TICKS: u64 = 8;
 /// Returns normally whether or not the proof passes: an absent or broken timer
 /// must not stop the rest of bootstrap from reporting its own state, and the
 /// markers make the failure explicit instead of silent.
-fn prove_apic_timer_delivery() {
+fn prove_apic_timer_delivery() -> bool {
     debug_write("AW_APIC_TIMER_BEGIN\n");
 
     // SAFETY: runs once after IDT/TSS install, with interrupts still masked.
@@ -846,7 +846,7 @@ fn prove_apic_timer_delivery() {
         debug_write("AW_APIC_TIMER_UNAVAILABLE reason=");
         debug_write(reason);
         debug_write("\n");
-        return;
+        return false;
     }
     // SAFETY: CPL0; the PIC is reprogrammed and fully masked before any `sti`.
     unsafe { legacy_pic::remap_and_mask_all() };
@@ -898,6 +898,7 @@ fn prove_apic_timer_delivery() {
             debug_write("\n");
         }
     }
+    matches!(proof, DeliveryProof::Passed { .. })
 }
 
 /// Route a real device interrupt through an I/O APIC and prove it arrives.
@@ -1467,29 +1468,41 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // W^X page tables. Identity-mapped, so a failure here is non-fatal:
         // the firmware tables stay active and boot continues, with the
         // protections explicitly reported as unproven.
-        match activate_virtual_memory(handoff) {
+        let memory_ready = match activate_virtual_memory(handoff) {
             Some(map) => {
                 prove_memory_protections(&map);
                 prove_runtime_mapping();
                 heap::prove();
                 ring3::prove();
                 scheduler::prove();
+                true
             }
-            None => debug_write("AW_MEMORY_PROTECTION_SKIPPED reason=no-kernel-page-tables\n"),
-        }
+            None => {
+                debug_write("AW_MEMORY_PROTECTION_SKIPPED reason=no-kernel-page-tables\n");
+                false
+            }
+        };
 
         install_bootstrap_per_cpu();
-        prove_apic_timer_delivery();
+        let timer_ready = prove_apic_timer_delivery();
         // The timer gate is installed and x2APIC is live; prove threads that never
         // yield are still switched by that timer. Leaves the timer masked and
         // interrupts disabled again, as the device-routing proof below expects.
         // SAFETY: CPL0 on the bootstrap processor, right after the timer proof.
-        unsafe { scheduler::prove_preemptive() };
+        if timer_ready {
+            unsafe { scheduler::prove_preemptive() };
+        } else {
+            debug_write("AW_PREEMPT_SKIPPED reason=timer-not-proven\n");
+        }
         // With per-CPU GS and the timer both live, prove a CPL3 user thread that
         // never makes a syscall is preempted by the timer. Runs before SMP so the
         // single-CPU switch state is never touched by an application processor.
         // SAFETY: CPL0 on the bootstrap processor; per-CPU block installed.
-        unsafe { ring3::prove_ring3_preemption() };
+        if timer_ready && memory_ready {
+            unsafe { ring3::prove_ring3_preemption() };
+        } else {
+            debug_write("AW_RING3_PREEMPT_SKIPPED reason=timer-or-memory-not-ready\n");
+        }
         prove_device_interrupt_routing(handoff);
         bring_up_secondary_processors(handoff);
         prove_per_cpu_state();
@@ -1512,10 +1525,18 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
                 // Load a userland ELF off that same filesystem and run it at CPL3.
                 // SAFETY: CPL0; paging, heap and the first Ring 3 proof are up, and
                 // the device was just brought up.
-                unsafe { ring3::prove_user_loader(&device) };
+                if memory_ready {
+                    unsafe { ring3::prove_user_loader(&device) };
+                } else {
+                    debug_write("AW_USER_LOADER_SKIPPED reason=no-kernel-page-tables\n");
+                }
                 // Then load two userland programs and preemptively schedule both.
                 // SAFETY: same preconditions; runs before any AP is online.
-                unsafe { ring3::prove_user_init(&device) };
+                if memory_ready && timer_ready {
+                    unsafe { ring3::prove_user_init(&device) };
+                } else {
+                    debug_write("AW_USER_INIT_SKIPPED reason=timer-or-memory-not-ready\n");
+                }
             }
             None => debug_write("AW_VIRTIO_BLK_UNAVAILABLE reason=no_device\n"),
         }

@@ -214,6 +214,15 @@ jobs:
           ! grep -qF "AW_IOAPIC_IRQ_NOT_FIRED" "$LOG"
           ! grep -qF "AW_IOAPIC_MASK_INEFFECTIVE" "$LOG"
           ! grep -qF "AW_IOAPIC_DID_NOT_RESUME" "$LOG"
+          # A missing timer must skip preemption, never enter its unbounded wait.
+          if grep -qF "AW_APIC_TIMER_UNAVAILABLE" "$LOG"; then
+            grep -F "AW_PREEMPT_SKIPPED reason=timer-not-proven" "$LOG"
+            grep -F "AW_RING3_PREEMPT_SKIPPED" "$LOG"
+            ! grep -qF "AW_PREEMPT_BEGIN" "$LOG"
+          else
+            grep -F "AW_APIC_TIMER_DELIVERY_PROOF_OK" "$LOG"
+            grep -F "AW_PREEMPT_PROOF_OK" "$LOG"
+          fi
           grep -F "AW_NATIVE_FRAMEBUFFER_WRITE_OK" "$LOG"
           grep -F "AW_NATIVE_KERNEL_IDLE" "$LOG"
           if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 124 ]; then
