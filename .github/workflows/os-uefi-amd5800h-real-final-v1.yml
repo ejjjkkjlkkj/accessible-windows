@@ -22,7 +22,7 @@ permissions:
 
 concurrency:
   group: os-uefi-amd5800h-real-final-v1-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-graph-efi:
@@ -30,19 +30,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-      - name: Cancel superseded AMD final runs
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          export current="$GITHUB_RUN_ID"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs?branch=os&per_page=100" --jq             '.workflow_runs[] | select(.name=="os-uefi-amd5800h-real-final-v1") | select((.status=="queued" or .status=="in_progress") and (.id|tostring)!=env.current) | .id'             | while read -r run; do
-                test -n "$run" || continue
-                echo "Cancelling superseded AMD final run $run"
-                gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$run/cancel" >/dev/null || true
-              done
-          echo AMD_FINAL_SUPERSEDED_RUNS_PRUNED=PASS
       - name: Build deterministic multi-hop HDA graph EFI
         run: |
           set -euo pipefail
