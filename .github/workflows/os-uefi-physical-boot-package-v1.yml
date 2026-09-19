@@ -6,7 +6,8 @@ on:
     paths:
       - 'boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
       - 'boot/uefi-hii-graph-prompt-speech-v1/generate_units.py'
-      - 'boot/uefi-physical-boot-v1/**'
+      - 'boot/uefi-physical-boot-v1/physical-boot.profile'
+      - 'boot/uefi-physical-boot-v1/verify_physical_boot_proof.ps1'
       - '.github/workflows/os-uefi-physical-boot-package-v1.yml'
   workflow_dispatch:
 
