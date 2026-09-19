@@ -1485,7 +1485,6 @@ static int wait_navigation_keys(void *system_table) {
         g_stall(1000);
     }
 }
-}
 #endif
 
 __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
