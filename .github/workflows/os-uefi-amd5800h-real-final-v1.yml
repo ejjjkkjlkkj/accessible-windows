@@ -51,6 +51,7 @@ jobs:
                 test -n "$run" || continue
                 echo "Cancelling older AMD closure run $run"
                 gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$run/cancel" >/dev/null || true
+                gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$run/force-cancel" >/dev/null || true
               done
           echo AMD_FINAL_OLDER_RUNS_PRUNED=PASS
       - name: Require proven UEFI accessibility dependencies
