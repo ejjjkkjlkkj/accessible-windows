@@ -1362,6 +1362,16 @@ jobs:
             if($qw -match 'qemu-waveform = PASS'){ $qemuWave='PASS' }
             elseif($qw -match 'NOT_ESTABLISHED_ON_WINDOWS_BACKEND'){ $qemuWave='NOT_ESTABLISHED_ON_WINDOWS_BACKEND' }
           }
+          if($qemuWave -ne 'PASS'){ throw "Final proof refused: QEMU waveform=$qemuWave" }
+          if($vm -ne 'PASS'){ throw "Final proof refused: VMware Workstation=$vm" }
+          if($vmSpeech -ne 'PASS'){ throw "Final proof refused: VMware HDA graph speech=$vmSpeech" }
+          if($vmIntegrated -ne 'PASS'){ throw "Final proof refused: VMware integrated HII/HDA speech=$vmIntegrated" }
+          if($vmInteractive -ne 'PASS'){ throw "Final proof refused: VMware interactive HII navigation=$vmInteractive" }
+          if($vmControllerSelection -ne 'GENERIC_CLASS_0403'){ throw "Final proof refused: VMware controller selection=$vmControllerSelection" }
+          if($vmCodecSelection -ne 'GENERIC_RUNTIME'){ throw "Final proof refused: VMware codec selection=$vmCodecSelection" }
+          if($hyperv -ne 'PASS'){ throw "Final proof refused: Hyper-V UEFI execution=$hyperv" }
+          if($hypervPlatform -in @('NOT_ESTABLISHED','UNCLASSIFIED')){ throw "Final proof refused: Hyper-V platform result=$hypervPlatform" }
+          'FINAL_VIRTUALIZATION_EVIDENCE_ASSERTIONS=PASS'
           $lines += 'final-proof-state = VIRTUALIZATION_PASS_PHYSICAL_AUDIO_PENDING'
           $lines += "proof-current-option-proof-blob = $testedCurrentProof"
           $lines += "proof-platform-commit-proof-blob = $testedCommitProof"
