@@ -6,35 +6,37 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 SOURCE=ROOT/'boot'/'uefi-native-speech-v1'/'build_uefi_native_speech.py'
 LETTER_UNITS={
- # Runtime grapheme-to-allophone map. This is intentionally word-like rather
- # than spelling letter names so focus changes sound like labels, not an
- # alphabet exercise. Context-sensitive cases are kept conservative.
+ # Clear fallback spelling for arbitrary firmware labels. The previous map
+ # treated each grapheme as a raw phoneme, which made unknown HII labels sound
+ # like fused pseudo-words. Here each grapheme expands to a short French letter
+ # name; the EFI runtime already inserts a gap between graphemes and can
+ # interrupt the DMA stream immediately when focus moves.
  'a':('a',),
- 'b':('b',),
- 'c':('k',),
- 'd':('d',),
+ 'b':('b','e'),
+ 'c':('s','e'),
+ 'd':('d','e'),
  'e':('e',),
- 'f':('f',),
- 'g':('g',),
- 'h':('sil',),
+ 'f':('e','f'),
+ 'g':('zh','e'),
+ 'h':('a','sh'),
  'i':('i',),
- 'j':('zh',),
- 'k':('k',),
- 'l':('l',),
- 'm':('m',),
- 'n':('n',),
+ 'j':('zh','i'),
+ 'k':('k','a'),
+ 'l':('e','l'),
+ 'm':('e','m'),
+ 'n':('e','n'),
  'o':('o',),
- 'p':('p',),
- 'q':('k',),
- 'r':('r',),
- 's':('s',),
- 't':('t',),
+ 'p':('p','e'),
+ 'q':('k','u'),
+ 'r':('e','r'),
+ 's':('e','s'),
+ 't':('t','e'),
  'u':('u',),
- 'v':('v',),
- 'w':('w',),
- 'x':('k','s'),
- 'y':('i',),
- 'z':('z',),
+ 'v':('v','e'),
+ 'w':('d','u','b','l','e','v','e'),
+ 'x':('i','k','s'),
+ 'y':('i','g','r','e','k'),
+ 'z':('z','e','d'),
 }
 
 def load_source():
@@ -112,12 +114,12 @@ def main():
         f'unit-count={len(names)}\n'
         f'bank-bytes={len(bank)}\n'
         f'bank-sha256={hashlib.sha256(bank).hexdigest()}\n'
-        'letter-map=a-z\n'
+        'letter-map=a-z-french-letter-names\n'
         'max-input-graphemes=32\n'
         'max-units-per-letter=8\n'
-        'inter-letter-silence-ms=0\n'
+        'inter-letter-silence-ms=12-runtime-gap\n'
         'word-silence-ms=65\n'
-        'speech-mode=grapheme-allophone-v2\n'
+        'speech-mode=clear-lettername-spelling-fr-v3\n'
         'full-utterance-asset=false\n'
     )
     print('HII_GRAPH_PROMPT_UNIT_GENERATION=PASS')

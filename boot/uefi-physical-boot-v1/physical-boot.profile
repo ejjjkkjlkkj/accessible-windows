@@ -16,6 +16,7 @@ proof-navigation-speech-events = at least 7
 proof-navigation-incomplete-exit = HII_GRAPH_NAV_EXIT=BLOCKED_INCOMPLETE
 proof-DMA = HII_GRAPH_SPEECH_DMA=PASS + LPIB_PROGRESS=PASS
 proof-DMA-reuse = HII_GRAPH_SPEECH_DMA_REUSE=PASS
+proof-speech-mode = HII_GRAPH_SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3
 audible-speaker-proof = human confirmation remains required
 claim = a valid proof file after a real ASUS UEFI boot establishes native execution, analog HDA controller selection, live graph routing, selector programming and DMA progress
 claim = the proof file alone does not establish that the laptop speaker was audibly heard
