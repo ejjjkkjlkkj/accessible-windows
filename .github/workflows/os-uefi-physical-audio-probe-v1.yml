@@ -12,7 +12,7 @@ on:
 permissions:
   contents: write
 
-# Revalidate physical ASUS/ALC256 inventory after the latest native HDA routing changes.
+# Revalidate physical ASUS/ALC256 inventory after the latest native HDA routing changes; independent from final-gate pruning.
 
 jobs:
   amd5800h-audio-inventory:
