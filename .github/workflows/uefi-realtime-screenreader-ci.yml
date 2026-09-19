@@ -35,6 +35,10 @@ jobs:
           test -s "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS' "$root/REALTIME.EFI"
+          grep -aF 'HII_GRAPH_NAV_SEMANTIC_ROLE=PASS' "$root/REALTIME.EFI"
+          grep -aF 'HII_GRAPH_NAV_SEMANTIC_SPEECH=ROLE_PLUS_LABEL' "$root/REALTIME.EFI"
+          grep -aF 'HII_GRAPH_NAV_ROLE=' "$root/REALTIME.EFI"
+          grep -aF 'HII_GRAPH_NAV_SPEECH_TEXT=' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_REALTIME_CAPABLE=PASS' "$root/REALTIME.EFI"
           echo UEFI_REALTIME_SCREENREADER_BUILD=PASS
@@ -138,6 +142,12 @@ jobs:
           b=wait_marker(b'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS\r\n',1)
           if b.count(b'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS\r\n') < 7:
               raise SystemExit('not all focus changes were announced')
+          if b.count(b'HII_GRAPH_NAV_SEMANTIC_ROLE=PASS\r\n') < 8:
+              raise SystemExit('not all focus changes carried an IFR semantic role')
+          if b'HII_GRAPH_NAV_ROLE=' not in b:
+              raise SystemExit('semantic role output missing')
+          if b'HII_GRAPH_NAV_SPEECH_TEXT=' not in b:
+              raise SystemExit('semantic speech output missing')
 
           # Let the final utterance make real HDA progress before exiting.
           end=time.time()+2
@@ -326,6 +336,10 @@ jobs:
             'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA',
             'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS',
             'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS',
+            'HII_GRAPH_NAV_SEMANTIC_ROLE=PASS',
+            'HII_GRAPH_NAV_SEMANTIC_SPEECH=ROLE_PLUS_LABEL',
+            'HII_GRAPH_NAV_ROLE=',
+            'HII_GRAPH_NAV_SPEECH_TEXT=',
             'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS',
             'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3',
             'HDA_CODEC_SELECTION=REALTEK_10EC_0256'
@@ -339,6 +353,9 @@ jobs:
             'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS',
             'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS',
             'HII_GRAPH_NAV_LPIB_PROGRESS=PASS',
+            'HII_GRAPH_NAV_SEMANTIC_ROLE=PASS',
+            'HII_GRAPH_NAV_ROLE=',
+            'HII_GRAPH_NAV_SPEECH_TEXT=',
             'BOOT_MEDIA_PERSISTENT_PROOF=PASS',
             'STATUS=PASS'
           )){
@@ -348,6 +365,7 @@ jobs:
           $proofText=Get-Content $proof -Raw
           foreach($marker in @(
             'HII_GRAPH_NAV_REALTIME=PASS',
+            'HII_GRAPH_NAV_SEMANTIC_ROLE=PASS',
             'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
           )){
             if(-not $proofText.Contains($marker)){ throw "persistent proof marker missing: $marker" }
