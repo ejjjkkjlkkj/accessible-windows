@@ -697,6 +697,143 @@ jobs:
             'VMWARE_STATUS=PASS'
             ($raw -split "[\r\n]+" | Where-Object { $_ -match '^(HII_PROMPT_TEXT|HDA_PIN_NID|HDA_DAC_NID|HDA_ROUTE_DEPTH|HDA_SELECTOR_WRITES_)=' })
           ) | Set-Content (Join-Path $root 'vmware-result.txt') -Encoding ascii
+      - name: Hyper-V Generation 2 UEFI reader boot witness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path 'boot/uefi-amd5800h-real-final-v1/evidence').Path
+          $result=Join-Path $root 'hyperv-result.txt'
+          $serial=Join-Path $root 'hyperv.serial'
+          $vhdx=Join-Path $root 'hyperv-uefi.vhdx'
+          $vmName="QEV-UEFI-$env:GITHUB_RUN_ID"
+          $pipeName="qev-uefi-$env:GITHUB_RUN_ID"
+          $captureJob=$null
+          $mounted=$false
+
+          Import-Module Hyper-V -ErrorAction Stop
+          foreach($cmd in @('New-VHD','Mount-VHD','Dismount-VHD','New-VM','Set-VMFirmware','Set-VMComPort','Start-VM','Stop-VM','Remove-VM')){
+            if(-not (Get-Command $cmd -ErrorAction SilentlyContinue)){ throw "Hyper-V command missing: $cmd" }
+          }
+          $vmms=Get-Service vmms -ErrorAction Stop
+          if($vmms.Status -ne 'Running'){ throw "Hyper-V VMMS is not running: $($vmms.Status)" }
+
+          try {
+            Get-VM -Name $vmName -ErrorAction SilentlyContinue | Stop-VM -TurnOff -Force -ErrorAction SilentlyContinue
+            Get-VM -Name $vmName -ErrorAction SilentlyContinue | Remove-VM -Force -ErrorAction SilentlyContinue
+            Remove-Item $vhdx,$serial -Force -ErrorAction SilentlyContinue
+
+            New-VHD -Path $vhdx -SizeBytes 128MB -Dynamic | Out-Null
+            $vhd=Mount-VHD -Path $vhdx -PassThru
+            $mounted=$true
+            $diskNumber=$vhd.DiskNumber
+            $disk=Get-Disk -Number $diskNumber
+            if($disk.IsOffline){ Set-Disk -Number $diskNumber -IsOffline $false }
+            if($disk.IsReadOnly){ Set-Disk -Number $diskNumber -IsReadOnly $false }
+            Initialize-Disk -Number $diskNumber -PartitionStyle GPT | Out-Null
+            $part=New-Partition -DiskNumber $diskNumber -UseMaximumSize -AssignDriveLetter -GptType '{C12A7328-F81F-11D2-BA4B-00A0C93EC93B}'
+            $part | Format-Volume -FileSystem FAT32 -NewFileSystemLabel 'QEVARYNOX' -Confirm:$false | Out-Null
+            $drive="$($part.DriveLetter):"
+            New-Item -ItemType Directory -Force "$drive\EFI\BOOT" | Out-Null
+            Copy-Item (Join-Path $root 'hii-graph.EFI') "$drive\EFI\BOOT\BOOTX64.EFI" -Force
+            Dismount-VHD -Path $vhdx
+            $mounted=$false
+
+            New-VM -Name $vmName -Generation 2 -MemoryStartupBytes 256MB -VHDPath $vhdx -Path $root | Out-Null
+            Set-VMFirmware -VMName $vmName -EnableSecureBoot Off
+            Set-VMProcessor -VMName $vmName -Count 1
+            Set-VMComPort -VMName $vmName -Number 1 -Path "\\.\pipe\$pipeName"
+
+            $captureJob=Start-Job -ScriptBlock {
+              param($pipeName,$serialPath)
+              $server=[System.IO.Pipes.NamedPipeServerStream]::new(
+                $pipeName,
+                [System.IO.Pipes.PipeDirection]::In,
+                1,
+                [System.IO.Pipes.PipeTransmissionMode]::Byte,
+                [System.IO.Pipes.PipeOptions]::Asynchronous
+              )
+              try {
+                $server.WaitForConnection()
+                $file=[System.IO.File]::Open(
+                  $serialPath,
+                  [System.IO.FileMode]::Create,
+                  [System.IO.FileAccess]::Write,
+                  [System.IO.FileShare]::ReadWrite
+                )
+                try {
+                  $buf=New-Object byte[] 4096
+                  while($true){
+                    $n=$server.Read($buf,0,$buf.Length)
+                    if($n -le 0){ break }
+                    $file.Write($buf,0,$n)
+                    $file.Flush()
+                  }
+                } finally {
+                  $file.Dispose()
+                }
+              } finally {
+                $server.Dispose()
+              }
+            } -ArgumentList $pipeName,$serial
+
+            Start-VM -Name $vmName
+            $deadline=(Get-Date).AddSeconds(45)
+            $raw=''
+            do {
+              Start-Sleep -Milliseconds 500
+              if(Test-Path $serial){
+                try { $raw=[System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($serial)) } catch {}
+                if($raw -match 'HII_PROMPT_SPEECH_HDA=PASS' -or $raw -match 'STATUS=BLOCKED'){ break }
+              }
+            } while((Get-Date) -lt $deadline)
+
+            if(-not $raw -and (Test-Path $serial)){
+              $raw=[System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($serial))
+            }
+            if($raw -notmatch 'QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V1'){
+              throw "Hyper-V did not execute the UEFI reader. serial=$raw"
+            }
+            if($raw -notmatch 'STATE=START'){
+              throw "Hyper-V UEFI reader start marker missing. serial=$raw"
+            }
+
+            $platform='UNCLASSIFIED'
+            $audio='NOT_ESTABLISHED'
+            if($raw -match 'HII_PROMPT_SPEECH_HDA=PASS'){
+              $platform='FULL_HII_HDA_RUNTIME'
+              $audio='PASS'
+            } elseif($raw -match 'REASON=HDA_CONTROLLER_OR_CODEC_NOT_FOUND'){
+              $platform='EXPECTED_NO_VIRTUAL_HDA'
+            } elseif($raw -match 'REASON=HII_PROMPT_NOT_RESOLVED'){
+              $platform='FIRMWARE_HII_CONTENT_NOT_RESOLVED'
+            } else {
+              throw "Hyper-V UEFI reader reached an unexpected state. serial=$raw"
+            }
+
+            @(
+              'HYPERV_GENERATION2=PASS'
+              'HYPERV_UEFI_READER_EXECUTION=PASS'
+              'HYPERV_SERIAL_CAPTURE=PASS'
+              "HYPERV_PLATFORM_RESULT=$platform"
+              "HYPERV_HDA_SPEECH=$audio"
+              'HYPERV_FALSE_AUDIO_PASS=BLOCKED'
+              ($raw -split "[\r\n]+" | Where-Object {
+                $_ -match '^(QEVARYNOX-|STATE=|HII_|HDA_|STATUS=|REASON=)'
+              })
+            ) | Set-Content $result -Encoding ascii
+            Get-Content $result
+          } finally {
+            if($mounted){ Dismount-VHD -Path $vhdx -ErrorAction SilentlyContinue }
+            Get-VM -Name $vmName -ErrorAction SilentlyContinue | Stop-VM -TurnOff -Force -ErrorAction SilentlyContinue
+            if($captureJob){
+              Wait-Job $captureJob -Timeout 5 | Out-Null
+              Stop-Job $captureJob -ErrorAction SilentlyContinue
+              Remove-Job $captureJob -Force -ErrorAction SilentlyContinue
+            }
+            Get-VM -Name $vmName -ErrorAction SilentlyContinue | Remove-VM -Force -ErrorAction SilentlyContinue
+            Remove-Item $vhdx -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Final evidence manifest
         shell: pwsh
         run: |
@@ -728,6 +865,7 @@ jobs:
           ) | Set-Content "$root/final-result.txt" -Encoding ascii
           if(Test-Path "$root/qemu-waveform.txt"){ Get-Content "$root/qemu-waveform.txt" | Add-Content "$root/final-result.txt" -Encoding ascii }
           if(Test-Path "$root/vmware-result.txt"){ Get-Content "$root/vmware-result.txt" | Add-Content "$root/final-result.txt" -Encoding ascii }
+          if(Test-Path "$root/hyperv-result.txt"){ Get-Content "$root/hyperv-result.txt" | Add-Content "$root/final-result.txt" -Encoding ascii }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -774,6 +912,15 @@ jobs:
           }
           $sha=(Get-FileHash "$root/evidence/downspeech.EFI" -Algorithm SHA256).Hash.ToLowerInvariant()
           $manifest=(Get-FileHash "$root/evidence/manifest.sha256" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $hyperv='NOT_ESTABLISHED'
+          $hypervPlatform='NOT_ESTABLISHED'
+          $hypervAudio='NOT_ESTABLISHED'
+          if(Test-Path "$root/evidence/hyperv-result.txt"){
+            $hr=Get-Content "$root/evidence/hyperv-result.txt" -Raw
+            if($hr -match 'HYPERV_UEFI_READER_EXECUTION=PASS'){ $hyperv='PASS' }
+            if($hr -match 'HYPERV_PLATFORM_RESULT=([^\r\n]+)'){ $hypervPlatform=$matches[1].Trim() }
+            if($hr -match 'HYPERV_HDA_SPEECH=([^\r\n]+)'){ $hypervAudio=$matches[1].Trim() }
+          }
           $qemuWave='NOT_ESTABLISHED'
           if(Test-Path "$root/evidence/qemu-waveform.txt"){
             $qw=Get-Content "$root/evidence/qemu-waveform.txt" -Raw
@@ -799,6 +946,10 @@ jobs:
           $lines += "proof-vmware-integrated-hii-hda-speech = $vmIntegrated"
           $lines += "proof-vmware-hda-controller-selection = $vmControllerSelection"
           $lines += "proof-vmware-hda-codec-selection = $vmCodecSelection"
+          $lines += "proof-hyperv-generation2-uefi-execution = $hyperv"
+          $lines += "proof-hyperv-platform-result = $hypervPlatform"
+          $lines += "proof-hyperv-hda-speech = $hypervAudio"
+          $lines += 'proof-hyperv-false-audio-pass = BLOCKED'
           $lines += 'proof-vmware-hii-source = live-integrated-hii-graph-prompt'
           $lines += 'proof-physical-host-reboot = false'
           $lines += 'proof-physical-host-firmware-mutation = false'
