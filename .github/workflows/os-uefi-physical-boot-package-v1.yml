@@ -2,7 +2,7 @@ name: os-uefi-physical-boot-package-v1
 
 on:
   push:
-    branches: [os]
+    branches: [os, uefi-realtime-screenreader-20260919]
     paths:
       - 'boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
       - 'boot/uefi-hii-graph-prompt-speech-v1/generate_units.py'
