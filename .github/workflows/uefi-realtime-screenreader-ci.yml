@@ -191,25 +191,53 @@ jobs:
           tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
           echo UEFI_REALTIME_NAVIGATION_PROOF=PASS
 
-      - name: Validate audio waveform
+      - name: Validate audio waveform quality
         shell: python
         run: |
           from pathlib import Path
-          import struct, wave
+          import math, struct, wave
+
           p=Path('boot/uefi-hii-graph-prompt-speech-v1/realtime.wav')
           assert p.exists() and p.stat().st_size > 10000, p
           with wave.open(str(p),'rb') as w:
               assert w.getnchannels()==2
               assert w.getframerate()==48000
               assert w.getsampwidth()==2
-              raw=w.readframes(w.getnframes())
+              frames=w.getnframes()
+              raw=w.readframes(frames)
+
+          assert frames >= 4800, frames
+          assert len(raw) == frames * 4, (len(raw), frames)
+
           vals=struct.unpack('<'+'h'*(len(raw)//2),raw)
+          mono=vals[::2]
           peak=max(abs(v) for v in vals)
           active=sum(abs(v)>=500 for v in vals)
+          rms=math.sqrt(sum(v*v for v in mono)/len(mono))
+          mean_abs=sum(abs(v) for v in mono)/len(mono)
+          zero_crossings=sum(
+              1 for a,b in zip(mono,mono[1:])
+              if (a < 0 <= b) or (a >= 0 > b)
+          )
+          clipped=sum(abs(v)>=32760 for v in vals)
+          clip_ratio=clipped/len(vals)
+          duration=frames/48000.0
+
           assert peak>=5000, peak
           assert active>=1000, active
-          print(f'realtime-peak={peak} realtime-active={active}')
+          assert rms>=300, rms
+          assert mean_abs>=100, mean_abs
+          assert zero_crossings>=20, zero_crossings
+          assert clip_ratio<0.25, clip_ratio
+
+          print(
+              f'realtime-duration={duration:.3f}s '
+              f'peak={peak} active={active} rms={rms:.1f} '
+              f'mean_abs={mean_abs:.1f} zero_crossings={zero_crossings} '
+              f'clip_ratio={clip_ratio:.6f}'
+          )
           print('UEFI_REALTIME_WAVEFORM=PASS')
+          print('UEFI_REALTIME_AUDIO_QUALITY=PASS')
 
       - uses: actions/upload-artifact@v4
         with:
