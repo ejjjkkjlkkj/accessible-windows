@@ -13,7 +13,7 @@ on:
 permissions:
   contents: write
 
-# Revalidate the read-only ASUS M1603QA UEFI/HDA preflight against the current reader.
+# Revalidate the read-only ASUS M1603QA UEFI/HDA preflight against the current reader; independent from final-gate pruning.
 
 jobs:
   amd-5800h-real-readonly-preflight:
