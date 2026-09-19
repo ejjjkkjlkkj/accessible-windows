@@ -1,0 +1,206 @@
+name: uefi-realtime-screenreader-ci
+
+on:
+  push:
+    branches: [uefi-realtime-screenreader-20260919]
+    paths:
+      - 'boot/uefi-hii-graph-prompt-speech-v1/**'
+      - 'boot/uefi-native-speech-v1/build_uefi_native_speech.py'
+      - '.github/workflows/uefi-realtime-screenreader-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  realtime-nav:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install UEFI test toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld qemu-system-x86 ovmf dosfstools mtools
+
+      - name: Validate generator and build interruptible screen reader
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-graph-prompt-speech-v1
+          python -m py_compile "$root/generate_units.py"
+          python "$root/generate_units.py" "$root/realtime-units.c" "$root/realtime-units.txt"
+          flags='--target=x86_64-pc-windows-msvc -DQEV_INTERACTIVE_NAV=1 -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+          clang $flags -c "$root/hii_graph_prompt_speech_uefi.c" -o "$root/realtime-main.obj"
+          clang $flags -c "$root/realtime-units.c" -o "$root/realtime-units.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$root/REALTIME.EFI" "$root/realtime-main.obj" "$root/realtime-units.obj"
+          test -s "$root/REALTIME.EFI"
+          grep -aF 'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA' "$root/REALTIME.EFI"
+          grep -aF 'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS' "$root/REALTIME.EFI"
+          grep -aF 'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS' "$root/REALTIME.EFI"
+          grep -aF 'HII_GRAPH_NAV_REALTIME_CAPABLE=PASS' "$root/REALTIME.EFI"
+          echo UEFI_REALTIME_SCREENREADER_BUILD=PASS
+
+      - name: Resolve OVMF
+        run: |
+          set -euo pipefail
+          CODE=''; VARS=''
+          for pair in             '/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd'             '/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd'             '/usr/share/edk2/ovmf/OVMF_CODE.fd|/usr/share/edk2/ovmf/OVMF_VARS.fd'
+          do
+            IFS='|' read -r code vars <<< "$pair"
+            if test -f "$code" -a -f "$vars"; then CODE="$code"; VARS="$vars"; break; fi
+          done
+          test -n "$CODE" -a -n "$VARS"
+          printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-hii-graph-prompt-speech-v1/realtime-ovmf.env
+
+      - name: Prove navigation interrupts speech in real time
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-graph-prompt-speech-v1
+          source "$root/realtime-ovmf.env"
+          cp "$VARS" "$root/realtime-vars.fd"
+          rm -f "$root/realtime-esp.img" "$root/realtime.serial" "$root/realtime.wav" "$root/realtime-qmp.sock" "$root/realtime-proof.txt"
+          truncate -s 64M "$root/realtime-esp.img"
+          mkfs.vfat -F 16 "$root/realtime-esp.img"
+          mmd -i "$root/realtime-esp.img" ::/EFI
+          mmd -i "$root/realtime-esp.img" ::/EFI/BOOT
+          mcopy -i "$root/realtime-esp.img" "$root/REALTIME.EFI" ::/EFI/BOOT/BOOTX64.EFI
+
+          qemu-system-x86_64             -machine q35,accel=tcg -m 192M             -drive if=pflash,format=raw,readonly=on,file="$CODE"             -drive if=pflash,format=raw,file="$root/realtime-vars.fd"             -drive format=raw,file="$root/realtime-esp.img"             -audiodev wav,id=aud,path="$root/realtime.wav",out.frequency=48000,out.channels=2             -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0             -device hda-duplex,bus=hda0.0,cad=0,audiodev=aud             -display none -monitor none             -qmp unix:"$root/realtime-qmp.sock",server=on,wait=off             -serial file:"$root/realtime.serial"             -parallel none -net none -no-reboot -no-shutdown &
+          qpid=$!
+          trap 'kill $qpid 2>/dev/null || true' EXIT
+
+          ROOT="$root" python - <<'PY'
+          from pathlib import Path
+          import json, os, re, socket, time
+
+          root=Path(os.environ['ROOT'])
+          serial=root/'realtime.serial'
+          qmp=root/'realtime-qmp.sock'
+
+          def raw():
+              return serial.read_bytes() if serial.exists() else b''
+
+          def wait_marker(marker, count=1, timeout=60):
+              end=time.time()+timeout
+              while time.time()<end:
+                  b=raw()
+                  if b'STATUS=BLOCKED\r\n' in b:
+                      raise SystemExit('firmware blocked: '+repr(b[-20000:]))
+                  if b.count(marker) >= count:
+                      return b
+                  time.sleep(.005)
+              raise SystemExit('timeout '+repr(marker)+': '+repr(raw()[-20000:]))
+
+          b=wait_marker(b'HII_GRAPH_NAV_READY=PASS\r\n')
+          if b'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA\r\n' not in b:
+              raise SystemExit('realtime mode marker missing')
+
+          end=time.time()+20
+          while time.time()<end and not qmp.exists():
+              time.sleep(.01)
+          if not qmp.exists():
+              raise SystemExit('QMP socket missing')
+
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+          s.connect(str(qmp))
+          f=s.makefile('rwb',buffering=0)
+          hello=json.loads(f.readline())
+          if 'QMP' not in hello:
+              raise SystemExit('bad QMP greeting')
+          f.write((json.dumps({'execute':'qmp_capabilities'})+'\r\n').encode())
+          while True:
+              reply=json.loads(f.readline())
+              if 'return' in reply:
+                  break
+
+          def send(qcode):
+              f.write((json.dumps({'execute':'send-key','arguments':{'keys':[{'type':'qcode','data':qcode}],'hold-time':20}})+'\r\n').encode())
+              while True:
+                  reply=json.loads(f.readline())
+                  if 'return' in reply:
+                      return
+                  if 'error' in reply:
+                      raise SystemExit('QMP send-key error '+repr(reply))
+
+          sequence=[
+              ('down', b'HII_GRAPH_NAV_KEY=DOWN\r\n'),
+              ('up', b'HII_GRAPH_NAV_KEY=UP\r\n'),
+              ('end', b'HII_GRAPH_NAV_KEY=END\r\n'),
+              ('home', b'HII_GRAPH_NAV_KEY=HOME\r\n'),
+              ('pgdn', b'HII_GRAPH_NAV_KEY=PAGE_DOWN\r\n'),
+              ('pgup', b'HII_GRAPH_NAV_KEY=PAGE_UP\r\n'),
+              ('r', b'HII_GRAPH_NAV_KEY=R\r\n'),
+          ]
+          for n,(key,marker) in enumerate(sequence,1):
+              send(key)
+              wait_marker(marker)
+              wait_marker(b'HII_GRAPH_NAV_SPEECH_DMA=STARTED\r\n',n)
+
+          b=wait_marker(b'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS\r\n',1)
+          if b.count(b'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS\r\n') < 7:
+              raise SystemExit('not all focus changes were announced')
+
+          # Let the final utterance make real HDA progress before exiting.
+          end=time.time()+2
+          while time.time()<end:
+              b=raw()
+              if b'HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n' in b:
+                  break
+              time.sleep(.005)
+          else:
+              raise SystemExit('no HDA LPIB progress during realtime speech')
+
+          send('esc')
+          s.close()
+          b=wait_marker(b'STATUS=PASS\r\n')
+          for marker in [
+              b'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS\r\n',
+              b'HII_GRAPH_NAV_EXIT=PASS\r\n',
+              b'BOOT_MEDIA_PERSISTENT_PROOF=PASS\r\n',
+          ]:
+              if marker not in b:
+                  raise SystemExit('missing '+repr(marker))
+          print(b.decode('ascii','replace'))
+          print('UEFI_REALTIME_NAVIGATION_RUNTIME=PASS')
+          PY
+
+          sleep 1
+          kill $qpid 2>/dev/null || true
+          wait $qpid 2>/dev/null || true
+          trap - EXIT
+
+          mcopy -o -i "$root/realtime-esp.img" ::/QEVARYNOX-PHYSICAL-PROOF.TXT "$root/realtime-proof.txt"
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_NAV_REALTIME=PASS'
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -E '^HII_GRAPH_NAV_REALTIME_EVENTS=0x0[7-9A-F]$'
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -E '^HII_GRAPH_NAV_SPEECH_INTERRUPTS=0x0[1-9A-F]$'
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
+          echo UEFI_REALTIME_NAVIGATION_PROOF=PASS
+
+      - name: Validate audio waveform
+        shell: python
+        run: |
+          from pathlib import Path
+          import struct, wave
+          p=Path('boot/uefi-hii-graph-prompt-speech-v1/realtime.wav')
+          assert p.exists() and p.stat().st_size > 10000, p
+          with wave.open(str(p),'rb') as w:
+              assert w.getnchannels()==2
+              assert w.getframerate()==48000
+              assert w.getsampwidth()==2
+              raw=w.readframes(w.getnframes())
+          vals=struct.unpack('<'+'h'*(len(raw)//2),raw)
+          peak=max(abs(v) for v in vals)
+          active=sum(abs(v)>=500 for v in vals)
+          assert peak>=5000, peak
+          assert active>=1000, active
+          print(f'realtime-peak={peak} realtime-active={active}')
+          print('UEFI_REALTIME_WAVEFORM=PASS')
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefi-realtime-screenreader
+          path: |
+            boot/uefi-hii-graph-prompt-speech-v1/REALTIME.EFI
+            boot/uefi-hii-graph-prompt-speech-v1/realtime.serial
+            boot/uefi-hii-graph-prompt-speech-v1/realtime.wav
+            boot/uefi-hii-graph-prompt-speech-v1/realtime-proof.txt
+          if-no-files-found: error
