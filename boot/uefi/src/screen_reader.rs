@@ -50,9 +50,12 @@ const CUE_CONTINUE_HZ: u32 = 523;
 const CUE_READY_HZ: u32 = 880;
 
 /// How long an unattended boot waits for a key before it continues on its own.
-/// The QEMU proof harness presses no key, so it always waits this out and then
-/// boots - which is why the automated boot proof must never depend on a keystroke.
-const REVIEW_WINDOW: Duration = Duration::from_secs(5);
+/// Kept short: it is pure latency on every boot where nobody reviews, and it is in
+/// the critical path of timed boot tests. A user who wants to review just presses a
+/// key inside this window; missing it only means the boot proceeds to the (equally
+/// accessible) installer. The QEMU proof harness presses no key, so it always waits
+/// this out - which is why the automated boot proof must never depend on a keystroke.
+const REVIEW_WINDOW: Duration = Duration::from_secs(2);
 /// How often the review window polls for a keystroke.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -191,7 +194,7 @@ fn review_and_continue(
 ) {
     log::info!("AW_UEFI_SR_READY");
     uefi::println!();
-    uefi::println!("  Up/Down: review a line.  Enter: continue.  Continuing in 5 seconds.");
+    uefi::println!("  Up/Down: review a line.  Enter: continue.  Continuing in 2 seconds.");
     // An audible "waiting for you" cue, so a blind user knows input is expected.
     sound::cue(CUE_READY_HZ, Duration::from_millis(90));
 

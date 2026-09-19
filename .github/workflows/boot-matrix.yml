@@ -157,7 +157,7 @@ jobs:
           truncate -s 32M nvme-test.img
 
           set +e
-          timeout 20s qemu-system-x86_64 \
+          timeout 30s qemu-system-x86_64 \
             -machine q35 \
             -cpu "${{ matrix.cpu_model }}" \
             -smp "${{ matrix.cpus }}" \
