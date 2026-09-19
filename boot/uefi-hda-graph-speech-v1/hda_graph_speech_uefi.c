@@ -35,9 +35,12 @@ static u8 g_parent[MAX_NID];
 static u8 g_depth[MAX_NID];
 static u8 g_queue[MAX_NID];
 static u8 g_route_index[MAX_NID];
+static u32 g_widget_cap[MAX_NID];
 
 static volatile u8 *g_hda;
 static u8 g_cad;
+static u8 g_afg = INVALID_NID;
+static u8 g_controller_preferred;
 static stall_fn g_stall;
 static allocate_pages_fn g_allocate_pages;
 
@@ -164,6 +167,7 @@ static void clear_graph(void) {
         g_depth[i] = 0;
         g_queue[i] = 0;
         g_route_index[i] = 0;
+        g_widget_cap[i] = 0;
         for (j = 0; j < MAX_CONN; ++j) g_conn[i][j] = 0;
     }
 }
@@ -312,7 +316,45 @@ static int apply_route(u8 pin, u8 dac, u8 *applied_out) {
     return 1;
 }
 
+static int wait_node_d0(u8 nid) {
+    for (u32 attempt = 0; attempt < 100u; ++attempt) {
+        u32 state = verb12(nid, 0xf05, 0);
+        if (state == INVALID_RESP || (state & 0x00000100u)) return 0;
+        if ((state & 0x0fu) == 0u && ((state >> 4) & 0x0fu) == 0u) return 1;
+        if (g_stall) g_stall(1000);
+    }
+    return 0;
+}
+
+static int power_up_afg(void) {
+    if (g_afg == INVALID_NID) return 0;
+    u32 supported = get_param(g_afg, 0x0f);
+    if (supported == INVALID_RESP || !(supported & 0x01u))
+        return g_controller_preferred ? 0 : 1;
+    if (verb12(g_afg, 0x705, 0x00) == INVALID_RESP) return 0;
+    return wait_node_d0(g_afg);
+}
+
+static int power_up_route_widget(u8 nid) {
+    if (!(g_widget_cap[nid] & 0x00000400u)) return 1;
+    u32 supported = get_param(nid, 0x0f);
+    if (supported == INVALID_RESP || !(supported & 0x01u)) return 0;
+    if (verb12(nid, 0x705, 0x00) == INVALID_RESP) return 0;
+    return wait_node_d0(nid);
+}
+
 static int configure_output_path(u8 pin, u8 dac) {
+    if (!power_up_afg()) return 0;
+    u8 cur = dac;
+    for (;;) {
+        if (!power_up_route_widget(cur)) return 0;
+        if (cur == pin) break;
+        u8 child = g_parent[cur];
+        if (child == INVALID_NID) return 0;
+        cur = child;
+    }
+    marker("HDA_ROUTE_POWER_D0=PASS");
+
     u32 amp_cap = get_param(dac, 0x12);
     if (amp_cap == INVALID_RESP) return 0;
     if (amp_cap) {
@@ -326,14 +368,30 @@ static int configure_output_path(u8 pin, u8 dac) {
     u32 pin_cap = get_param(pin, 0x0c);
     if (pin_cap == INVALID_RESP) return 0;
     if (pin_cap & 0x00010000u) {
-        if (verb12(pin, 0x70c, 0x02) == INVALID_RESP) return 0;
         u32 eapd = verb12(pin, 0xf0c, 0);
-        if (eapd == INVALID_RESP || !(eapd & 0x02)) return 0;
+        if (eapd == INVALID_RESP) return 0;
+        u8 desired_eapd = (u8)eapd | 0x02u;
+        if (verb12(pin, 0x70c, desired_eapd) == INVALID_RESP) return 0;
+        eapd = verb12(pin, 0xf0c, 0);
+        if (eapd == INVALID_RESP || !(eapd & 0x02u)) return 0;
     }
 
     if (verb12(dac, 0x706, 0x10) == INVALID_RESP) return 0;
+    u32 stream_channel = verb12(dac, 0xf06, 0);
+    if (stream_channel == INVALID_RESP || (stream_channel & 0xffu) != 0x10u) return 0;
+
     if (verb4(dac, 0x2, 0x0011) == INVALID_RESP) return 0;
-    if (verb12(pin, 0x707, 0x40) == INVALID_RESP) return 0;
+    u32 format = verb4(dac, 0xa, 0);
+    if (format == INVALID_RESP || (format & 0xffffu) != 0x0011u) return 0;
+    marker("HDA_DAC_STREAM_READBACK=PASS");
+
+    u32 pin_ctl = verb12(pin, 0xf07, 0);
+    if (pin_ctl == INVALID_RESP) return 0;
+    u8 desired_pin_ctl = (u8)pin_ctl | 0x40u;
+    if (verb12(pin, 0x707, desired_pin_ctl) == INVALID_RESP) return 0;
+    pin_ctl = verb12(pin, 0xf07, 0);
+    if (pin_ctl == INVALID_RESP || !(pin_ctl & 0x40u)) return 0;
+    marker("HDA_PIN_CONTROL_READBACK=PASS");
     return 1;
 }
 
@@ -441,6 +499,7 @@ static int discover_controller(void) {
             if (pass == 0 && vd != 0x15e31022u) continue;
             cfg = base;
             found = 1;
+            g_controller_preferred = (u8)(pass == 0);
             if (pass == 0) marker("HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3");
             else marker("HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403");
             break;
@@ -502,6 +561,7 @@ static int discover_live_graph(u8 *pin_out, u8 *dac_out, u8 *selectors_out) {
         }
     }
     if (afg == INVALID_NID) return 0;
+    g_afg = afg;
     marker("HDA_AFG_RUNTIME=PASS");
 
     u32 widget_nodes = get_param(afg, 0x04);
@@ -514,6 +574,7 @@ static int discover_live_graph(u8 *pin_out, u8 *dac_out, u8 *selectors_out) {
         u8 nid = (u8)n;
         u32 cap = get_param(nid, 0x09);
         if (cap == INVALID_RESP) return 0;
+        g_widget_cap[nid] = cap;
         u8 type = (u8)((cap >> 20) & 0x0f);
         g_type[nid] = type;
         if (type == WIDGET_PIN) {
