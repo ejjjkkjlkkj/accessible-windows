@@ -66,6 +66,10 @@ fn speak_focus(node: &SemanticNode<'_>, context: FocusContext) -> bool {
     debug_write("AW_SR_SPEAK \"");
     debug_write(text);
     debug_write("\"\n");
+    // Mirror the spoken line to the visible framebuffer console, so a sighted
+    // helper on real hardware sees the same words the reader voices. A no-op when
+    // no framebuffer is up, so the proof stays device-free.
+    crate::framebuffer::write_line(text);
     true
 }
 

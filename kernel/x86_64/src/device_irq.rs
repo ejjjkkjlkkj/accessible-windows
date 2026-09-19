@@ -89,18 +89,25 @@ const fn isa_trigger(trigger: TriggerMode) -> PinTrigger {
     }
 }
 
-/// Route ISA IRQ 0 through the I/O APIC the MADT names, leaving it masked.
+/// Route one ISA IRQ through the I/O APIC the MADT names, to a caller-supplied
+/// interrupt entry stub, leaving the redirection entry masked.
 ///
 /// Nothing here is derived from convention: the global system interrupt, the
 /// I/O APIC that owns it, and the electrical configuration all come from the
 /// MADT, and a route that cannot be built from it is refused by name instead
-/// of falling back to the conventional numbers.
+/// of falling back to the conventional numbers. `stub_addr` is the address of a
+/// bare interrupt stub (see [`crate::device_interrupt_stub!`]) that EOIs the
+/// local APIC; the PIT proof and the keyboard driver each pass their own.
 ///
 /// # Safety
 ///
 /// CPL0, single core, after the IDT is installed and the local APIC has been
-/// enabled in x2APIC mode.
-pub unsafe fn route_pit_through_ioapic(madt: Madt<'static>) -> Result<RoutedIrq, &'static str> {
+/// enabled in x2APIC mode. `stub_addr` must name a valid interrupt entry stub.
+pub unsafe fn route_isa_irq(
+    madt: Madt<'static>,
+    isa_irq: u8,
+    stub_addr: u64,
+) -> Result<(IoApic, IoApicRouting), &'static str> {
     // SAFETY: CPL0; reading the APIC base MSR has no side effects.
     let apic_base = unsafe { crate::local_apic::read_apic_base() };
     if !apic_base.enabled || !apic_base.x2apic_enabled {
@@ -116,7 +123,7 @@ pub unsafe fn route_pit_through_ioapic(madt: Madt<'static>) -> Result<RoutedIrq,
         return Err("apic_id_too_wide_for_ioapic");
     }
 
-    let (gsi, polarity, trigger) = madt.resolve_isa_irq(PIT_ISA_IRQ);
+    let (gsi, polarity, trigger) = madt.resolve_isa_irq(isa_irq);
     let Some((madt_id, address, redirection_index)) = madt.io_apic_for_gsi(gsi) else {
         return Err("no_ioapic_for_gsi");
     };
@@ -143,17 +150,15 @@ pub unsafe fn route_pit_through_ioapic(madt: Madt<'static>) -> Result<RoutedIrq,
 
     // SAFETY: CPL0 with interrupts disabled; the gate uses the same audited
     // encoder as every other vector and the stub preserves all registers.
-    unsafe {
-        crate::interrupts::install_interrupt_gate(vector, aw_ioapic_isr as *const () as u64, 0)
-    }
-    .map_err(|_| "idt_gate_encoding")?;
+    unsafe { crate::interrupts::install_interrupt_gate(vector, stub_addr, 0) }
+        .map_err(|_| "idt_gate_encoding")?;
 
     // SAFETY: single core, CPL0; the entry is written masked.
     unsafe { io_apic.write_entry(redirection_index, entry) }.map_err(IoApicError::name)?;
 
-    Ok(RoutedIrq {
+    Ok((
         io_apic,
-        routing: IoApicRouting {
+        IoApicRouting {
             // SAFETY: single core, CPL0; exclusive use of the selector/window.
             io_apic_id: unsafe { io_apic.id() },
             madt_id,
@@ -163,7 +168,21 @@ pub unsafe fn route_pit_through_ioapic(madt: Madt<'static>) -> Result<RoutedIrq,
             redirection_index,
             vector,
         },
-    })
+    ))
+}
+
+/// Route ISA IRQ 0 (the 8254) through the I/O APIC, leaving it masked.
+///
+/// # Safety
+///
+/// CPL0, single core, after the IDT is installed and the local APIC has been
+/// enabled in x2APIC mode.
+pub unsafe fn route_pit_through_ioapic(madt: Madt<'static>) -> Result<RoutedIrq, &'static str> {
+    // SAFETY: CPL0, x2APIC enabled; delegates to the shared ISA-IRQ router with
+    // the PIT's own interrupt stub.
+    let (io_apic, routing) =
+        unsafe { route_isa_irq(madt, PIT_ISA_IRQ, aw_ioapic_isr as *const () as u64) }?;
+    Ok(RoutedIrq { io_apic, routing })
 }
 
 /// Start the PIT and require the routed interrupt to actually arrive.

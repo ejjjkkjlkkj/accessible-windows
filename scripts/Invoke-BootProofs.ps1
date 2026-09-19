@@ -281,11 +281,42 @@ $configurations = @(
             'AW_CPU_NX_OK'
             'AW_PAGING_BASELINE_OK'
             'AW_NATIVE_FRAMEBUFFER_WRITE_OK'
+            # The framebuffer text console: it renders a known glyph into the
+            # handed-off linear framebuffer and reads every pixel of it back in the
+            # framebuffer's own colour order, matching the scaled 8x8 font bitmap -
+            # the first post-firmware output that survives on real hardware.
+            'AW_FBCON_READY width=1280 height=800'
+            'AW_FBCON_GLYPH_READBACK_OK char=A'
+            'AW_FBCON_PROOF_OK'
+            # PS/2 keyboard: real IRQ1 delivery and set-1 decode, proved by the
+            # 8042's own 0xD2 injection (the exact path a keypress takes), plus a
+            # mask/resume negative test. The input half of an accessible boot.
+            'AW_KBD_CONTROLLER_OK'
+            'AW_KBD_KEY name=space'
+            'AW_KBD_KEY name=enter'
+            'AW_KBD_KEY name=up'
+            'AW_KBD_KEY name=down'
+            'AW_KBD_MASKED_STOPPED'
+            'AW_KBD_UNMASKED_RESUMED'
+            'AW_KBD_PROOF_OK'
+            # Accessible boot menu: keyboard-driven navigation and selection, the
+            # same handler the live menu uses, voiced through the screen-reader
+            # engine and rendered to the framebuffer with a visible focus bar.
+            'AW_MENU_FOCUS index=1 name="System information"'
+            'AW_MENU_SPEAK "System information, menu item, 2 of 3"'
+            'AW_MENU_SELECT name="System information"'
+            'AW_MENU_WRAP_OK'
+            'AW_MENU_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
+            'AW_FBCON_FAIL'
+            'AW_FBCON_UNAVAILABLE'
+            'AW_KBD_FAIL'
+            'AW_KBD_UNAVAILABLE'
+            'AW_MENU_FAIL'
             'AW_MEMORY_PROTECTION_FAIL'
             'AW_MEMORY_PROTECTION_SKIPPED'
             'AW_VMM_FAIL'
@@ -388,7 +419,7 @@ $configurations = @(
         QemuArgs = @('-device', 'edu')
         Required = @(
             'AW_MSI_DEVICE_FOUND'
-            'AW_MSI_PROGRAMMED vector=0x0000000000000051 address=0x00000000fee00000 data=0x0000000000000051'
+            'AW_MSI_PROGRAMMED vector=0x0000000000000052 address=0x00000000fee00000 data=0x0000000000000052'
             'AW_MSI_FIRED'
             'AW_MSI_MONOTONIC_OK'
             'AW_MSI_MASKED_STOPPED'
@@ -557,6 +588,13 @@ $configurations = @(
             'AW_HDA_STREAM_RUN'
             'AW_HDA_DMA_ADVANCED position='
             'AW_HDA_PLAYBACK_PROOF_OK'
+            # Then real spoken output: the codec is set to the 24 kHz mono speech
+            # format and one pre-recorded menu clip is streamed by DMA, the link
+            # position advancing just like the tone - the accessible menu's voice,
+            # proven to reach the codec (audibility on hardware is separate).
+            'AW_HDA_SPEECH_READY'
+            'AW_HDA_SPEECH_DMA_ADVANCED position='
+            'AW_HDA_SPEECH_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
@@ -564,6 +602,8 @@ $configurations = @(
             'AW_UEFI_HDA_FAIL'
             'AW_HDA_UNAVAILABLE'
             'AW_HDA_FAIL'
+            'AW_HDA_SPEECH_FAIL'
+            'AW_HDA_SPEECH_UNAVAILABLE'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )

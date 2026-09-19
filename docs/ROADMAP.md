@@ -82,7 +82,7 @@
 - [ ] USB hub enumeration
 - [ ] USB HID keyboard
 - [ ] USB HID pointer baseline
-- [ ] Basic framebuffer console
+- [x] Basic framebuffer console
 - [ ] ACPI power off/reboot
 - [ ] Physical boot validation on at least one AMD x64 PC
 - [ ] Physical boot validation on at least one Intel x64 PC
