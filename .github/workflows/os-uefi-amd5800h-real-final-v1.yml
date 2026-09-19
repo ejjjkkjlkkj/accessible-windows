@@ -73,12 +73,39 @@ jobs:
           rm -f "$hiiroot/hii-graph-2.EFI"
           sha256sum "$hiiroot/hii-graph.EFI"
 
+          clang $hiiflags -DQEV_INTERACTIVE_NAV=1 -c "$hiiroot/hii_graph_prompt_speech_uefi.c" -o "$hiiroot/main-nav.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$hiiroot/hii-graph-nav.EFI" "$hiiroot/main-nav.obj" "$hiiroot/units.obj"
+          test -s "$hiiroot/hii-graph-nav.EFI"
+          for marker in \
+            'HII_GRAPH_NAV_READY=PASS' \
+            'HII_GRAPH_NAV_KEY=UP' \
+            'HII_GRAPH_NAV_KEY=DOWN' \
+            'HII_GRAPH_NAV_KEY=HOME' \
+            'HII_GRAPH_NAV_KEY=END' \
+            'HII_GRAPH_NAV_KEY=PAGE_UP' \
+            'HII_GRAPH_NAV_KEY=PAGE_DOWN' \
+            'HII_GRAPH_NAV_KEY=R' \
+            'HII_GRAPH_NAV_KEY=ESC' \
+            'HII_GRAPH_NAV_SPEECH_DMA=PASS' \
+            'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
+          do
+            grep -aF "$marker" "$hiiroot/hii-graph-nav.EFI"
+          done
+          clang $hiiflags -DQEV_INTERACTIVE_NAV=1 -c "$hiiroot/hii_graph_prompt_speech_uefi.c" -o "$hiiroot/main-nav-2.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$hiiroot/hii-graph-nav-2.EFI" "$hiiroot/main-nav-2.obj" "$hiiroot/units.obj"
+          cmp "$hiiroot/hii-graph-nav.EFI" "$hiiroot/hii-graph-nav-2.EFI"
+          rm -f "$hiiroot/hii-graph-nav-2.EFI"
+          sha256sum "$hiiroot/hii-graph-nav.EFI"
+
           stage=boot/uefi-amd5800h-real-final-v1/build-artifact
           rm -rf "$stage"
           mkdir -p "$stage"
           cp "$root/graph.EFI" "$stage/graph.EFI"
           cp "$hiiroot/hii-graph.EFI" "$stage/hii-graph.EFI"
+          cp "$hiiroot/hii-graph-nav.EFI" "$stage/hii-graph-nav.EFI"
           echo AMD5800H_HII_GRAPH_EFI_BUILD=PASS
+          echo AMD5800H_HII_GRAPH_NAV_EFI_BUILD=PASS
+          echo AMD5800H_HII_GRAPH_NAV_EFI_DETERMINISM=PASS
           echo AMD5800H_HII_GRAPH_EFI_DETERMINISM=PASS
       - uses: actions/upload-artifact@v4
         with:
