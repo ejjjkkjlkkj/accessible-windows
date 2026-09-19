@@ -17,6 +17,8 @@ on:
       - 'boot/uefi-hii-platform-commit-v1/os-uefi-hii-platform-commit-v1.labproof'
       - 'boot/uefi-secure-boot-v1/os-uefi-secure-boot-v1.labproof'
       - 'boot/uefi-hii-graph-prompt-speech-v1/os-uefi-hii-graph-prompt-speech-v1.labproof'
+      - 'boot/uefi-physical-audio-v1/os-uefi-physical-audio-probe-v1.labproof'
+      - 'boot/uefi-asus-m1603qa-preflight-v1/os-uefi-asus-m1603qa-preflight-v1.labproof'
       - '.github/workflows/os-uefi-amd5800h-real-final-v1.yml'
   workflow_dispatch:
 
@@ -59,7 +61,9 @@ jobs:
           commit='boot/uefi-hii-platform-commit-v1/os-uefi-hii-platform-commit-v1.labproof'
           secure='boot/uefi-secure-boot-v1/os-uefi-secure-boot-v1.labproof'
           graph='boot/uefi-hii-graph-prompt-speech-v1/os-uefi-hii-graph-prompt-speech-v1.labproof'
-          for p in "$current" "$commit" "$secure" "$graph"; do
+          physicalAudio='boot/uefi-physical-audio-v1/os-uefi-physical-audio-probe-v1.labproof'
+          asusPreflight='boot/uefi-asus-m1603qa-preflight-v1/os-uefi-asus-m1603qa-preflight-v1.labproof'
+          for p in "$current" "$commit" "$secure" "$graph" "$physicalAudio" "$asusPreflight"; do
             test -s "$p"
             grep -Fx 'proof = PASS' "$p"
           done
@@ -72,6 +76,15 @@ jobs:
           grep -Fx 'proof-unsigned-negative-control = PASS' "$secure"
           grep -Fx 'proof-signed-positive-control = PASS' "$secure"
           grep -Fx 'proof-HII-prompt-speech-HDA = PASS' "$graph"
+          grep -Fx 'proof-physical-UEFI-speech = not-established' "$physicalAudio"
+          grep -F 'proof-analog-controller-instance-id = PCI\\VEN_1022&DEV_15E3' "$physicalAudio"
+          grep -F 'proof-analog-codec-instance-id = HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256' "$physicalAudio"
+          grep -Fx 'proof-hardware-identity = PASS' "$asusPreflight"
+          grep -Fx 'proof-uefi-presence = PASS' "$asusPreflight"
+          grep -Fx 'proof-audio-inventory = PASS' "$asusPreflight"
+          grep -Fx 'proof-reboot = false' "$asusPreflight"
+          grep -Fx 'proof-setting-mutation = false' "$asusPreflight"
+          echo PHYSICAL_ASUS_READONLY_PROOFS=PASS
           echo UEFI_ACCESSIBILITY_DEPENDENCIES=PASS
           echo HII_CURRENT_VALUE_PROOF=PASS
           echo HII_PERSISTENT_COMMIT_PROOF=PASS
@@ -1345,6 +1358,8 @@ jobs:
           $commitProof='boot/uefi-hii-platform-commit-v1/os-uefi-hii-platform-commit-v1.labproof'
           $secureBootProof='boot/uefi-secure-boot-v1/os-uefi-secure-boot-v1.labproof'
           $graphProof='boot/uefi-hii-graph-prompt-speech-v1/os-uefi-hii-graph-prompt-speech-v1.labproof'
+          $physicalAudioProof='boot/uefi-physical-audio-v1/os-uefi-physical-audio-probe-v1.labproof'
+          $asusPreflightProof='boot/uefi-asus-m1603qa-preflight-v1/os-uefi-asus-m1603qa-preflight-v1.labproof'
           $workflow='.github/workflows/os-uefi-amd5800h-real-final-v1.yml'
           $testedBuilder=(git rev-parse "$($env:GITHUB_SHA):$builder").Trim()
           $testedPromptBuilder=(git rev-parse "$($env:GITHUB_SHA):$promptBuilder").Trim()
@@ -1354,6 +1369,8 @@ jobs:
           $testedCommitProof=(git rev-parse "$($env:GITHUB_SHA):$commitProof").Trim()
           $testedSecureBootProof=(git rev-parse "$($env:GITHUB_SHA):$secureBootProof").Trim()
           $testedGraphProof=(git rev-parse "$($env:GITHUB_SHA):$graphProof").Trim()
+          $testedPhysicalAudioProof=(git rev-parse "$($env:GITHUB_SHA):$physicalAudioProof").Trim()
+          $testedAsusPreflightProof=(git rev-parse "$($env:GITHUB_SHA):$asusPreflightProof").Trim()
           $testedWorkflow=(git rev-parse "$($env:GITHUB_SHA):$workflow").Trim()
           git fetch origin os
           git checkout -B os origin/os
@@ -1365,6 +1382,8 @@ jobs:
           if($testedCommitProof -ne (git rev-parse "origin/os:$commitProof").Trim()){ 'AMD_FINAL_STALE_PLATFORM_COMMIT_PROOF=SKIP'; exit 0 }
           if($testedSecureBootProof -ne (git rev-parse "origin/os:$secureBootProof").Trim()){ 'AMD_FINAL_STALE_SECURE_BOOT_PROOF=SKIP'; exit 0 }
           if($testedGraphProof -ne (git rev-parse "origin/os:$graphProof").Trim()){ 'AMD_FINAL_STALE_HII_GRAPH_PROOF=SKIP'; exit 0 }
+          if($testedPhysicalAudioProof -ne (git rev-parse "origin/os:$physicalAudioProof").Trim()){ 'AMD_FINAL_STALE_PHYSICAL_AUDIO_PROOF=SKIP'; exit 0 }
+          if($testedAsusPreflightProof -ne (git rev-parse "origin/os:$asusPreflightProof").Trim()){ 'AMD_FINAL_STALE_ASUS_PREFLIGHT_PROOF=SKIP'; exit 0 }
           if($testedWorkflow -ne (git rev-parse "origin/os:$workflow").Trim()){ 'AMD_FINAL_STALE_WORKFLOW=SKIP'; exit 0 }
           $lines=Get-Content $proof | Where-Object { $_ -notmatch '^proof(-| = )' -and $_ -notmatch '^final-proof-state = ' }
           $vm='NOT_FOUND'
@@ -1414,6 +1433,9 @@ jobs:
           $lines += "proof-platform-commit-proof-blob = $testedCommitProof"
           $lines += "proof-secure-boot-proof-blob = $testedSecureBootProof"
           $lines += "proof-hii-graph-proof-blob = $testedGraphProof"
+          $lines += "proof-physical-audio-proof-blob = $testedPhysicalAudioProof"
+          $lines += "proof-asus-preflight-proof-blob = $testedAsusPreflightProof"
+          $lines += 'proof-physical-asus-readonly-evidence = PASS'
           $lines += 'proof = PENDING_PHYSICAL_PRE_OS_AUDIO'
           $lines += 'proof-virtualization-suite = PASS'
           $lines += "proof-run = $env:GITHUB_RUN_ID"
