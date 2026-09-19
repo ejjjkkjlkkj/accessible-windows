@@ -74,6 +74,7 @@ typedef u64 (*locate_protocol_fn)(const void *protocol, void *registration, void
 typedef u64 (*handle_protocol_fn)(void *handle, const void *protocol, void **interface_out);
 typedef u64 (*file_open_fn)(void *self, void **new_handle, const u16 *name, u64 open_mode, u64 attributes);
 typedef u64 (*file_close_fn)(void *self);
+typedef u64 (*file_delete_fn)(void *self);
 typedef u64 (*file_write_fn)(void *self, usize *buffer_size, void *buffer);
 typedef u64 (*file_flush_fn)(void *self);
 
@@ -89,7 +90,7 @@ typedef struct file_protocol {
     u64 revision;
     file_open_fn open;
     file_close_fn close;
-    void *delete_file;
+    file_delete_fn delete_file;
     void *read;
     file_write_fn write;
     void *get_position;
@@ -262,8 +263,23 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
         !fs || !fs->open_volume) return 0;
     if (fs->open_volume(fs, &root) != 0 || !root || !root->open) return 0;
 
-    const u64 open_mode = 0x8000000000000000ull | 0x2ull | 0x1ull;
-    if (root->open(root, (void **)&file, filename, open_mode, 0) != 0 ||
+    /*
+     * EFI_FILE_MODE_CREATE does not guarantee truncation when a file already
+     * exists. Delete the previous witness first so a shorter second proof can
+     * never retain stale trailing fields from an earlier physical boot.
+     */
+    const u64 rw_mode = 0x2ull | 0x1ull;
+    file_protocol *old_file = 0;
+    if (root->open(root, (void **)&old_file, filename, rw_mode, 0) == 0 && old_file) {
+        if (!old_file->delete_file || old_file->delete_file(old_file) != 0) {
+            if (old_file->close) old_file->close(old_file);
+            if (root->close) root->close(root);
+            return 0;
+        }
+    }
+
+    const u64 create_mode = 0x8000000000000000ull | rw_mode;
+    if (root->open(root, (void **)&file, filename, create_mode, 0) != 0 ||
         !file || !file->write) {
         if (root->close) root->close(root);
         return 0;
