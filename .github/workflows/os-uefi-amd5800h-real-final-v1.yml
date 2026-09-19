@@ -35,7 +35,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-      - name: Cancel older AMD closure runs
+      - name: Cancel stale AMD hardware runs
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -43,8 +43,9 @@ jobs:
           set -euo pipefail
           export current="$GITHUB_RUN_ID"
           export current_number="$GITHUB_RUN_NUMBER"
+          export current_created_at="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs?branch=os&per_page=100" --jq \
-            '.workflow_runs[] | select(.name=="os-uefi-amd5800h-real-final-v1") | select(.run_number < (env.current_number|tonumber)) | select(.status=="queued" or .status=="pending" or .status=="in_progress") | .id' \
+            '.workflow_runs[] | select(.status=="queued" or .status=="pending" or .status=="in_progress") | select((.name=="os-uefi-amd5800h-real-final-v1" and .run_number < (env.current_number|tonumber)) or ((.name=="os-uefi-physical-audio-probe-v1" or .name=="os-uefi-asus-m1603qa-preflight-v1") and .created_at < env.current_created_at)) | .id' \
             | while read -r run; do
                 test -n "$run" || continue
                 echo "Cancelling older AMD closure run $run"
