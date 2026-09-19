@@ -9,7 +9,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$KernelRoot = "C:\accessible-windows-gdt-idt-v3\kernel\x86_64"
+$KernelRoot = Join-Path (Split-Path $PSScriptRoot -Parent) "kernel\x86_64"
 $TargetTriple = "x86_64-unknown-none"
 
 $cargo = (Get-Command cargo -ErrorAction Stop).Source
