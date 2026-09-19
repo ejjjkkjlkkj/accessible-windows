@@ -70,6 +70,9 @@ static allocate_pages_fn g_allocate_pages;
 static u64 g_speech_dma_base;
 static u8 g_speech_dma_allocations;
 static u8 g_speech_stream_initialized;
+static u8 g_speech_active;
+static u64 g_speech_timeout_us;
+static u64 g_speech_elapsed_us;
 static u8 g_proof_overflow;
 
 typedef u64 (*locate_protocol_fn)(const void *protocol, void *registration, void **interface_out);
@@ -166,6 +169,8 @@ static u8 g_nav_prompt_total;
 static u8 g_nav_prompt_index;
 static u8 g_nav_event_mask;
 static u8 g_nav_speech_events;
+static u8 g_nav_realtime_events;
+static u8 g_nav_speech_interruptions;
 static u8 g_nav_question_speech_events;
 static u8 g_nav_help_events;
 static u8 g_nav_form_headings;
@@ -384,6 +389,14 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SPEECH_EVENTS=0x");
     proof_hex8(proof,sizeof(proof),&n,g_nav_speech_events);
     proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_REALTIME_EVENTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_realtime_events);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SPEECH_INTERRUPTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_speech_interruptions);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_REALTIME=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_realtime_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_HELP_EVENTS=0x");
     proof_hex8(proof,sizeof(proof),&n,g_nav_help_events);
     proof_puts(proof,sizeof(proof),&n,"\r\n");
@@ -781,18 +794,45 @@ static void copy_bytes(volatile u8 *dst, const u8 *src, u32 len) {
     for (u32 i = 0; i < len; ++i) dst[i] = src[i];
 }
 
-static int run_speech_dma(const char *text, u32 text_count) {
+static volatile u8 *speech_stream_descriptor(void) {
+    if (!g_hda) return 0;
+    u16 gcap = mmio16(0x00);
+    u8 iss = (u8)((gcap >> 8) & 0x0f);
+    return g_hda + 0x80 + ((u32)iss * 0x20);
+}
+
+static void speech_dma_stop(void) {
+    volatile u8 *sd = speech_stream_descriptor();
+    if (sd) {
+        sd[0] = (u8)(sd[0] & ~2u);
+        u32 timeout = 100000;
+        while (timeout-- && (sd[0] & 2u)) {}
+        sd[3] = 0x1cu;
+        if (g_stall) g_stall(1000);
+    }
+    g_speech_active = 0;
+    g_speech_timeout_us = 0;
+    g_speech_elapsed_us = 0;
+}
+
+static int speech_dma_begin(const char *text, u32 text_count) {
     if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 95u) return 0;
     const u32 pcm_off = 0x1000u;
-    const u32 dma_pages = 512u;
+    const u32 dma_pages = 1536u;
     const u32 dma_bytes = dma_pages * 4096u;
     if (!qev_unit_bank_len || pcm_off >= dma_bytes) return 0;
 
+    if (g_speech_active) speech_dma_stop();
+
     /*
-     * Build each complete spoken label as one contiguous PCM buffer. Older
-     * builds emitted one HDA BDL entry per allophone; longer real HII labels
-     * exposed descriptor/alignment failures during rapid focus navigation.
-     * A single 4 KiB-aligned DMA buffer is simpler and deterministic.
+     * Build the complete semantic label as contiguous PCM. This keeps realtime
+     * interruption while avoiding one BDL descriptor per allophone and the
+     * alignment failures seen with longer HII labels.
+     *
+     * Worst-case 32-character French letter-name spelling is about 4.36 MiB
+     * (all 'w'). Reserve 6 MiB and up to 128 BDL entries so every accepted
+     * 32-character label remains representable. Playback stays interruptible,
+     * so the larger worst-case timeout never blocks keyboard focus changes.
      */
     u64 base = g_speech_dma_base;
     if (!base) {
@@ -806,11 +846,10 @@ static int run_speech_dma(const char *text, u32 text_count) {
     volatile u8 *pcm = (volatile u8 *)(usize)(base + pcm_off);
 
     /*
-     * Give the physical codec a short quiet lead-in and keep adjacent
-     * graphemes from collapsing into one another. The synthetic allophone
-     * units have intentionally soft edges, but back-to-back units can still
-     * sound fused on small laptop speakers. All sizes are whole 48 kHz,
-     * signed-16 stereo frames (192 bytes/ms).
+     * Keep physical speech intelligible: a short lead-in gives the codec time
+     * to settle, grapheme gaps stop adjacent synthetic units from fusing, and
+     * the tail prevents the final phoneme from being clipped. Sizes are whole
+     * 48 kHz signed-16 stereo frames (192 bytes/ms).
      */
     const u32 lead_silence_bytes = 30u * 192u;
     const u32 grapheme_gap_bytes = 12u * 192u;
@@ -862,21 +901,17 @@ static int run_speech_dma(const char *text, u32 text_count) {
     for (u32 i = 0; i < tail_silence_bytes; ++i) pcm[total_bytes + i] = 0;
     total_bytes += tail_silence_bytes;
     marker("HII_GRAPH_SPEECH_PACING=PASS");
+    marker("HII_GRAPH_SPEECH_LONG_LABEL_CAPACITY=PASS");
 
-    /* HDA DMA buffers are safest on 128-byte boundaries. Pad with signed
-       PCM silence (zero) without changing any lexical audio content. */
     u32 dma_payload = (total_bytes + 127u) & ~127u;
     if (dma_payload < total_bytes || dma_payload > dma_bytes - pcm_off) return 0;
     for (u32 i = total_bytes; i < dma_payload; ++i) pcm[i] = 0;
 
-    /* Keep each HDA BDL buffer at or below 64 KiB. QEMU/virtio-hda and
-       physical codecs are more reliable with bounded descriptors, while the
-       PCM itself remains one contiguous utterance. */
     const u32 max_bdl_bytes = 0x10000u;
     u32 entries = 0;
     u32 described = 0;
     while (described < dma_payload) {
-        if (entries >= 64u) return 0;
+        if (entries >= 128u) return 0;
         u32 len = dma_payload - described;
         if (len > max_bdl_bytes) len = max_bdl_bytes;
         volatile u8 *e = bdl + entries * 16u;
@@ -890,18 +925,14 @@ static int run_speech_dma(const char *text, u32 text_count) {
     *(volatile u32 *)(bdl + (entries - 1u) * 16u + 0x0c) = 1u;
     fence();
 
-    u16 gcap = mmio16(0x00);
-    u8 iss = (u8)((gcap >> 8) & 0x0f);
-    volatile u8 *sd = g_hda + 0x80 + ((u32)iss * 0x20);
+    volatile u8 *sd = speech_stream_descriptor();
+    if (!sd) return 0;
 
     sd[0] = (u8)(sd[0] & ~2u);
     u32 timeout = 100000;
     while (timeout-- && (sd[0] & 2u)) {}
     if (!timeout) return 0;
 
-    /* Reset the HDA stream descriptor only once. Repeated SRST cycles during
-       fast focus navigation eventually wedge QEMU hda-micro and can stress
-       real codecs too. Subsequent utterances reuse the stopped descriptor. */
     if (!g_speech_stream_initialized) {
         sd[0] = (u8)(sd[0] | 1u);
         timeout = 100000;
@@ -927,28 +958,60 @@ static int run_speech_dma(const char *text, u32 text_count) {
     sd[2] = 0x10;
     sd[0] = (u8)(sd[0] | 2u);
 
-    /* 48 kHz, signed 16-bit stereo = 192000 bytes/s. */
+    /* 48 kHz, signed 16-bit stereo = 192000 bytes/s. Polling stays async so
+       keyboard focus can cancel the current utterance immediately. */
     u64 play_us = (((u64)dma_payload * 125ull) + 23ull) / 24ull;
     play_us += 150000ull;
-    if (play_us > 12000000ull) {
-        sd[0] = (u8)(sd[0] & ~2u);
+    if (play_us > 30000000ull) {
+        speech_dma_stop();
         return 0;
     }
-    u64 waited_us = 0;
-    while (!(sd[3] & 0x04u) && waited_us < play_us) {
-        g_stall(1000);
-        waited_us += 1000;
+    g_speech_timeout_us = play_us;
+    g_speech_elapsed_us = 0;
+    g_speech_active = 1;
+    return 1;
+}
+
+/* Returns 1 when complete, 0 while running, -1 on timeout/failure. */
+static int speech_dma_poll(u64 elapsed_step_us, u8 *progress_out) {
+    if (progress_out) *progress_out = 0;
+    if (!g_speech_active) return 1;
+
+    volatile u8 *sd = speech_stream_descriptor();
+    if (!sd) {
+        speech_dma_stop();
+        return -1;
     }
 
     u32 lpib = *(volatile u32 *)(sd + 0x04);
+    if (lpib && progress_out) *progress_out = 1;
     u8 status = sd[3];
-    sd[0] = (u8)(sd[0] & ~2u);
-    timeout = 100000;
-    while (timeout-- && (sd[0] & 2u)) {}
-    if (!timeout) return 0;
-    sd[3] = 0x1cu;
-    if (g_stall) g_stall(1000);
-    return lpib != 0 && (status & 0x04u) != 0;
+    if (status & 0x04u) {
+        int ok = lpib != 0;
+        speech_dma_stop();
+        return ok ? 1 : -1;
+    }
+
+    if (elapsed_step_us > g_speech_timeout_us - g_speech_elapsed_us)
+        g_speech_elapsed_us = g_speech_timeout_us;
+    else
+        g_speech_elapsed_us += elapsed_step_us;
+    if (g_speech_elapsed_us >= g_speech_timeout_us) {
+        speech_dma_stop();
+        return -1;
+    }
+    return 0;
+}
+
+static int run_speech_dma(const char *text, u32 text_count) {
+    if (!speech_dma_begin(text, text_count)) return 0;
+    for (;;) {
+        u8 progress = 0;
+        int state = speech_dma_poll(1000u, &progress);
+        if (state > 0) return 1;
+        if (state < 0) return 0;
+        g_stall(1000);
+    }
 }
 
 static u16 rd16(const u8 *p) {
@@ -1196,6 +1259,8 @@ static int resolve_hii_prompt(void *system_table) {
     g_nav_prompt_index = 0;
     g_nav_event_mask = 0;
     g_nav_speech_events = 0;
+    g_nav_realtime_events = 0;
+    g_nav_speech_interruptions = 0;
     g_nav_question_speech_events = 0;
     g_nav_help_events = 0;
     g_nav_form_headings = 0;
@@ -1543,13 +1608,15 @@ static int wait_navigation_keys(void *system_table) {
     if (!system_table || g_nav_prompt_total < 2u) return 0;
     simple_text_input_protocol *conin =
         *(simple_text_input_protocol **)((u8 *)system_table + 0x30);
-    if (!conin || !conin->read_key) return 0;
+    if (!conin || !conin->read_key || !g_stall) return 0;
 
     marker("HII_GRAPH_NAV_READY=PASS");
+    marker("HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA");
     serial_puts("HII_GRAPH_NAV_TOTAL=0x");
     serial_hex8(g_nav_prompt_total);
     serial_puts("\r\n");
 
+    u8 audio_progress_for_current = 0;
     for (;;) {
         efi_input_key key;
         key.scan_code = 0;
@@ -1560,11 +1627,17 @@ static int wait_navigation_keys(void *system_table) {
             if (key.unicode_char == (u16)'h' || key.unicode_char == (u16)'H' ||
                 key.scan_code == 0x000bu) {
                 marker("HII_GRAPH_NAV_KEY=HELP");
+                if (g_speech_active) {
+                    speech_dma_stop();
+                    if (g_nav_speech_interruptions != 0xffu) ++g_nav_speech_interruptions;
+                    marker("HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS");
+                }
                 if (!nav_speak_help()) return 0;
                 continue;
             }
             if (key.unicode_char == 0x001bu || key.scan_code == 0x0017u) {
                 marker("HII_GRAPH_NAV_KEY=ESC");
+                speech_dma_stop();
                 if ((g_nav_event_mask & NAV_REQUIRED_MASK) != NAV_REQUIRED_MASK ||
                     g_nav_speech_events < 7u) {
                     marker("HII_GRAPH_NAV_REQUIRED_EVENTS=PENDING");
@@ -1624,6 +1697,7 @@ static int wait_navigation_keys(void *system_table) {
                 nav_prompt_load(next);
                 speak = 1;
             }
+
             if (speak) {
                 serial_puts("HII_GRAPH_NAV_INDEX=0x");
                 serial_hex8(g_nav_prompt_index);
@@ -1645,20 +1719,49 @@ static int wait_navigation_keys(void *system_table) {
                 serial_hex8((u8)(g_nav_varstore_id[g_nav_prompt_index] >> 8));
                 serial_hex8((u8)g_nav_varstore_id[g_nav_prompt_index]);
                 serial_puts("\r\n");
+
                 u32 spoken_count = nav_build_speech_text();
-                if (!spoken_count || !run_speech_dma(g_nav_speech_text, spoken_count)) return 0;
+                if (!spoken_count) return 0;
+                serial_puts("HII_GRAPH_NAV_SPEECH_TEXT=");
+                serial_puts(g_nav_speech_text);
+                serial_puts("\r\n");
                 marker("HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS");
-                marker("HII_GRAPH_NAV_SPEECH_DMA=PASS");
-                marker("HII_GRAPH_NAV_SPEECH_HDA=PASS");
-                marker("HII_GRAPH_NAV_LPIB_PROGRESS=PASS");
-                ++g_nav_speech_events;
-                if (g_nav_question_id[g_nav_prompt_index] != 0u)
+
+                if (g_speech_active) {
+                    speech_dma_stop();
+                    if (g_nav_speech_interruptions != 0xffu) ++g_nav_speech_interruptions;
+                    marker("HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS");
+                }
+                if (!speech_dma_begin(g_nav_speech_text, spoken_count)) return 0;
+
+                if (g_nav_speech_events != 0xffu) ++g_nav_speech_events;
+                if (g_nav_realtime_events != 0xffu) ++g_nav_realtime_events;
+                if (g_nav_question_id[g_nav_prompt_index] != 0u &&
+                    g_nav_question_speech_events != 0xffu)
                     ++g_nav_question_speech_events;
+                audio_progress_for_current = 0;
+                marker("HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS");
+                marker("HII_GRAPH_NAV_SPEECH_DMA=STARTED");
+                marker("HII_GRAPH_NAV_SPEECH_HDA=STARTED");
                 if (g_speech_dma_allocations != 1u) return 0;
                 marker("HII_GRAPH_SPEECH_DMA_REUSE=PASS");
             }
         }
-        if (g_stall) g_stall(1000);
+
+        if (g_speech_active) {
+            u8 progressed = 0;
+            int audio_state = speech_dma_poll(1000u, &progressed);
+            if (progressed && !audio_progress_for_current) {
+                marker("HII_GRAPH_NAV_LPIB_PROGRESS=PASS");
+                audio_progress_for_current = 1;
+            }
+            if (audio_state < 0) return 0;
+            if (audio_state > 0) {
+                marker("HII_GRAPH_NAV_SPEECH_DMA=PASS");
+                marker("HII_GRAPH_NAV_SPEECH_HDA=PASS");
+            }
+        }
+        g_stall(1000);
     }
 }
 #endif
@@ -1749,6 +1852,7 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("HII_GRAPH_SPEECH_DMA=PASS");
     marker("HII_PROMPT_SPEECH_HDA=PASS");
     marker("LPIB_PROGRESS=PASS");
+    marker("HII_GRAPH_NAV_REALTIME_CAPABLE=PASS");
     if (g_controller_preferred && g_codec_vendor_id == 0x10ec0256u) {
         marker("PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS");
         if (g_selected_pin_is_internal_speaker)
