@@ -590,19 +590,40 @@ static int unmute_input_amp(u8 nid, u8 index) {
     return 1;
 }
 
+static int wait_node_d0(u8 nid) {
+    /* Get Power State: PS-Set is bits 3:0, PS-Act is bits 7:4 and
+       PS-Error is bit 8. A real codec may need time to complete D3->D0. */
+    for (u32 attempt = 0; attempt < 100u; ++attempt) {
+        u32 state = verb12(nid, 0xf05, 0);
+        if (state == INVALID_RESP || (state & 0x00000100u)) return 0;
+        if ((state & 0x0fu) == 0u && ((state >> 4) & 0x0fu) == 0u) return 1;
+        if (g_stall) g_stall(1000);
+    }
+    return 0;
+}
+
+static int power_up_afg(void) {
+    if (g_afg == INVALID_NID) return 0;
+    u32 supported = get_param(g_afg, 0x0f);
+    /* Some virtual codecs expose no controllable AFG power states. */
+    if (supported == INVALID_RESP || !(supported & 0x01u)) return 1;
+    if (verb12(g_afg, 0x705, 0x00) == INVALID_RESP) return 0;
+    return wait_node_d0(g_afg);
+}
+
 static int power_up_route_widget(u8 nid) {
     /* Audio Widget Capabilities bit 10 advertises power-state control. */
     if (!(g_widget_cap[nid] & 0x00000400u)) return 1;
     u32 supported = get_param(nid, 0x0f);
     if (supported == INVALID_RESP || !(supported & 0x01u)) return 0;
     if (verb12(nid, 0x705, 0x00) == INVALID_RESP) return 0;
-    if (g_stall) g_stall(100);
-    u32 state = verb12(nid, 0xf05, 0);
-    if (state == INVALID_RESP || (state & 0x0fu) != 0) return 0;
-    return 1;
+    return wait_node_d0(nid);
 }
 
 static int configure_output_path(u8 pin, u8 dac) {
+    /* The Function Group constrains widget PS-Act, so request AFG D0 first. */
+    if (!power_up_afg()) return 0;
+
     /* Put every power-managed route widget in D0 before touching amps. */
     u8 cur = dac;
     for (;;) {
