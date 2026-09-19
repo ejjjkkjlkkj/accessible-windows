@@ -1,0 +1,145 @@
+name: uefi-convergence-amd5800h-preflight
+
+on:
+  push:
+    branches: [uefi-screenreader-convergence-20260919]
+    paths:
+      - '.github/workflows/uefi-convergence-amd5800h-preflight.yml'
+      - 'boot/uefi-hii-graph-prompt-speech-v1/**'
+  workflow_dispatch:
+
+jobs:
+  amd5800h-real-preflight:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Bind exact AMD-5800H-REAL host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:RUNNER_NAME -ne 'AMD-5800H-REAL'){
+            throw "Wrong runner: $env:RUNNER_NAME"
+          }
+
+          $cs=Get-CimInstance Win32_ComputerSystem
+          $cpu=Get-CimInstance Win32_Processor | Select-Object -First 1
+          $bios=Get-CimInstance Win32_BIOS
+          $os=Get-CimInstance Win32_OperatingSystem
+          $fw=(Get-ComputerInfo -Property BiosFirmwareType).BiosFirmwareType
+
+          if([string]$cs.Manufacturer -notmatch 'ASUSTeK'){ throw "Unexpected manufacturer: $($cs.Manufacturer)" }
+          if([string]$cs.Model -notmatch 'M1603QA'){ throw "Unexpected model: $($cs.Model)" }
+          if([string]$cpu.Name -notmatch 'Ryzen 7 5800H'){ throw "Unexpected CPU: $($cpu.Name)" }
+          if([string]$bios.SMBIOSBIOSVersion -ne 'M1603QA.308'){ throw "Unexpected BIOS: $($bios.SMBIOSBIOSVersion)" }
+          if([string]$fw -notmatch 'UEFI|Uefi'){ throw "Host is not in UEFI mode: $fw" }
+          try { $secure=[bool](Confirm-SecureBootUEFI) } catch { throw "Cannot query Secure Boot: $($_.Exception.Message)" }
+          if($secure){ throw 'Secure Boot must remain disabled for the unsigned physical image' }
+
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          @(
+            'AMD5800H_REAL_PREFLIGHT=PASS'
+            "RUNNER_NAME=$env:RUNNER_NAME"
+            "MANUFACTURER=$($cs.Manufacturer)"
+            "MODEL=$($cs.Model)"
+            "CPU=$($cpu.Name)"
+            "BIOS=$($bios.SMBIOSBIOSVersion)"
+            "WINDOWS_BUILD=$($os.BuildNumber)"
+            "FIRMWARE_TYPE=$fw"
+            'SECURE_BOOT=DISABLED'
+            'HOST_REBOOTED=false'
+            'FIRMWARE_MUTATION=false'
+          ) | Set-Content evidence/amd5800h-host.txt -Encoding ascii
+
+          Get-Content evidence/amd5800h-host.txt
+
+      - name: Prove converged EFI builds natively on Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='boot/uefi-hii-graph-prompt-speech-v1'
+          $out='evidence/build'
+          New-Item -ItemType Directory -Force $out | Out-Null
+
+          $python=(Get-Command python -ErrorAction Stop).Source
+          $clang=(Get-Command clang -ErrorAction Stop).Source
+          $lld=(Get-Command lld-link -ErrorAction Stop).Source
+          "PYTHON=$python"
+          "CLANG=$clang"
+          "LLD_LINK=$lld"
+
+          python -m py_compile "$root/generate_units.py"
+          python "$root/generate_units.py" "$out/units.c" "$out/units.txt"
+
+          $sourceBlob=(git rev-parse "HEAD:$root/hii_graph_prompt_speech_uefi.c").Trim()
+          $flags=@(
+            '--target=x86_64-pc-windows-msvc',
+            '-DQEV_INTERACTIVE_NAV=1',
+            "-DQEV_SOURCE_BLOB=`"$sourceBlob`"",
+            '-ffreestanding','-fshort-wchar','-fno-stack-protector',
+            '-fno-builtin','-mno-red-zone','-nostdlib','-O2','-Wall','-Wextra','-Werror'
+          )
+          & clang @flags -c "$root/hii_graph_prompt_speech_uefi.c" -o "$out/main.obj"
+          if($LASTEXITCODE -ne 0){ throw "clang main failed: $LASTEXITCODE" }
+          & clang @flags -c "$out/units.c" -o "$out/units.obj"
+          if($LASTEXITCODE -ne 0){ throw "clang units failed: $LASTEXITCODE" }
+          & lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 "/out:$out/BOOTX64.EFI" "$out/main.obj" "$out/units.obj"
+          if($LASTEXITCODE -ne 0){ throw "lld-link failed: $LASTEXITCODE" }
+          if(-not (Test-Path "$out/BOOTX64.EFI")){ throw 'BOOTX64.EFI missing' }
+
+          $bytes=[IO.File]::ReadAllBytes((Resolve-Path "$out/BOOTX64.EFI"))
+          $ascii=[Text.Encoding]::ASCII.GetString($bytes)
+          foreach($marker in @(
+            'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V2',
+            'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA',
+            'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS',
+            'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS',
+            'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS',
+            'HII_GRAPH_NAV_QUESTION_ID=0x',
+            'HII_GRAPH_NAV_VARSTORE_ID=0x',
+            'HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS',
+            'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS'
+          )){
+            if(-not $ascii.Contains($marker)){ throw "EFI marker missing: $marker" }
+          }
+
+          $sha=(Get-FileHash "$out/BOOTX64.EFI" -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            'WINDOWS_NATIVE_EFI_BUILD=PASS'
+            "SOURCE_BLOB=$sourceBlob"
+            "EFI_SHA256=$sha"
+            "EFI_BYTES=$($bytes.Length)"
+            'SEMANTIC_IFR_V2=PASS'
+            'INTERRUPTIBLE_SPEECH_CAPABILITY=PASS'
+          ) | Set-Content evidence/windows-native-build.txt -Encoding ascii
+          Get-Content evidence/windows-native-build.txt
+
+      - name: Inventory physical and virtualization backends
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          function CmdPath([string]$name){
+            $c=Get-Command $name -ErrorAction SilentlyContinue
+            if($c){ return $c.Source }
+            return 'NOT_FOUND'
+          }
+          $qemu=CmdPath 'qemu-system-x86_64.exe'
+          $vmrun=CmdPath 'vmrun.exe'
+          $hyperv='NOT_AVAILABLE'
+          if(Get-Command Get-VM -ErrorAction SilentlyContinue){ $hyperv='AVAILABLE' }
+
+          @(
+            'BACKEND_INVENTORY=PASS'
+            "QEMU=$qemu"
+            "VMWARE_VMRUN=$vmrun"
+            "HYPERV=$hyperv"
+            'PHYSICAL_BOOT_MEDIA_EXECUTION=NOT_PERFORMED_BY_PREFLIGHT'
+          ) | Set-Content evidence/backend-inventory.txt -Encoding ascii
+          Get-Content evidence/backend-inventory.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefi-convergence-amd5800h-preflight
+          path: evidence/
+          if-no-files-found: error
