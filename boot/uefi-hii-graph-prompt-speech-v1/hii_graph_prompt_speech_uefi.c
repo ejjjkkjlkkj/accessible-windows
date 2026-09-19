@@ -1636,14 +1636,13 @@ static int wait_navigation_keys(void *system_table) {
             }
             if (key.unicode_char == 0x001bu || key.scan_code == 0x0017u) {
                 marker("HII_GRAPH_NAV_KEY=ESC");
-                if (g_nav_scope_depth[g_nav_prompt_index] != 0u) {
-                    u8 parent = nav_find_parent(g_nav_prompt_index);
-                    if (parent != g_nav_prompt_index) {
-                        nav_prompt_load(parent);
-                        ++g_nav_back_events;
-                        marker("HII_GRAPH_NAV_BACK_PARENT=PASS");
-                        speak = 1;
-                    }
+                u8 parent = nav_find_parent(g_nav_prompt_index);
+                if (g_nav_scope_depth[g_nav_prompt_index] != 0u &&
+                    parent != g_nav_prompt_index) {
+                    nav_prompt_load(parent);
+                    ++g_nav_back_events;
+                    marker("HII_GRAPH_NAV_BACK_PARENT=PASS");
+                    speak = 1;
                 } else {
                     if ((g_nav_event_mask & NAV_REQUIRED_MASK) != NAV_REQUIRED_MASK ||
                         g_nav_speech_events < 7u) {
