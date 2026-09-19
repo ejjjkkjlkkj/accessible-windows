@@ -548,15 +548,28 @@ jobs:
             '-serial',"file:$serial",
             '-parallel','none','-net','none','-no-reboot','-no-shutdown'
           )
-          $p=Start-Process -FilePath $env:QEMU_EXE -ArgumentList $args -PassThru -WindowStyle Hidden
+          $stdout=Join-Path $rt 'qemu.stdout.txt'
+          $stderr=Join-Path $rt 'qemu.stderr.txt'
+          $p=Start-Process -FilePath $env:QEMU_EXE -ArgumentList $args -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           try {
             $deadline=[DateTime]::UtcNow.AddSeconds(50)
-            $raw=''
+            [string]$raw=''
             do {
               Start-Sleep -Milliseconds 100
-              if(Test-Path $serial){ $raw=Get-Content $serial -Raw -ErrorAction SilentlyContinue }
+              if(Test-Path $serial){
+                $content=Get-Content $serial -Raw -ErrorAction SilentlyContinue
+                if($null -ne $content){ $raw=[string]$content }
+              }
               if($raw -match 'STATUS=BLOCKED'){ throw "PC QEMU current-value firmware blocked: $raw" }
+              if($p.HasExited -and $raw -notmatch 'STATUS=PASS'){
+                $err=if(Test-Path $stderr){ Get-Content $stderr -Raw -ErrorAction SilentlyContinue }else{''}
+                throw "PC QEMU exited before PASS (code=$($p.ExitCode)): $err"
+              }
             } while([DateTime]::UtcNow -lt $deadline -and $raw -notmatch 'STATUS=PASS')
+            if($raw -notmatch 'STATUS=PASS'){
+              $err=if(Test-Path $stderr){ Get-Content $stderr -Raw -ErrorAction SilentlyContinue }else{''}
+              throw "PC QEMU current-value timeout. serial=$raw stderr=$err"
+            }
 
             foreach($marker in @(
               'CONFIG_ROUTING_EXPORT_CONFIG=PASS',
