@@ -1729,11 +1729,13 @@ static int wait_navigation_keys(void *system_table) {
                 if (!spoken_count || !run_speech_dma(g_nav_speech_text, spoken_count)) return 0;
                 marker("HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS");
                 marker("HII_GRAPH_NAV_SPEECH_DMA=PASS");
-                marker("HII_GRAPH_NAV_SPEECH_HDA=PASS");
-                if (g_speech_last_preempted)
+                if (g_speech_last_preempted) {
+                    marker("HII_GRAPH_NAV_SPEECH_HDA=PREEMPTED");
                     marker("HII_GRAPH_NAV_LPIB_PROGRESS=PREEMPTED");
-                else
+                } else {
+                    marker("HII_GRAPH_NAV_SPEECH_HDA=PASS");
                     marker("HII_GRAPH_NAV_LPIB_PROGRESS=PASS");
+                }
                 ++g_nav_speech_events;
                 if (g_nav_question_id[g_nav_prompt_index] != 0u)
                     ++g_nav_question_speech_events;
