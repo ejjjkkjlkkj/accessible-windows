@@ -92,6 +92,7 @@ jobs:
               b'HII_GRAPH_REPEAT_SPEECH_DMA=PASS',
               b'HII_GRAPH_REPEAT_SPEECH_HDA=PASS',
               b'HII_GRAPH_REPEAT_LPIB_PROGRESS=PASS',
+              b'HII_GRAPH_SPEECH_PACING=PASS',
           ]:
               assert token in rb,token
           print('HII_GRAPH_PROMPT_SPEECH_PE_AUDIT=PASS')
@@ -143,6 +144,7 @@ jobs:
             b'HDA_OUTPUT_PATH_CONFIGURATION=PASS\r\n',
             b'BDL_RUNTIME_TEXT_SCHEDULE=PASS\r\n',
             b'HII_GRAPH_SPEECH_DMA=PASS\r\n',
+            b'HII_GRAPH_SPEECH_PACING=PASS\r\n',
             b'HII_PROMPT_SPEECH_HDA=PASS\r\n',
             b'LPIB_PROGRESS=PASS\r\n',
             b'BOOT_MEDIA_PERSISTENT_PROOF=PASS\r\n',
