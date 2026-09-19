@@ -1,0 +1,201 @@
+name: uefi-screenreader-convergence-ci
+
+on:
+  push:
+    branches: [uefi-screenreader-convergence-20260919]
+    paths:
+      - 'boot/uefi-hii-graph-prompt-speech-v1/**'
+      - '.github/workflows/uefi-screenreader-convergence-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  semantic-realtime-ovmf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install UEFI runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld qemu-system-x86 ovmf dosfstools mtools
+
+      - name: Build converged semantic realtime EFI
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-graph-prompt-speech-v1
+          mkdir -p "$root/convergence"
+          python -m py_compile "$root/generate_units.py"
+          python "$root/generate_units.py" "$root/convergence/units.c" "$root/convergence/units.txt"
+          source_blob=$(git rev-parse "HEAD:$root/hii_graph_prompt_speech_uefi.c")
+          flags='--target=x86_64-pc-windows-msvc -DQEV_INTERACTIVE_NAV=1 -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+          clang $flags "-DQEV_SOURCE_BLOB=\"$source_blob\"" -c "$root/hii_graph_prompt_speech_uefi.c" -o "$root/convergence/main.obj"
+          clang $flags -c "$root/convergence/units.c" -o "$root/convergence/units.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$root/convergence/BOOTX64.EFI" "$root/convergence/main.obj" "$root/convergence/units.obj"
+          test -s "$root/convergence/BOOTX64.EFI"
+          for marker in             'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V2'             'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS'             'HII_GRAPH_NAV_QUESTION_ID=0x'             'HII_GRAPH_NAV_VARSTORE_ID=0x'             'HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS'             'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA'             'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS'             'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS'             'HII_GRAPH_NAV_REALTIME_EVENTS=0x'             'HII_GRAPH_NAV_SPEECH_INTERRUPTS=0x'             'HII_GRAPH_SPEECH_LONG_LABEL_CAPACITY=PASS'
+          do
+            grep -aF "$marker" "$root/convergence/BOOTX64.EFI"
+          done
+          echo UEFI_CONVERGENCE_BUILD=PASS
+
+      - name: Resolve OVMF
+        run: |
+          set -euo pipefail
+          CODE=''; VARS=''
+          for pair in             '/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd'             '/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd'             '/usr/share/edk2/ovmf/OVMF_CODE.fd|/usr/share/edk2/ovmf/OVMF_VARS.fd'
+          do
+            IFS='|' read -r code vars <<< "$pair"
+            if test -f "$code" -a -f "$vars"; then CODE="$code"; VARS="$vars"; break; fi
+          done
+          test -n "$CODE" -a -n "$VARS"
+          printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-hii-graph-prompt-speech-v1/convergence/ovmf.env
+
+      - name: Prove semantic navigation and speech interruption
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-graph-prompt-speech-v1
+          out="$root/convergence"
+          source "$out/ovmf.env"
+          cp "$VARS" "$out/vars.fd"
+          rm -f "$out/esp.img" "$out/serial.txt" "$out/audio.wav" "$out/qmp.sock" "$out/proof.txt"
+          truncate -s 64M "$out/esp.img"
+          mkfs.vfat -F 16 "$out/esp.img"
+          mmd -i "$out/esp.img" ::/EFI
+          mmd -i "$out/esp.img" ::/EFI/BOOT
+          mcopy -i "$out/esp.img" "$out/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+
+          qemu-system-x86_64             -machine q35,accel=tcg -m 256M             -drive if=pflash,format=raw,readonly=on,file="$CODE"             -drive if=pflash,format=raw,file="$out/vars.fd"             -drive format=raw,file="$out/esp.img"             -audiodev wav,id=aud,path="$out/audio.wav",out.frequency=48000,out.channels=2             -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0             -device hda-duplex,bus=hda0.0,cad=0,audiodev=aud             -display none -monitor none             -qmp unix:"$out/qmp.sock",server=on,wait=off             -serial file:"$out/serial.txt"             -parallel none -net none -no-reboot -no-shutdown &
+          qpid=$!
+          trap 'kill $qpid 2>/dev/null || true' EXIT
+
+          ROOT="$out" python - <<'PY'
+          from pathlib import Path
+          import json, os, socket, time
+
+          root=Path(os.environ['ROOT'])
+          serial=root/'serial.txt'
+          qmp=root/'qmp.sock'
+
+          def raw():
+              return serial.read_bytes() if serial.exists() else b''
+
+          def wait(marker, count=1, timeout=75):
+              end=time.time()+timeout
+              while time.time()<end:
+                  data=raw()
+                  if b'STATUS=BLOCKED\r\n' in data:
+                      raise SystemExit('firmware blocked: '+repr(data[-24000:]))
+                  if data.count(marker) >= count:
+                      return data
+                  time.sleep(.01)
+              raise SystemExit('timeout '+repr(marker)+': '+repr(raw()[-24000:]))
+
+          wait(b'HII_GRAPH_NAV_READY=PASS\r\n')
+          wait(b'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA\r\n')
+
+          end=time.time()+20
+          while time.time()<end and not qmp.exists():
+              time.sleep(.01)
+          if not qmp.exists():
+              raise SystemExit('QMP socket missing')
+
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+          s.connect(str(qmp))
+          f=s.makefile('rwb',buffering=0)
+          hello=json.loads(f.readline())
+          if 'QMP' not in hello:
+              raise SystemExit('bad QMP greeting')
+          f.write((json.dumps({'execute':'qmp_capabilities'})+'\r\n').encode())
+          while True:
+              reply=json.loads(f.readline())
+              if 'return' in reply:
+                  break
+
+          def send(qcode):
+              f.write((json.dumps({
+                  'execute':'send-key',
+                  'arguments':{'keys':[{'type':'qcode','data':qcode}],'hold-time':20}
+              })+'\r\n').encode())
+              while True:
+                  reply=json.loads(f.readline())
+                  if 'return' in reply: return
+                  if 'error' in reply:
+                      raise SystemExit('send-key failed: '+repr(reply))
+
+          seq=[
+              ('down', b'HII_GRAPH_NAV_KEY=DOWN\r\n'),
+              ('up', b'HII_GRAPH_NAV_KEY=UP\r\n'),
+              ('end', b'HII_GRAPH_NAV_KEY=END\r\n'),
+              ('home', b'HII_GRAPH_NAV_KEY=HOME\r\n'),
+              ('pgdn', b'HII_GRAPH_NAV_KEY=PAGE_DOWN\r\n'),
+              ('pgup', b'HII_GRAPH_NAV_KEY=PAGE_UP\r\n'),
+              ('r', b'HII_GRAPH_NAV_KEY=R\r\n'),
+          ]
+          for i,(key,marker) in enumerate(seq,1):
+              send(key)
+              wait(marker)
+              wait(b'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS\r\n',i)
+
+          data=wait(b'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS\r\n')
+          for marker in [
+              b'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS\r\n',
+              b'HII_GRAPH_NAV_ROLE=',
+              b'HII_GRAPH_NAV_QUESTION_ID=0x',
+              b'HII_GRAPH_NAV_VARSTORE_ID=0x',
+              b'HII_GRAPH_NAV_SPEECH_TEXT=',
+              b'HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n',
+          ]:
+              if marker not in data:
+                  raise SystemExit('missing semantic realtime marker: '+repr(marker))
+
+          send('esc')
+          data=wait(b'STATUS=PASS\r\n')
+          for marker in [
+              b'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS\r\n',
+              b'HII_GRAPH_NAV_EXIT=PASS\r\n',
+              b'BOOT_MEDIA_PERSISTENT_PROOF=PASS\r\n',
+          ]:
+              if marker not in data:
+                  raise SystemExit('missing closure marker: '+repr(marker))
+          s.close()
+          print('UEFI_CONVERGENCE_OVMF_RUNTIME=PASS')
+          PY
+
+          sleep 1
+          kill $qpid 2>/dev/null || true
+          wait $qpid 2>/dev/null || true
+          trap - EXIT
+
+          mcopy -o -i "$out/esp.img" ::/QEVARYNOX-PHYSICAL-PROOF.TXT "$out/proof.txt"
+          tr -d '\r' < "$out/proof.txt" | grep -F 'HII_GRAPH_NAV_REALTIME=PASS'
+          tr -d '\r' < "$out/proof.txt" | grep -E '^HII_GRAPH_NAV_REALTIME_EVENTS=0x0[7-9A-F]$'
+          tr -d '\r' < "$out/proof.txt" | grep -E '^HII_GRAPH_NAV_SPEECH_INTERRUPTS=0x0[1-9A-F]$'
+          tr -d '\r' < "$out/proof.txt" | grep -F 'HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS'
+          tr -d '\r' < "$out/proof.txt" | grep -F 'HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V2'
+          echo UEFI_CONVERGENCE_PROOF=PASS
+
+      - name: Validate waveform exists
+        shell: python
+        run: |
+          from pathlib import Path
+          import wave
+          p=Path('boot/uefi-hii-graph-prompt-speech-v1/convergence/audio.wav')
+          assert p.exists() and p.stat().st_size > 10000, p
+          with wave.open(str(p),'rb') as w:
+              assert w.getnchannels()==2
+              assert w.getframerate()==48000
+              assert w.getsampwidth()==2
+              assert w.getnframes()>4800
+          print('UEFI_CONVERGENCE_WAVEFORM=PASS')
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefi-screenreader-convergence
+          path: |
+            boot/uefi-hii-graph-prompt-speech-v1/convergence/BOOTX64.EFI
+            boot/uefi-hii-graph-prompt-speech-v1/convergence/serial.txt
+            boot/uefi-hii-graph-prompt-speech-v1/convergence/audio.wav
+            boot/uefi-hii-graph-prompt-speech-v1/convergence/proof.txt
+          if-no-files-found: error
