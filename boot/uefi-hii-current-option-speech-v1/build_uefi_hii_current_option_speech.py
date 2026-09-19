@@ -867,7 +867,12 @@ def build():
  c.label('expanded_char')
  c.emit(bytes.fromhex('ffc6'))
  c.emit(bytes.fromhex('39fe'))
- c.rel32(bytes.fromhex('0f82'),'expand_char')
+ c.rel32(bytes.fromhex('0f83'),'all_chars_expanded')
+ # The imported option-speech unit bank includes a 65 ms silence unit.
+ # Insert it only between graphemes, never after the final grapheme.
+ emit_unit_descriptor('sil')
+ c.rel32(bytes.fromhex('e9'),'expand_char')
+ c.label('all_chars_expanded')
  c.emit(bytes.fromhex('85db')); c.rel32(bytes.fromhex('0f84'),'fail_speech_text')
  c.emit(bytes.fromhex('89d8ffc848c1e0044c01e8'))
  c.emit(bytes.fromhex('c7400c01000000'))
