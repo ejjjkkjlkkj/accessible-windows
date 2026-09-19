@@ -78,7 +78,8 @@ $expected=[ordered]@{
   HII_GRAPH_NAV_REPEAT='PASS'
   HII_GRAPH_NAV_REQUIRED_EVENTS='PASS'
   HII_GRAPH_NAV_EXIT='PASS'
-  HII_NAV_OBJECT_MODEL='IFR_SEMANTIC_V1'
+  HII_NAV_OBJECT_MODEL='IFR_SEMANTIC_V2'
+  HII_GRAPH_NAV_REALTIME='PASS'
   HII_NAV_DIGITS_AND_COMMON_SYMBOLS='PASS'
   HII_GRAPH_NAV_SEMANTIC_CONTROL='PASS'
   HII_GRAPH_SPEECH_DMA_REUSE='PASS'
@@ -98,6 +99,8 @@ $selectorsRequired=Get-ProofField 'HDA_SELECTOR_WRITES_REQUIRED' '0x[0-9A-F]{2}'
 $selectorsApplied=Get-ProofField 'HDA_SELECTOR_WRITES_APPLIED' '0x[0-9A-F]{2}'
 $navEvents=Get-ProofField 'HII_GRAPH_NAV_SPEECH_EVENTS' '0x[0-9A-F]{2}'
 $semanticQuestionEvents=Get-ProofField 'HII_GRAPH_NAV_SEMANTIC_QUESTION_EVENTS' '0x[0-9A-F]{2}'
+$realtimeEvents=Get-ProofField 'HII_GRAPH_NAV_REALTIME_EVENTS' '0x[0-9A-F]{2}'
+$speechInterrupts=Get-ProofField 'HII_GRAPH_NAV_SPEECH_INTERRUPTS' '0x[0-9A-F]{2}'
 
 $pinValue=[Convert]::ToInt32($pin.Substring(2),16)
 $dacValue=[Convert]::ToInt32($dac.Substring(2),16)
@@ -106,6 +109,8 @@ $requiredValue=[Convert]::ToInt32($selectorsRequired.Substring(2),16)
 $appliedValue=[Convert]::ToInt32($selectorsApplied.Substring(2),16)
 $navEventCount=[Convert]::ToInt32($navEvents.Substring(2),16)
 $semanticQuestionEventCount=[Convert]::ToInt32($semanticQuestionEvents.Substring(2),16)
+$realtimeEventCount=[Convert]::ToInt32($realtimeEvents.Substring(2),16)
+$speechInterruptCount=[Convert]::ToInt32($speechInterrupts.Substring(2),16)
 
 if($pinValue -eq 0 -or $dacValue -eq 0 -or $pinValue -eq $dacValue){
   throw "Invalid physical HDA route endpoints: pin=$pin dac=$dac"
@@ -121,6 +126,12 @@ if($navEventCount -lt 7){
 }
 if($semanticQuestionEventCount -lt 1){
   throw "Physical HII navigation did not speak any semantic IFR question/control"
+}
+if($realtimeEventCount -lt 7){
+  throw "Physical HII navigation produced only $realtimeEventCount realtime focus speech events; expected at least 7"
+}
+if($speechInterruptCount -lt 1){
+  throw "Physical HII navigation did not prove interruptible speech"
 }
 
 [pscustomobject]@{
@@ -138,7 +149,9 @@ if($semanticQuestionEventCount -lt 1){
   NativeUefiHdaExecution='PASS'
   HiiNavigation='UP_DOWN_HOME_END_PAGEUP_PAGEDOWN_R_ESC_PASS'
   NavigationSpeechEvents=$navEventCount
-  SemanticObjectModel='IFR_SEMANTIC_V1'
+  SemanticObjectModel='IFR_SEMANTIC_V2'
+  RealtimeFocusSpeechEvents=$realtimeEventCount
+  SpeechInterruptions=$speechInterruptCount
   SemanticQuestionSpeechEvents=$semanticQuestionEventCount
   DigitsAndCommonSymbols='PASS'
   DmaReuse='PASS'
@@ -151,11 +164,16 @@ if($semanticQuestionEventCount -lt 1){
 'PHYSICAL_UEFI_HII_NAVIGATION=PASS'
 'PHYSICAL_UEFI_SEMANTIC_CONTROL_READING=PASS'
 'PHYSICAL_UEFI_DIGITS_AND_COMMON_SYMBOLS=PASS'
+'PHYSICAL_UEFI_REALTIME_FOCUS_SPEECH=PASS'
+'PHYSICAL_UEFI_SPEECH_INTERRUPT=PASS'
 'PHYSICAL_UEFI_DMA_REUSE=PASS'
 if($AudibleSpeakerConfirmed){
   'PHYSICAL_UEFI_SPEAKER_AUDIBLE=PASS'
-  'PHYSICAL_UEFI_FINAL_CLOSURE=PASS'
+  'PHYSICAL_UEFI_NATIVE_READER_GATE=PASS'
 } else {
   'PHYSICAL_UEFI_SPEAKER_AUDIBLE=REQUIRES_HUMAN_CONFIRMATION'
-  'PHYSICAL_UEFI_FINAL_CLOSURE=PENDING_AUDIBLE_CONFIRMATION'
+  'PHYSICAL_UEFI_NATIVE_READER_GATE=PENDING_AUDIBLE_CONFIRMATION'
 }
+'PHYSICAL_UEFI_FIRMWARE_FOCUS_SYNC=PENDING'
+'PHYSICAL_UEFI_CONTROL_ACTIVATION=PENDING'
+'PHYSICAL_UEFI_CORE_SCREEN_READER_PARITY=PENDING'
