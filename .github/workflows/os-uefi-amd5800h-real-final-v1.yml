@@ -20,6 +20,7 @@ permissions:
   contents: write
   actions: write
 
+# Closure gate: an active AMD hardware validation must survive later UEFI commits.
 concurrency:
   group: os-uefi-amd5800h-real-final-v1-${{ github.ref }}
   cancel-in-progress: false
