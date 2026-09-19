@@ -267,7 +267,11 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
         g_controller_preferred ? "REALTEK_10EC_0256\r\n" : "GENERIC_RUNTIME\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_GRAPH_SEARCH_LIVE=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_SELECTOR_APPLY_LIVE=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_ROUTE_POWER_D0=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_ROUTE_AMPLIFIERS=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_EAPD_POLICY=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_DAC_STREAM_READBACK=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HDA_PIN_CONTROL_READBACK=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_OUTPUT_PATH_CONFIGURATION=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_PIN_NID=0x"); proof_hex8(proof,sizeof(proof),&n,pin); proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_DAC_NID=0x"); proof_hex8(proof,sizeof(proof),&n,dac); proof_puts(proof,sizeof(proof),&n,"\r\n");
@@ -586,10 +590,33 @@ static int unmute_input_amp(u8 nid, u8 index) {
     return 1;
 }
 
+static int power_up_route_widget(u8 nid) {
+    /* Audio Widget Capabilities bit 10 advertises power-state control. */
+    if (!(g_widget_cap[nid] & 0x00000400u)) return 1;
+    u32 supported = get_param(nid, 0x0f);
+    if (supported == INVALID_RESP || !(supported & 0x01u)) return 0;
+    if (verb12(nid, 0x705, 0x00) == INVALID_RESP) return 0;
+    if (g_stall) g_stall(100);
+    u32 state = verb12(nid, 0xf05, 0);
+    if (state == INVALID_RESP || (state & 0x0fu) != 0) return 0;
+    return 1;
+}
+
 static int configure_output_path(u8 pin, u8 dac) {
+    /* Put every power-managed route widget in D0 before touching amps. */
+    u8 cur = dac;
+    for (;;) {
+        if (!power_up_route_widget(cur)) return 0;
+        if (cur == pin) break;
+        u8 child = g_parent[cur];
+        if (child == INVALID_NID) return 0;
+        cur = child;
+    }
+    marker("HDA_ROUTE_POWER_D0=PASS");
+
     /* Unmute every amplifier actually traversed by the discovered route.
        Widgets without Amp Parameter Override inherit the AFG capabilities. */
-    u8 cur = dac;
+    cur = dac;
     for (;;) {
         if (!unmute_output_amp(cur)) return 0;
         if (cur == pin) break;
@@ -603,14 +630,31 @@ static int configure_output_path(u8 pin, u8 dac) {
     u32 pin_cap = get_param(pin, 0x0c);
     if (pin_cap == INVALID_RESP) return 0;
     if (pin_cap & 0x00010000u) {
-        if (verb12(pin, 0x70c, 0x02) == INVALID_RESP) return 0;
         u32 eapd = verb12(pin, 0xf0c, 0);
-        if (eapd == INVALID_RESP || !(eapd & 0x02)) return 0;
+        if (eapd == INVALID_RESP) return 0;
+        u8 desired_eapd = (u8)eapd | 0x02u;
+        if (verb12(pin, 0x70c, desired_eapd) == INVALID_RESP) return 0;
+        eapd = verb12(pin, 0xf0c, 0);
+        if (eapd == INVALID_RESP || !(eapd & 0x02u)) return 0;
     }
+    marker("HDA_EAPD_POLICY=PASS");
 
     if (verb12(dac, 0x706, 0x10) == INVALID_RESP) return 0;
+    u32 stream_channel = verb12(dac, 0xf06, 0);
+    if (stream_channel == INVALID_RESP || (stream_channel & 0xffu) != 0x10u) return 0;
+
     if (verb4(dac, 0x2, 0x0011) == INVALID_RESP) return 0;
-    if (verb12(pin, 0x707, 0x40) == INVALID_RESP) return 0;
+    u32 format = verb4(dac, 0xa, 0);
+    if (format == INVALID_RESP || (format & 0xffffu) != 0x0011u) return 0;
+    marker("HDA_DAC_STREAM_READBACK=PASS");
+
+    u32 pin_ctl = verb12(pin, 0xf07, 0);
+    if (pin_ctl == INVALID_RESP) return 0;
+    u8 desired_pin_ctl = (u8)pin_ctl | 0x40u;
+    if (verb12(pin, 0x707, desired_pin_ctl) == INVALID_RESP) return 0;
+    pin_ctl = verb12(pin, 0xf07, 0);
+    if (pin_ctl == INVALID_RESP || !(pin_ctl & 0x40u)) return 0;
+    marker("HDA_PIN_CONTROL_READBACK=PASS");
     return 1;
 }
 
@@ -973,6 +1017,25 @@ static int discover_controller(void) {
     return 0;
 }
 
+static int physical_pin_score(u8 pin, u32 *config_out) {
+    u32 config = verb12(pin, 0xf1c, 0);
+    if (config_out) *config_out = config;
+    if (config == INVALID_RESP) return 0;
+
+    u8 connectivity = (u8)((config >> 30) & 0x03u);
+    u8 device = (u8)((config >> 20) & 0x0fu);
+    if (connectivity == 0x01u) return -1; /* No physical connection. */
+
+    int score = 1;
+    if (device == 0x01u) score = 100;      /* Speaker. */
+    else if (device == 0x02u) score = 80;  /* Headphone out. */
+    else if (device == 0x00u) score = 60;  /* Line out. */
+    else if (device == 0x04u || device == 0x05u) score = 40;
+    if (connectivity == 0x02u) score += 20; /* Fixed/internal device. */
+    else if (connectivity == 0x03u) score += 10;
+    return score;
+}
+
 static int discover_live_graph(u8 *pin_out, u8 *dac_out, u8 *selectors_out) {
     clear_graph();
     u32 root_nodes = get_param(0, 0x04);
@@ -1016,18 +1079,47 @@ static int discover_live_graph(u8 *pin_out, u8 *dac_out, u8 *selectors_out) {
     marker("HDA_WIDGET_ENUMERATION=PASS");
     marker("HDA_CONNECTION_LIST_DECODE=PASS");
 
+    if (!g_controller_preferred) {
+        for (u16 n = start; n < (u16)start + count; ++n) {
+            u8 pin = (u8)n;
+            if (!g_pin_output[pin]) continue;
+            u8 dac = 0, selectors = 0;
+            if (find_route(pin, &dac, &selectors)) {
+                *pin_out = pin;
+                *dac_out = dac;
+                *selectors_out = selectors;
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    /* Bare-metal ASUS/ALC256: prefer the fixed internal speaker advertised by
+       the codec default pin configuration instead of the first routable pin. */
+    u8 best_pin = INVALID_NID;
+    int best_score = -1;
+    u32 best_config = INVALID_RESP;
     for (u16 n = start; n < (u16)start + count; ++n) {
         u8 pin = (u8)n;
         if (!g_pin_output[pin]) continue;
-        u8 dac = 0, selectors = 0;
-        if (find_route(pin, &dac, &selectors)) {
-            *pin_out = pin;
-            *dac_out = dac;
-            *selectors_out = selectors;
-            return 1;
+        u8 candidate_dac = 0, candidate_selectors = 0;
+        if (!find_route(pin, &candidate_dac, &candidate_selectors)) continue;
+        u32 config = INVALID_RESP;
+        int score = physical_pin_score(pin, &config);
+        if (score > best_score) {
+            best_score = score;
+            best_pin = pin;
+            best_config = config;
         }
     }
-    return 0;
+    if (best_pin == INVALID_NID) return 0;
+    if (!find_route(best_pin, dac_out, selectors_out)) return 0;
+    *pin_out = best_pin;
+    marker("HDA_PHYSICAL_PIN_SELECTION=DEFAULT_CONFIG_PRIORITY");
+    serial_puts("HDA_SELECTED_PIN_DEFAULT_CONFIG=0x");
+    serial_hex32(best_config);
+    serial_puts("\r\n");
+    return 1;
 }
 
 #ifdef QEV_INTERACTIVE_REPEAT
