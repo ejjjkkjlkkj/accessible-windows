@@ -69,6 +69,7 @@ static stall_fn g_stall;
 static allocate_pages_fn g_allocate_pages;
 static u64 g_speech_dma_base;
 static u8 g_speech_dma_allocations;
+static u8 g_speech_stream_initialized;
 static u8 g_proof_overflow;
 
 typedef u64 (*locate_protocol_fn)(const void *protocol, void *registration, void **interface_out);
@@ -837,16 +838,25 @@ static int run_speech_dma(const char *text, u32 text_count) {
 
     sd[0] = (u8)(sd[0] & ~2u);
     u32 timeout = 100000;
-    while (timeout-- && (sd[0] & 2)) {}
+    while (timeout-- && (sd[0] & 2u)) {}
     if (!timeout) return 0;
-    sd[0] = (u8)(sd[0] | 1u);
-    timeout = 100000;
-    while (timeout-- && !(sd[0] & 1)) {}
-    if (!timeout) return 0;
-    sd[0] = (u8)(sd[0] & ~1u);
-    timeout = 100000;
-    while (timeout-- && (sd[0] & 1)) {}
-    if (!timeout) return 0;
+
+    /* Reset the HDA stream descriptor only once. Repeated SRST cycles during
+       fast focus navigation eventually wedge QEMU hda-micro and can stress
+       real codecs too. Subsequent utterances reuse the stopped descriptor. */
+    if (!g_speech_stream_initialized) {
+        sd[0] = (u8)(sd[0] | 1u);
+        timeout = 100000;
+        while (timeout-- && !(sd[0] & 1u)) {}
+        if (!timeout) return 0;
+        sd[0] = (u8)(sd[0] & ~1u);
+        timeout = 100000;
+        while (timeout-- && (sd[0] & 1u)) {}
+        if (!timeout) return 0;
+        g_speech_stream_initialized = 1u;
+    }
+    sd[3] = 0x1cu;
+    if (g_stall) g_stall(1000);
 
     *(volatile u32 *)(sd + 0x08) = dma_payload;
     *(volatile u16 *)(sd + 0x0c) = (u16)(entries - 1u);
@@ -875,7 +885,11 @@ static int run_speech_dma(const char *text, u32 text_count) {
     u32 lpib = *(volatile u32 *)(sd + 0x04);
     u8 status = sd[3];
     sd[0] = (u8)(sd[0] & ~2u);
+    timeout = 100000;
+    while (timeout-- && (sd[0] & 2u)) {}
+    if (!timeout) return 0;
     sd[3] = 0x1cu;
+    if (g_stall) g_stall(1000);
     return lpib != 0 && (status & 0x04u) != 0;
 }
 
