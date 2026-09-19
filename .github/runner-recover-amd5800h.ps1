@@ -90,7 +90,6 @@ Write-Host ("RUNNER_DIR = {0}" -f $RunnerDir)
 
 $required = @(
     '.runner',
-    'svc.cmd',
     'bin\RunnerService.exe',
     'bin\Runner.Listener.exe'
 )
@@ -121,11 +120,70 @@ try {
 $service = Get-RunnerService $RunnerDir
 
 if (-not $service) {
-    Write-Host 'SERVICE = NOT_INSTALLED; installing with svc.cmd'
-    & (Join-Path $RunnerDir 'svc.cmd') install
-    if ($LASTEXITCODE -ne 0) {
-        throw "svc.cmd install failed with exit code $LASTEXITCODE"
+    Write-Host 'SERVICE = NOT_INSTALLED; rebuilding native Windows service'
+
+    $manual = @(Get-RunnerListener $RunnerDir)
+    foreach ($proc in $manual) {
+        Write-Host ("STOP_MANUAL_LISTENER_PID = {0}" -f $proc.ProcessId)
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
     }
+    if ($manual.Count -gt 0) {
+        Start-Sleep -Seconds 2
+    }
+
+    $runnerServiceExe = Join-Path $RunnerDir 'bin\RunnerService.exe'
+
+    $repoOrOrg = $null
+    if ($cfg.GitHubUrl) {
+        try {
+            $repoOrOrg = ([Uri]([string]$cfg.GitHubUrl)).AbsolutePath.Trim('/')
+        } catch {
+            $repoOrOrg = $null
+        }
+    }
+    if (-not $repoOrOrg -and $cfg.ServerUrl) {
+        try {
+            $repoOrOrg = (([Uri]([string]$cfg.ServerUrl)).AbsolutePath.Trim('/') -split '/')[0]
+        } catch {
+            $repoOrOrg = $null
+        }
+    }
+    if (-not $repoOrOrg) {
+        throw 'Unable to derive repository/organization name from .runner.'
+    }
+
+    $repoOrOrg = $repoOrOrg -replace '[^0-9A-Za-z._-]', '-'
+    $serviceName = "actions.runner.$repoOrOrg.$configuredName"
+    $serviceDisplayName = "GitHub Actions Runner ($repoOrOrg.$configuredName)"
+
+    if ($serviceName.Length -gt 80) {
+        throw "Calculated Windows service name is too long: $serviceName"
+    }
+
+    Write-Host ("SERVICE_INSTALL_NAME = {0}" -f $serviceName)
+    Write-Host ("SERVICE_INSTALL_DISPLAY = {0}" -f $serviceDisplayName)
+
+    & $runnerServiceExe init
+    if ($LASTEXITCODE -ne 0) {
+        throw "RunnerService.exe init failed with exit code $LASTEXITCODE"
+    }
+
+    & icacls.exe $RunnerDir /grant '*S-1-5-20:(OI)(CI)F' /T /C | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "icacls failed with exit code $LASTEXITCODE"
+    }
+
+    $binPathArg = 'binPath= "' + $runnerServiceExe + '"'
+    $displayArg = 'DisplayName= ' + $serviceDisplayName
+    & sc.exe create $serviceName $binPathArg 'start= auto' 'obj= NT AUTHORITY\NetworkService' $displayArg | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "sc.exe create failed with exit code $LASTEXITCODE"
+    }
+
+    $serviceFile = Join-Path $RunnerDir '.service'
+    [IO.File]::WriteAllText($serviceFile, $serviceName, [Text.UTF8Encoding]::new($false))
+    (Get-Item $serviceFile).Attributes = (Get-Item $serviceFile).Attributes -bor [IO.FileAttributes]::Hidden
+
     Start-Sleep -Seconds 2
     $service = Get-RunnerService $RunnerDir
 }
@@ -158,9 +216,9 @@ Set-Service -Name $service.Name -StartupType Automatic
 & sc.exe failureflag $service.Name 1 | Out-Host
 
 try {
-    & (Join-Path $RunnerDir 'svc.cmd') start | Out-Host
+    Start-Service -Name $service.Name -ErrorAction Stop
 } catch {
-    Write-Host ("SVC_START_EXCEPTION = {0}" -f $_.Exception.Message)
+    Write-Host ("SERVICE_START_EXCEPTION = {0}" -f $_.Exception.Message)
 }
 
 $deadline = (Get-Date).AddSeconds(20)
