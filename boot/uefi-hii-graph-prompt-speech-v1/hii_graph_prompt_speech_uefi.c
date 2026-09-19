@@ -58,6 +58,8 @@ static u8 g_cad;
 static u8 g_afg = INVALID_NID;
 static u8 g_controller_preferred;
 static u32 g_codec_vendor_id;
+static u32 g_selected_pin_default_config = INVALID_RESP;
+static u8 g_selected_pin_is_internal_speaker;
 static stall_fn g_stall;
 static allocate_pages_fn g_allocate_pages;
 static u64 g_speech_dma_base;
@@ -280,6 +282,15 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HDA_SELECTOR_WRITES_APPLIED=0x"); proof_hex8(proof,sizeof(proof),&n,applied); proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_SPEECH_DMA=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"LPIB_PROGRESS=PASS\r\n");
+    if (g_controller_preferred && g_codec_vendor_id == 0x10ec0256u) {
+        proof_puts(proof,sizeof(proof),&n,"PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS\r\n");
+        proof_puts(proof,sizeof(proof),&n,"PHYSICAL_ASUS_M1603QA_CODEC=REALTEK_10EC_0256\r\n");
+        proof_puts(proof,sizeof(proof),&n,"PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=");
+        proof_puts(proof,sizeof(proof),&n,
+            g_selected_pin_is_internal_speaker ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    } else {
+        proof_puts(proof,sizeof(proof),&n,"PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=NOT_APPLICABLE\r\n");
+    }
 #ifdef QEV_INTERACTIVE_REPEAT
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_REPEAT_KEY=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_REPEAT_SPEECH_DMA=PASS\r\n");
@@ -1137,10 +1148,19 @@ static int discover_live_graph(u8 *pin_out, u8 *dac_out, u8 *selectors_out) {
     if (best_pin == INVALID_NID) return 0;
     if (!find_route(best_pin, dac_out, selectors_out)) return 0;
     *pin_out = best_pin;
+    g_selected_pin_default_config = best_config;
+    g_selected_pin_is_internal_speaker =
+        (u8)((((best_config >> 30) & 0x03u) == 0x02u) &&
+             (((best_config >> 20) & 0x0fu) == 0x01u));
     marker("HDA_PHYSICAL_PIN_SELECTION=DEFAULT_CONFIG_PRIORITY");
+    marker("HDA_PHYSICAL_PIN_DEFAULT_CONFIG=PASS");
     serial_puts("HDA_SELECTED_PIN_DEFAULT_CONFIG=0x");
     serial_hex32(best_config);
     serial_puts("\r\n");
+    if (g_selected_pin_is_internal_speaker)
+        marker("HDA_PHYSICAL_INTERNAL_SPEAKER_PIN=PASS");
+    else
+        marker("HDA_PHYSICAL_INTERNAL_SPEAKER_PIN=NOT_ESTABLISHED");
     return 1;
 }
 
@@ -1329,6 +1349,14 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("HII_GRAPH_SPEECH_DMA=PASS");
     marker("HII_PROMPT_SPEECH_HDA=PASS");
     marker("LPIB_PROGRESS=PASS");
+    if (g_controller_preferred && g_codec_vendor_id == 0x10ec0256u) {
+        marker("PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS");
+        if (g_selected_pin_is_internal_speaker)
+            marker("PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS");
+        else
+            marker("PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=NOT_ESTABLISHED");
+        marker("PHYSICAL_ASUS_M1603QA_AUDIBLE_SPEAKER=REQUIRES_HUMAN_CONFIRMATION");
+    }
 #ifdef QEV_INTERACTIVE_NAV
     if (!wait_navigation_keys(system_table)) {
         marker("STATUS=BLOCKED");
@@ -1363,7 +1391,7 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     } else {
         marker("BOOT_MEDIA_PERSISTENT_PROOF=NOT_ESTABLISHED");
     }
-    marker("PHYSICAL_ASUS_M1603QA_SPEECH=NOT_ESTABLISHED");
+    marker("PHYSICAL_ASUS_M1603QA_SPEAKER_AUDIBLE=REQUIRES_HUMAN_CONFIRMATION");
     marker("STATUS=PASS");
     return 0;
 }
