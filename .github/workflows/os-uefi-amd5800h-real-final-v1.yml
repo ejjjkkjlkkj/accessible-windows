@@ -921,7 +921,7 @@ jobs:
           & $env:QEMU_IMG_EXE convert -f raw -O vmdk $rawDisk $vmdk
           if($LASTEXITCODE -ne 0){ throw 'VMware navigation VMDK conversion failed' }
 
-          @" 
+          @"
           .encoding = "UTF-8"
           config.version = "8"
           virtualHW.version = "20"
