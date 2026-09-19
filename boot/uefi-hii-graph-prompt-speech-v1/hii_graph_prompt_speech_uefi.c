@@ -772,7 +772,20 @@ static int run_speech_dma(const char *text, u32 text_count) {
 
     volatile u8 *bdl = (volatile u8 *)(usize)base;
     volatile u8 *pcm = (volatile u8 *)(usize)(base + pcm_off);
-    u32 total_bytes = 0;
+
+    /*
+     * Give the physical codec a short quiet lead-in and keep adjacent
+     * graphemes from collapsing into one another. The synthetic allophone
+     * units have intentionally soft edges, but back-to-back units can still
+     * sound fused on small laptop speakers. All sizes are whole 48 kHz,
+     * signed-16 stereo frames (192 bytes/ms).
+     */
+    const u32 lead_silence_bytes = 30u * 192u;
+    const u32 grapheme_gap_bytes = 12u * 192u;
+    const u32 tail_silence_bytes = 45u * 192u;
+    u32 total_bytes = lead_silence_bytes;
+    if (total_bytes > dma_bytes - pcm_off) return 0;
+    for (u32 i = 0; i < total_bytes; ++i) pcm[i] = 0;
 
     for (u32 i = 0; i < text_count; ++i) {
         u8 ch = (u8)text[i];
@@ -789,6 +802,14 @@ static int run_speech_dma(const char *text, u32 text_count) {
         }
 
         if (ch < (u8)'a' || ch > (u8)'z') return 0;
+
+        if (i != 0u && text[i - 1u] != ' ') {
+            if (total_bytes > dma_bytes - pcm_off ||
+                grapheme_gap_bytes > dma_bytes - pcm_off - total_bytes) return 0;
+            for (u32 gap = 0; gap < grapheme_gap_bytes; ++gap) pcm[total_bytes + gap] = 0;
+            total_bytes += grapheme_gap_bytes;
+        }
+
         u32 li = (u32)(ch - (u8)'a');
         u32 n = qev_letter_unit_count[li];
         if (!n || n > 8u) return 0;
@@ -804,6 +825,11 @@ static int run_speech_dma(const char *text, u32 text_count) {
         }
     }
     if (!total_bytes) return 0;
+    if (total_bytes > dma_bytes - pcm_off ||
+        tail_silence_bytes > dma_bytes - pcm_off - total_bytes) return 0;
+    for (u32 i = 0; i < tail_silence_bytes; ++i) pcm[total_bytes + i] = 0;
+    total_bytes += tail_silence_bytes;
+    marker("HII_GRAPH_SPEECH_PACING=PASS");
 
     /* HDA DMA buffers are safest on 128-byte boundaries. Pad with signed
        PCM silence (zero) without changing any lexical audio content. */
