@@ -709,11 +709,21 @@ def build():
  verb_data(L['pin_nid'],0x00070740)
  serial('codec')
 
- # Program stream number 1 in SDCTL byte 2, then RUN in SDCTL byte 0.
- c.emit(b'\xc6\x43\x02\x10\xc6\x03\x02')
- # Give HDA backend time to consume DMA, then prove LPIB moved.
- c.emit(b'\xb9\x80\x1a\x06\x00\x49\x8b\x87\xf8\x00\x00\x00\xff\xd0')
+ # Program stream number 1 in SDCTL byte 2, clear stale status, then RUN.
+ c.emit(b'\xc6\x43\x03\x1c\xc6\x43\x02\x10\xc6\x03\x02')
+ # Wait for the complete PCM payload, not a fixed 400 ms window.
+ # 48 kHz * 16-bit * stereo = 192000 bytes/s, so duration_us =
+ # ceil(total_bytes * 125 / 24). Add 150 ms device/codec guard time.
+ c.emit(b'\x44\x89\xd0')                  # eax = total PCM bytes (r10d)
+ c.emit(b'\x6b\xc0\x7d')                  # eax *= 125
+ c.emit(b'\x83\xc0\x17')                  # +23 for ceil(/24)
+ c.emit(b'\x31\xd2')                       # edx:eax dividend
+ c.emit(b'\xb9\x18\x00\x00\x00\xf7\xf1')  # div 24
+ c.emit(b'\x05\xf0\x49\x02\x00\x89\xc1')  # +150000 us; ecx=delay
+ c.emit(b'\x49\x8b\x87\xf8\x00\x00\x00\xff\xd0')
  c.emit(b'\x8b\x43\x04\x85\xc0'); c.rel32(b'\x0f\x84','fail_stream')
+ # IOC on the final BDL descriptor must complete before speech is considered done.
+ c.emit(b'\xf6\x43\x03\x04'); c.rel32(b'\x0f\x84','fail_stream')
  serial('progress')
  # Stop stream.
  c.emit(b'\x8a\x03\x24\xfd\x88\x03')
