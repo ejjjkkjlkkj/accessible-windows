@@ -35,6 +35,22 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+      - name: Cancel older AMD closure runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export current="$GITHUB_RUN_ID"
+          export current_number="$GITHUB_RUN_NUMBER"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?branch=os&per_page=100" --jq \
+            '.workflow_runs[] | select(.name=="os-uefi-amd5800h-real-final-v1") | select(.run_number < (env.current_number|tonumber)) | select(.status=="queued" or .status=="pending" or .status=="in_progress") | .id' \
+            | while read -r run; do
+                test -n "$run" || continue
+                echo "Cancelling older AMD closure run $run"
+                gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$run/cancel" >/dev/null || true
+              done
+          echo AMD_FINAL_OLDER_RUNS_PRUNED=PASS
       - name: Require proven UEFI accessibility dependencies
         shell: bash
         run: |
