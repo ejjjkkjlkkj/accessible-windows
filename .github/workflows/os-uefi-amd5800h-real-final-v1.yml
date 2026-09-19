@@ -827,12 +827,16 @@ jobs:
           }
           $raw | Set-Content (Join-Path $root 'vmware-graph-captured.txt') -Encoding ascii
           if(-not ($raw -match 'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403' -and
+                   $raw -match 'HDA_CONTROLLER_CODEC=PASS' -and
+                   $raw -match 'HDA_AFG_RUNTIME=PASS' -and
+                   $raw -match 'HDA_WIDGET_ENUMERATION=PASS' -and
+                   $raw -match 'HDA_CONNECTION_LIST_DECODE=PASS' -and
                    $raw -match 'HDA_GRAPH_SEARCH_LIVE=PASS' -and
                    $raw -match 'HDA_SELECTOR_APPLY_LIVE=PASS' -and
-                   $raw -match 'HDA_ROUTE_POWER_D0=PASS' -and
-                   $raw -match 'HDA_DAC_STREAM_READBACK=PASS' -and
-                   $raw -match 'HDA_PIN_CONTROL_READBACK=PASS' -and
+                   $raw -match 'HDA_SELECTOR_PLAN=PASS' -and
                    $raw -match 'HDA_OUTPUT_PATH_CONFIGURATION=PASS' -and
+                   $raw -match 'HDA_GRAPH_SPEECH_DMA=PASS' -and
+                   $raw -match 'RUNTIME_ALLOPHONE_HDA=PASS' -and
                    $raw -match 'LPIB_PROGRESS=PASS' -and
                    $raw -match 'STATUS=PASS')){
             throw "VMware multi-hop HDA graph probe failed: $raw"
