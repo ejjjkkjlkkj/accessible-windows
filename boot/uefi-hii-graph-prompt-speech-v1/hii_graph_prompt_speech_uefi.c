@@ -749,7 +749,7 @@ static void copy_bytes(volatile u8 *dst, const u8 *src, u32 len) {
 }
 
 static int run_speech_dma(const char *text, u32 text_count) {
-    if (!g_allocate_pages || !text || !text_count || text_count > 8u) return 0;
+    if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 8u) return 0;
     const u32 pcm_off = 0x1000;
     if (!qev_unit_bank_len || qev_unit_bank_len > (128u * 4096u - pcm_off)) return 0;
 
@@ -837,12 +837,31 @@ static int run_speech_dma(const char *text, u32 text_count) {
     *(volatile u32 *)(sd + 0x1c) = (u32)(base >> 32);
     fence();
 
+    /* Clear stale stream status before RUN. The final BDL entry carries IOC. */
+    sd[3] = 0x1cu;
     sd[2] = 0x10;
     sd[0] = (u8)(sd[0] | 2u);
-    if (g_stall) g_stall(700000);
+
+    /* 48 kHz, signed 16-bit stereo = 192000 bytes/s.
+       The old fixed 700 ms stop truncated longer HII labels. Poll final IOC
+       until the real payload duration plus a 150 ms hardware guard expires. */
+    u64 play_us = (((u64)total_bytes * 125ull) + 23ull) / 24ull;
+    play_us += 150000ull;
+    if (play_us > 8000000ull) {
+        sd[0] = (u8)(sd[0] & ~2u);
+        return 0;
+    }
+    u64 waited_us = 0;
+    while (!(sd[3] & 0x04u) && waited_us < play_us) {
+        g_stall(1000);
+        waited_us += 1000;
+    }
+
     u32 lpib = *(volatile u32 *)(sd + 0x04);
+    u8 status = sd[3];
     sd[0] = (u8)(sd[0] & ~2u);
-    return lpib != 0;
+    sd[3] = 0x1cu;
+    return lpib != 0 && (status & 0x04u) != 0;
 }
 
 static u16 rd16(const u8 *p) {
