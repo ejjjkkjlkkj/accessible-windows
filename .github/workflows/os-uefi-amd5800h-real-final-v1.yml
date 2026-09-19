@@ -1389,17 +1389,15 @@ jobs:
           $physicalAudible='PENDING_HUMAN_CONFIRMATION'
           if(Test-Path $physicalBootProof){
             $pb=Get-Content $physicalBootProof -Raw
-            if($pb -match '(?m)^proof-hii-navigation = PASS\s*$' -and
-               $pb -match '(?m)^proof-hii-navigation-required-events = PASS\s*$'){
-              $physicalNavigation='PASS'
-            }
             if($pb -match '(?m)^proof-native-uefi-execution = PASS\s*$' -and
                $pb -match '(?m)^proof-hda-dma = PASS\s*$' -and
                $pb -match '(?m)^proof-lpib-progress = PASS\s*$' -and
-               $pb -match '(?m)^proof-hii-navigation = PASS\s*$' -and
-               $pb -match '(?m)^proof-hii-navigation-required-events = PASS\s*$' -and
                $pb -match '(?m)^proof-internal-speaker-pin = PASS\s*$'){
               $physicalRuntime='PASS'
+            }
+            if($pb -match '(?m)^proof-hii-navigation = PASS\s*$' -and
+               $pb -match '(?m)^proof-hii-navigation-required-events = PASS\s*$'){
+              $physicalNavigation='PASS'
             }
             if($pb -match '(?m)^proof-audible-physical-speaker = HUMAN_CONFIRMED\s*$'){
               $physicalAudible='HUMAN_CONFIRMED'
@@ -1554,16 +1552,15 @@ jobs:
           $pb=Get-Content $physicalBootProof -Raw
           if($pb -match '(?m)^proof-source-blob = ([0-9a-f]{40})\s*$'){ $physicalSource=$matches[1] }
           if($physicalSource -eq $testedHiiGraphSource -and
-             $pb -match '(?m)^proof-hii-navigation = PASS\s*$' -and
-             $pb -match '(?m)^proof-hii-navigation-required-events = PASS\s*$'){
-            $physicalNavigation='PASS'
-          }
-          if($physicalSource -eq $testedHiiGraphSource -and
-             $physicalNavigation -eq 'PASS' -and
              $pb -match '(?m)^proof-native-uefi-execution = PASS\s*$' -and
              $pb -match '(?m)^proof-hda-dma = PASS\s*$' -and
              $pb -match '(?m)^proof-lpib-progress = PASS\s*$'){
             $physicalNative='PASS'
+          }
+          if($physicalSource -eq $testedHiiGraphSource -and
+             $pb -match '(?m)^proof-hii-navigation = PASS\s*$' -and
+             $pb -match '(?m)^proof-hii-navigation-required-events = PASS\s*$'){
+            $physicalNavigation='PASS'
           }
           if($physicalSource -eq $testedHiiGraphSource -and
              $pb -match '(?m)^proof-internal-speaker-pin = PASS\s*$'){
