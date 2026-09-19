@@ -204,3 +204,171 @@ jobs:
             boot/uefi-hii-graph-prompt-speech-v1/realtime.wav
             boot/uefi-hii-graph-prompt-speech-v1/realtime-proof.txt
           if-no-files-found: error
+
+
+  realtime-amd5800h-real:
+    needs: realtime-nav
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: src
+          clean: false
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: uefi-realtime-screenreader
+          path: src/boot/uefi-hii-graph-prompt-speech-v1/pc-runner-evidence
+
+      - name: Bind exact ASUS Ryzen physical runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:RUNNER_NAME -ne 'AMD-5800H-REAL'){
+            throw "wrong runner: $env:RUNNER_NAME"
+          }
+
+          $cs=Get-CimInstance Win32_ComputerSystem
+          $cpu=Get-CimInstance Win32_Processor | Select-Object -First 1
+          $bios=Get-CimInstance Win32_BIOS
+
+          if([string]$cs.Manufacturer -notmatch 'ASUSTeK'){
+            throw "unexpected manufacturer: $($cs.Manufacturer)"
+          }
+          if([string]$cs.Model -notmatch 'M1603QA'){
+            throw "unexpected model: $($cs.Model)"
+          }
+          if([string]$cpu.Name -notmatch '5800H'){
+            throw "unexpected cpu: $($cpu.Name)"
+          }
+          if([string]$bios.SMBIOSBIOSVersion -ne 'M1603QA.308'){
+            throw "unexpected BIOS: $($bios.SMBIOSBIOSVersion)"
+          }
+
+          $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+          $principal=[Security.Principal.WindowsPrincipal]::new($identity)
+          if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){
+            throw 'AMD-5800H-REAL must run elevated'
+          }
+
+          try {
+            $secureBoot=[bool](Confirm-SecureBootUEFI)
+          } catch {
+            throw "UEFI Secure Boot state unavailable: $($_.Exception.Message)"
+          }
+          if($secureBoot){
+            throw 'Secure Boot must remain disabled for the current unsigned UEFI test image'
+          }
+
+          $ev='boot/uefi-hii-graph-prompt-speech-v1/pc-runner-evidence'
+          @(
+            "runner=$env:RUNNER_NAME"
+            "manufacturer=$($cs.Manufacturer)"
+            "model=$($cs.Model)"
+            "cpu=$($cpu.Name)"
+            "bios=$($bios.SMBIOSBIOSVersion)"
+            "secure-boot=DISABLED"
+            "administrator=PASS"
+            "host-binding=PASS"
+          ) | Set-Content (Join-Path $ev 'pc-host.txt') -Encoding utf8
+
+          'UEFI_REALTIME_PC_RUNNER_BINDING=PASS'
+
+      - name: Verify physical HDA identities
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $ids=@(
+            Get-CimInstance Win32_PnPEntity -ErrorAction Stop |
+              ForEach-Object { [string]$_.PNPDeviceID } |
+              Where-Object { $_ }
+          )
+          if(-not ($ids -match 'VEN_1022&DEV_15E3')){
+            throw 'AMD 1022:15E3 analog HDA controller not present'
+          }
+          if(-not ($ids -match 'VEN_10EC&DEV_0256')){
+            throw 'Realtek 10EC:0256 codec not present'
+          }
+
+          $ev='boot/uefi-hii-graph-prompt-speech-v1/pc-runner-evidence'
+          @(
+            'amd-hda-1022-15e3=PASS'
+            'realtek-codec-10ec-0256=PASS'
+            'physical-audio-identity=PASS'
+          ) | Set-Content (Join-Path $ev 'pc-audio.txt') -Encoding ascii
+
+          'UEFI_REALTIME_PC_HDA_IDENTITY=PASS'
+
+      - name: Gate realtime EFI artifact on the physical PC
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $ev='boot/uefi-hii-graph-prompt-speech-v1/pc-runner-evidence'
+          $efi=Join-Path $ev 'REALTIME.EFI'
+          $serial=Join-Path $ev 'realtime.serial'
+          $proof=Join-Path $ev 'realtime-proof.txt'
+          $wav=Join-Path $ev 'realtime.wav'
+
+          foreach($p in @($efi,$serial,$proof,$wav)){
+            if(-not (Test-Path $p)){ throw "missing artifact: $p" }
+          }
+
+          $bytes=[IO.File]::ReadAllBytes($efi)
+          if($bytes.Length -lt 4096){ throw "EFI too small: $($bytes.Length)" }
+          if($bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a){ throw 'EFI MZ header missing' }
+
+          $ascii=[Text.Encoding]::ASCII.GetString($bytes)
+          foreach($marker in @(
+            'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA',
+            'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS',
+            'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS',
+            'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS',
+            'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3',
+            'HDA_CODEC_SELECTION=REALTEK_10EC_0256'
+          )){
+            if(-not $ascii.Contains($marker)){ throw "EFI marker missing: $marker" }
+          }
+
+          $serialText=Get-Content $serial -Raw
+          foreach($marker in @(
+            'HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA',
+            'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS',
+            'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS',
+            'HII_GRAPH_NAV_LPIB_PROGRESS=PASS',
+            'STATUS=PASS'
+          )){
+            if(-not $serialText.Contains($marker)){ throw "runtime proof marker missing: $marker" }
+          }
+
+          $proofText=Get-Content $proof -Raw
+          foreach($marker in @(
+            'HII_GRAPH_NAV_REALTIME=PASS',
+            'HII_GRAPH_SPEECH_DMA_REUSE=PASS',
+            'BOOT_MEDIA_PERSISTENT_PROOF=PASS'
+          )){
+            if(-not $proofText.Contains($marker)){ throw "persistent proof marker missing: $marker" }
+          }
+
+          $hash=(Get-FileHash $efi -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            "realtime-efi-sha256=$hash"
+            "realtime-efi-bytes=$($bytes.Length)"
+            'qemu-ovmf-realtime-proof=PASS'
+            'interruptible-speech=PASS'
+            'hda-lpib-progress=PASS'
+            'physical-pc-artifact-gate=PASS'
+            'physical-bare-metal-boot=NOT_EXECUTED_BY_THIS_JOB'
+            'audible-speaker=REQUIRES_HUMAN_CONFIRMATION'
+          ) | Set-Content (Join-Path $ev 'pc-gate.txt') -Encoding ascii
+
+          'UEFI_REALTIME_SCREENREADER_PC_RUNNER=PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefi-realtime-screenreader-amd5800h-real
+          path: src/boot/uefi-hii-graph-prompt-speech-v1/pc-runner-evidence/
+          if-no-files-found: error
