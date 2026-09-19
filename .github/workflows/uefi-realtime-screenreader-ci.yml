@@ -6,6 +6,7 @@ on:
     paths:
       - 'boot/uefi-hii-graph-prompt-speech-v1/**'
       - 'boot/uefi-native-speech-v1/build_uefi_native_speech.py'
+      - 'boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py'
       - '.github/workflows/uefi-realtime-screenreader-ci.yml'
   workflow_dispatch:
 
@@ -237,6 +238,7 @@ jobs:
           cmp "$root/CURRENTVALUE.EFI" "$root/CURRENTVALUE-2.EFI"
           rm -f "$root/CURRENTVALUE-2.EFI"
           grep -F 'OS_UEFI_HII_CURRENT_OPTION_SPEECH_BUILD=PASS' "$root/current-value-build.log"
+          grep -F 'current-option-max-spoken-graphemes=8' "$root/current-value-build.log"
           python - <<'PY'
           from pathlib import Path
           image=Path('boot/uefi-hii-current-option-speech-v1/CURRENTVALUE.EFI').read_bytes()
