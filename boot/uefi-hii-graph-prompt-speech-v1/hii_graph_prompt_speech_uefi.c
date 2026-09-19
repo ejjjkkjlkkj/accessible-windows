@@ -4,6 +4,10 @@ typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef unsigned long long usize;
 
+#ifndef QEV_SOURCE_BLOB
+#define QEV_SOURCE_BLOB "UNBOUND"
+#endif
+
 typedef u64 (*stall_fn)(usize microseconds);
 typedef u64 (*allocate_pages_fn)(u32 type, u32 memory_type, usize pages, u64 *memory);
 
@@ -64,6 +68,7 @@ static stall_fn g_stall;
 static allocate_pages_fn g_allocate_pages;
 static u64 g_speech_dma_base;
 static u8 g_speech_dma_allocations;
+static u8 g_proof_overflow;
 
 typedef u64 (*locate_protocol_fn)(const void *protocol, void *registration, void **interface_out);
 typedef u64 (*handle_protocol_fn)(void *handle, const void *protocol, void **interface_out);
@@ -211,14 +216,22 @@ static void marker(const char *s) {
 }
 
 static void proof_puts(char *buf, usize cap, usize *n, const char *s) {
-    while (*s && *n + 1u < cap) buf[(*n)++] = *s++;
+    while (*s) {
+        if (*n + 1u >= cap) {
+            g_proof_overflow = 1;
+            return;
+        }
+        buf[(*n)++] = *s++;
+    }
 }
 static void proof_hex8(char *buf, usize cap, usize *n, u8 value) {
     static const char h[] = "0123456789ABCDEF";
-    if (*n + 2u < cap) {
-        buf[(*n)++] = h[(value >> 4) & 0xf];
-        buf[(*n)++] = h[value & 0xf];
+    if (*n + 2u >= cap) {
+        g_proof_overflow = 1;
+        return;
     }
+    buf[(*n)++] = h[(value >> 4) & 0xf];
+    buf[(*n)++] = h[value & 0xf];
 }
 static void proof_hex32(char *buf, usize cap, usize *n, u32 value) {
     proof_hex8(buf,cap,n,(u8)(value >> 24));
@@ -232,8 +245,9 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
         '\\','Q','E','V','A','R','Y','N','O','X','-','P','H','Y','S','I','C','A','L',
         '-','P','R','O','O','F','.','T','X','T',0
     };
-    char proof[1024];
+    char proof[4096];
     usize n = 0;
+    g_proof_overflow = 0;
     loaded_image_protocol_head *loaded = 0;
     simple_fs_protocol *fs = 0;
     file_protocol *root = 0;
@@ -256,6 +270,9 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     }
 
     proof_puts(proof,sizeof(proof),&n,"QEVARYNOX-UEFI-PHYSICAL-BOOT-PROOF-V1\r\n");
+    proof_puts(proof,sizeof(proof),&n,"UEFI_SOURCE_BLOB=");
+    proof_puts(proof,sizeof(proof),&n,QEV_SOURCE_BLOB);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"STATUS=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_PROMPT_SOURCE=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_CONTROLLER_SELECTION=");
@@ -325,6 +342,12 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAVIGATION=NOT_ENABLED\r\n");
 #endif
     proof_puts(proof,sizeof(proof),&n,"AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION\r\n");
+
+    if (g_proof_overflow) {
+        if (file->close) file->close(file);
+        if (root->close) root->close(root);
+        return 0;
+    }
 
     usize bytes = n;
     u64 st = file->write(file, &bytes, proof);
@@ -1280,6 +1303,7 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     serial_init();
     marker("QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V1");
     marker("STATE=START");
+    serial_puts("UEFI_SOURCE_BLOB="); serial_puts(QEV_SOURCE_BLOB); serial_puts("\r\n");
     marker("FRAMEWORK=NONE");
     marker("EDK2=NONE");
 

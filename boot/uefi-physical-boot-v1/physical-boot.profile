@@ -22,3 +22,5 @@ proof-internal-speaker-path = PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS + PHYSICAL_
 proof-route-readback = HDA_ROUTE_POWER_D0=PASS + HDA_ROUTE_AMPLIFIERS=PASS + HDA_EAPD_POLICY=PASS + HDA_DAC_STREAM_READBACK=PASS + HDA_PIN_CONTROL_READBACK=PASS
 proof-selector-count = HDA_SELECTOR_WRITES_REQUIRED must equal HDA_SELECTOR_WRITES_APPLIED
 closure = audible confirmation is accepted only after machine-bound HDA runtime, internal-speaker path, route readbacks, DMA, and navigation all pass
+proof-source-provenance = UEFI_SOURCE_BLOB must equal the current git blob of hii_graph_prompt_speech_uefi.c
+proof-buffer-integrity = proof buffer is 4096 bytes and any overflow makes BOOT_MEDIA_PERSISTENT_PROOF fail

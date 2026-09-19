@@ -29,10 +29,11 @@ jobs:
           set -euo pipefail
           src=boot/uefi-hii-graph-prompt-speech-v1
           out=boot/uefi-physical-boot-v1/build
+          source_blob=$(git rev-parse "HEAD:$src/hii_graph_prompt_speech_uefi.c")
           mkdir -p "$out"
           python "$src/generate_units.py" "$out/speech_units.c" "$out/speech-unit-metadata.txt"
           flags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
-          clang $flags -DQEV_INTERACTIVE_NAV=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main.obj"
+          clang $flags -DQEV_INTERACTIVE_NAV=1 "-DQEV_SOURCE_BLOB=\"$source_blob\"" -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main.obj"
           clang $flags -c "$out/speech_units.c" -o "$out/units.obj"
           lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$out/BOOTX64.EFI" "$out/main.obj" "$out/units.obj"
           test -s "$out/BOOTX64.EFI"
@@ -52,6 +53,7 @@ jobs:
           grep -aF 'HII_GRAPH_SPEECH_DMA_REUSE=PASS' "$out/BOOTX64.EFI"
           grep -aF 'BOOT_MEDIA_PERSISTENT_PROOF=PASS' "$out/BOOTX64.EFI"
           grep -aF 'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$out/BOOTX64.EFI"
+          grep -aF "UEFI_SOURCE_BLOB=$source_blob" "$out/BOOTX64.EFI"
           grep -aF 'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS' "$out/BOOTX64.EFI"
           grep -aF 'PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS' "$out/BOOTX64.EFI"
           grep -aF 'HDA_ROUTE_POWER_D0=PASS' "$out/BOOTX64.EFI"
@@ -212,6 +214,7 @@ jobs:
           $proof=Join-Path $root 'build/SYNTHETIC-PROOF.TXT'
           @(
             'QEVARYNOX-UEFI-PHYSICAL-BOOT-PROOF-V1'
+            'UEFI_SOURCE_BLOB=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
             'STATUS=PASS'
             'HII_PROMPT_SOURCE=PASS'
             'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3'
@@ -248,15 +251,15 @@ jobs:
             'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION'
           ) | Set-Content $proof -Encoding ascii
 
-          & "$root/verify_physical_boot_proof.ps1" -ProofPath $proof | Out-Host
-          & "$root/verify_physical_boot_proof.ps1" -ProofPath $proof -AudibleSpeakerConfirmed | Out-Host
+          & "$root/verify_physical_boot_proof.ps1" -ProofPath $proof -ExpectedSourceBlob 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' | Out-Host
+          & "$root/verify_physical_boot_proof.ps1" -ProofPath $proof -ExpectedSourceBlob 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' -AudibleSpeakerConfirmed | Out-Host
 
           function Assert-Rejected([string]$name,[string]$content){
             $path=Join-Path $root "build/$name.txt"
             Set-Content $path $content -Encoding ascii -NoNewline
             $rejected=$false
             try {
-              & "$root/verify_physical_boot_proof.ps1" -ProofPath $path -AudibleSpeakerConfirmed | Out-Null
+              & "$root/verify_physical_boot_proof.ps1" -ProofPath $path -ExpectedSourceBlob 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' -AudibleSpeakerConfirmed | Out-Null
             } catch {
               $rejected=$true
               Write-Host "$name rejection: $($_.Exception.Message)"
@@ -274,6 +277,10 @@ jobs:
             'HDA_SELECTOR_WRITES_APPLIED=0x00'
           ))
           Assert-Rejected 'negative-duplicate-field' ($raw + "`r`nPHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=NOT_ESTABLISHED`r`n")
+          Assert-Rejected 'negative-source-mismatch' ($raw.Replace(
+            'UEFI_SOURCE_BLOB=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            'UEFI_SOURCE_BLOB=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+          ))
           'PHYSICAL_PROOF_VERIFIER_NEGATIVE_GATES=PASS'
 
       - name: Write package manifest
@@ -303,6 +310,8 @@ jobs:
           INTERNAL_SPEAKER_ROUTE=REQUIRED
           HDA_ROUTE_READBACK=REQUIRED
           SELECTOR_WRITE_COUNT_MATCH=REQUIRED
+          SOURCE_BLOB_PROVENANCE=REQUIRED
+          PROOF_BUFFER_OVERFLOW=FAIL_CLOSED
           PROOF_FILE=QEVARYNOX-PHYSICAL-PROOF.TXT
           AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION
           FINAL_CLOSURE_REQUIRES=RUNTIME_INTERNAL_SPEAKER_ROUTE_PLUS_HUMAN_AUDIBLE_CONFIRMATION
