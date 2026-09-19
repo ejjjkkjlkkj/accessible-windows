@@ -1106,7 +1106,7 @@ jobs:
           if($testedSecureBootProof -ne (git rev-parse "origin/os:$secureBootProof").Trim()){ 'AMD_FINAL_STALE_SECURE_BOOT_PROOF=SKIP'; exit 0 }
           if($testedGraphProof -ne (git rev-parse "origin/os:$graphProof").Trim()){ 'AMD_FINAL_STALE_HII_GRAPH_PROOF=SKIP'; exit 0 }
           if($testedWorkflow -ne (git rev-parse "origin/os:$workflow").Trim()){ 'AMD_FINAL_STALE_WORKFLOW=SKIP'; exit 0 }
-          $lines=Get-Content $proof | Where-Object { $_ -notmatch '^proof(-| = )' }
+          $lines=Get-Content $proof | Where-Object { $_ -notmatch '^proof(-| = )' -and $_ -notmatch '^final-proof-state = ' }
           $vm='NOT_FOUND'
           $vmSpeech='NOT_ESTABLISHED'
           $vmIntegrated='NOT_ESTABLISHED'
@@ -1137,6 +1137,11 @@ jobs:
             if($qw -match 'qemu-waveform = PASS'){ $qemuWave='PASS' }
             elseif($qw -match 'NOT_ESTABLISHED_ON_WINDOWS_BACKEND'){ $qemuWave='NOT_ESTABLISHED_ON_WINDOWS_BACKEND' }
           }
+          $lines += 'final-proof-state = PASS'
+          $lines += "proof-current-option-proof-blob = $testedCurrentProof"
+          $lines += "proof-platform-commit-proof-blob = $testedCommitProof"
+          $lines += "proof-secure-boot-proof-blob = $testedSecureBootProof"
+          $lines += "proof-hii-graph-proof-blob = $testedGraphProof"
           $lines += 'proof = PASS'
           $lines += "proof-run = $env:GITHUB_RUN_ID"
           $lines += "proof-head-sha = $env:GITHUB_SHA"
