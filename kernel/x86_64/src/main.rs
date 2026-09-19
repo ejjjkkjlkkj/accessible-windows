@@ -68,6 +68,8 @@ use core::panic::PanicInfo;
 
 const DEBUG_PORT: u16 = 0x00e9;
 const PCI_CONFIG_ADDRESS_PORT: u16 = 0x0cf8;
+const ECAM_BUS_BYTES: u64 = 1 << 20;
+const MAX_HANDOFF_MMIO_RANGES: usize = 5;
 const PCI_CONFIG_DATA_PORT: u16 = 0x0cfc;
 
 #[inline(always)]
@@ -437,14 +439,55 @@ fn activate_virtual_memory(handoff: &KernelHandoff) -> Option<virtual_memory::Ac
     }
     debug_write("AW_VMM_NXE_ON\n");
 
+    // Build the exact firmware MMIO ranges that must survive the CR3 switch.
+    // ECAM reserves 1 MiB of configuration space per bus by specification.
+    let mut mmio_ranges = [(0_u64, 0_u64); MAX_HANDOFF_MMIO_RANGES];
+    let mut mmio_count = 0_usize;
+
+    if handoff.flags & HANDOFF_FLAG_FRAMEBUFFER_PRESENT != 0 {
+        let framebuffer = handoff.framebuffer;
+        let Some(end) = framebuffer.physical_address.checked_add(framebuffer.byte_len) else {
+            debug_write("AW_VMM_FAIL reason=framebuffer_range_overflow\n");
+            return None;
+        };
+        mmio_ranges[mmio_count] = (framebuffer.physical_address, end);
+        mmio_count += 1;
+    }
+
+    if handoff.flags & HANDOFF_FLAG_PCIE_ECAM_PRESENT != 0 {
+        for region in handoff
+            .pcie_ecam
+            .iter()
+            .take(handoff.pcie_ecam_count as usize)
+            .copied()
+        {
+            if mmio_count >= mmio_ranges.len() {
+                debug_write("AW_VMM_FAIL reason=too_many_mmio_ranges\n");
+                return None;
+            }
+            let bus_count = u64::from(region.end_bus) - u64::from(region.start_bus) + 1;
+            let Some(byte_len) = bus_count.checked_mul(ECAM_BUS_BYTES) else {
+                debug_write("AW_VMM_FAIL reason=ecam_size_overflow\n");
+                return None;
+            };
+            let Some(end) = region.base_address.checked_add(byte_len) else {
+                debug_write("AW_VMM_FAIL reason=ecam_range_overflow\n");
+                return None;
+            };
+            mmio_ranges[mmio_count] = (region.base_address, end);
+            mmio_count += 1;
+        }
+    }
+
     // SAFETY: CPL0 single-core bootstrap after IDT/TSS install. Page-table
-    // frames come from conventional RAM outside the kernel image, and the map
-    // identity-covers the current RIP, stack, framebuffer and ECAM window, so
-    // execution continues across the CR3 switch.
+    // frames come from conventional RAM outside the kernel image. The map keeps
+    // the low bootstrap window and all handed-off framebuffer/ECAM ranges
+    // identity-mapped, so later device access remains valid after CR3 changes.
     let map = unsafe {
         virtual_memory::activate(
             frame_allocator::allocate,
             interrupts::double_fault_guard_page(),
+            &mmio_ranges[..mmio_count],
         )
     };
 
@@ -459,6 +502,9 @@ fn activate_virtual_memory(handoff: &KernelHandoff) -> Option<virtual_memory::Ac
             debug_write_u8(virtual_memory::IDENTITY_GIB as u8);
             debug_write(" tables=");
             debug_write_u64(map.table_count as u64);
+            debug_write("\n");
+            debug_write("AW_VMM_HANDOFF_MMIO_OK ranges=");
+            debug_write_u64(map.extra_identity_range_count as u64);
             debug_write("\n");
             debug_write("AW_VMM_WX_LAYOUT text=");
             debug_write_hex_u64(map.layout.text.0);
