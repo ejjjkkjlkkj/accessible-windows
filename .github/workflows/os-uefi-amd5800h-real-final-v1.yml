@@ -37,7 +37,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          current="$GITHUB_RUN_ID"
+          export current="$GITHUB_RUN_ID"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs?branch=os&per_page=100" --jq \
             '.workflow_runs[] | select(.name=="os-uefi-amd5800h-real-final-v1") | select((.status=="queued" or .status=="pending" or .status=="in_progress") and (.id|tostring)!=env.current) | .id' \
             | while read -r run; do
