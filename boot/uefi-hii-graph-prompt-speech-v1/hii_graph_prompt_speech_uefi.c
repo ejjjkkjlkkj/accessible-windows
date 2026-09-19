@@ -69,6 +69,7 @@ static stall_fn g_stall;
 static allocate_pages_fn g_allocate_pages;
 static u64 g_speech_dma_base;
 static u8 g_speech_dma_allocations;
+static u8 g_speech_stream_initialized;
 static u8 g_proof_overflow;
 static u8 g_speech_active;
 static u64 g_speech_timeout_us;
@@ -780,6 +781,7 @@ static void speech_dma_stop(void) {
         u32 timeout = 100000;
         while (timeout-- && (sd[0] & 2u)) {}
         sd[3] = 0x1cu;
+        if (g_stall) g_stall(1000);
     }
     g_speech_active = 0;
     g_speech_timeout_us = 0;
@@ -788,65 +790,81 @@ static void speech_dma_stop(void) {
 
 static int speech_dma_begin(const char *text, u32 text_count) {
     if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 32u) return 0;
-    const u32 pcm_off = 0x1000;
-    if (!qev_unit_bank_len || qev_unit_bank_len > (128u * 4096u - pcm_off)) return 0;
+    const u32 pcm_off = 0x1000u;
+    const u32 dma_pages = 512u;
+    const u32 dma_bytes = dma_pages * 4096u;
+    if (!qev_unit_bank_len || pcm_off >= dma_bytes) return 0;
 
     if (g_speech_active) speech_dma_stop();
 
-    /* Allocate the below-4GiB BDL/unit-bank arena once. Focus changes only
-       rebuild descriptors and restart the same HDA stream, which allows the
-       current utterance to be cancelled without leaking DMA pages. */
+    /*
+     * Build the complete semantic label as contiguous PCM. This keeps realtime
+     * interruption while avoiding one BDL descriptor per allophone and the
+     * alignment failures seen with longer HII labels.
+     */
     u64 base = g_speech_dma_base;
     if (!base) {
         base = 0xffffffffu;
-        if (g_allocate_pages(1, 4, 128, &base) != 0 || !base || base > 0xffffffffu) return 0;
+        if (g_allocate_pages(1, 4, dma_pages, &base) != 0 || !base || base > 0xffffffffu) return 0;
         g_speech_dma_base = base;
         ++g_speech_dma_allocations;
-        volatile u8 *pcm_init = (volatile u8 *)(usize)(base + pcm_off);
-        copy_bytes(pcm_init, qev_unit_bank, qev_unit_bank_len);
-        fence();
     }
 
     volatile u8 *bdl = (volatile u8 *)(usize)base;
-    u32 entries = 0;
+    volatile u8 *pcm = (volatile u8 *)(usize)(base + pcm_off);
     u32 total_bytes = 0;
+
     for (u32 i = 0; i < text_count; ++i) {
         u8 ch = (u8)text[i];
         if (ch == (u8)' ') {
-            if (entries >= 64u || qev_sil_unit_index >= qev_unit_count) return 0;
+            if (qev_sil_unit_index >= qev_unit_count) return 0;
             u32 ui = qev_sil_unit_index;
             u32 off = qev_unit_off[ui];
             u32 len = qev_unit_len[ui];
             if (!len || off > qev_unit_bank_len || len > qev_unit_bank_len - off) return 0;
-            volatile u8 *e = bdl + entries * 16u;
-            *(volatile u64 *)(e + 0x00) = base + pcm_off + off;
-            *(volatile u32 *)(e + 0x08) = len;
-            *(volatile u32 *)(e + 0x0c) = 0;
+            if (total_bytes > dma_bytes - pcm_off || len > dma_bytes - pcm_off - total_bytes) return 0;
+            copy_bytes(pcm + total_bytes, qev_unit_bank + off, len);
             total_bytes += len;
-            ++entries;
             continue;
         }
+
         if (ch < (u8)'a' || ch > (u8)'z') return 0;
         u32 li = (u32)(ch - (u8)'a');
         u32 n = qev_letter_unit_count[li];
         if (!n || n > 8u) return 0;
         for (u32 j = 0; j < n; ++j) {
-            if (entries >= 64u) return 0;
             u32 ui = qev_letter_units[li * 8u + j];
             if (ui >= qev_unit_count) return 0;
             u32 off = qev_unit_off[ui];
             u32 len = qev_unit_len[ui];
             if (!len || off > qev_unit_bank_len || len > qev_unit_bank_len - off) return 0;
-            volatile u8 *e = bdl + entries * 16u;
-            *(volatile u64 *)(e + 0x00) = base + pcm_off + off;
-            *(volatile u32 *)(e + 0x08) = len;
-            *(volatile u32 *)(e + 0x0c) = 0;
+            if (total_bytes > dma_bytes - pcm_off || len > dma_bytes - pcm_off - total_bytes) return 0;
+            copy_bytes(pcm + total_bytes, qev_unit_bank + off, len);
             total_bytes += len;
-            ++entries;
         }
     }
-    if (!entries || !total_bytes) return 0;
-    *(volatile u32 *)(bdl + (entries - 1u) * 16u + 0x0c) = 1;
+    if (!total_bytes) return 0;
+
+    u32 dma_payload = (total_bytes + 127u) & ~127u;
+    if (dma_payload < total_bytes || dma_payload > dma_bytes - pcm_off) return 0;
+    for (u32 i = total_bytes; i < dma_payload; ++i) pcm[i] = 0;
+
+    const u32 max_bdl_bytes = 0x10000u;
+    u32 entries = 0;
+    u32 described = 0;
+    while (described < dma_payload) {
+        if (entries >= 64u) return 0;
+        u32 len = dma_payload - described;
+        if (len > max_bdl_bytes) len = max_bdl_bytes;
+        volatile u8 *e = bdl + entries * 16u;
+        *(volatile u64 *)(e + 0x00) = base + pcm_off + described;
+        *(volatile u32 *)(e + 0x08) = len;
+        *(volatile u32 *)(e + 0x0c) = 0u;
+        described += len;
+        ++entries;
+    }
+    if (!entries) return 0;
+    *(volatile u32 *)(bdl + (entries - 1u) * 16u + 0x0c) = 1u;
     fence();
 
     volatile u8 *sd = speech_stream_descriptor();
@@ -856,16 +874,22 @@ static int speech_dma_begin(const char *text, u32 text_count) {
     u32 timeout = 100000;
     while (timeout-- && (sd[0] & 2u)) {}
     if (!timeout) return 0;
-    sd[0] = (u8)(sd[0] | 1u);
-    timeout = 100000;
-    while (timeout-- && !(sd[0] & 1u)) {}
-    if (!timeout) return 0;
-    sd[0] = (u8)(sd[0] & ~1u);
-    timeout = 100000;
-    while (timeout-- && (sd[0] & 1u)) {}
-    if (!timeout) return 0;
 
-    *(volatile u32 *)(sd + 0x08) = total_bytes;
+    if (!g_speech_stream_initialized) {
+        sd[0] = (u8)(sd[0] | 1u);
+        timeout = 100000;
+        while (timeout-- && !(sd[0] & 1u)) {}
+        if (!timeout) return 0;
+        sd[0] = (u8)(sd[0] & ~1u);
+        timeout = 100000;
+        while (timeout-- && (sd[0] & 1u)) {}
+        if (!timeout) return 0;
+        g_speech_stream_initialized = 1u;
+    }
+    sd[3] = 0x1cu;
+    if (g_stall) g_stall(1000);
+
+    *(volatile u32 *)(sd + 0x08) = dma_payload;
     *(volatile u16 *)(sd + 0x0c) = (u16)(entries - 1u);
     *(volatile u16 *)(sd + 0x12) = 0x0011;
     *(volatile u32 *)(sd + 0x18) = (u32)base;
@@ -876,11 +900,11 @@ static int speech_dma_begin(const char *text, u32 text_count) {
     sd[2] = 0x10;
     sd[0] = (u8)(sd[0] | 2u);
 
-    /* 48 kHz, signed 16-bit stereo = 192000 bytes/s. Keep a hardware guard,
-       but do not block the keyboard loop while this deadline is running. */
-    u64 play_us = (((u64)total_bytes * 125ull) + 23ull) / 24ull;
+    /* 48 kHz, signed 16-bit stereo = 192000 bytes/s. Polling stays async so
+       keyboard focus can cancel the current utterance immediately. */
+    u64 play_us = (((u64)dma_payload * 125ull) + 23ull) / 24ull;
     play_us += 150000ull;
-    if (play_us > 8000000ull) {
+    if (play_us > 12000000ull) {
         speech_dma_stop();
         return 0;
     }
