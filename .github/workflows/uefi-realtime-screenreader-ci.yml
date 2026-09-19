@@ -11,6 +11,10 @@ on:
       - '.github/workflows/uefi-realtime-screenreader-ci.yml'
   workflow_dispatch:
 
+concurrency:
+  group: uefi-realtime-screenreader-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   realtime-nav:
     runs-on: ubuntu-latest
