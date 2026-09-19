@@ -388,8 +388,200 @@ jobs:
           if-no-files-found: error
 
 
+  semantic-platform-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install isolated PlatformDxe interaction runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+
+      - name: Build commit and verifier
+        run: |
+          set -euo pipefail
+          src=boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py
+          root=boot/uefi-hii-platform-commit-v1
+          python "$src" "$root/INTERACT-COMMIT.EFI" --wait-platform-commit | tee "$root/interaction-build.log"
+          python "$src" "$root/INTERACT-COMMIT-2.EFI" --wait-platform-commit > "$root/interaction-build-2.log"
+          cmp "$root/INTERACT-COMMIT.EFI" "$root/INTERACT-COMMIT-2.EFI"
+          rm -f "$root/INTERACT-COMMIT-2.EFI"
+          python "$src" "$root/INTERACT-VERIFY.EFI" --platform-probe > "$root/interaction-verify-build.log"
+          grep -F 'platform-target-only=enabled' "$root/interaction-build.log"
+          grep -F 'hii-down-commit=enabled' "$root/interaction-build.log"
+
+      - name: Resolve OVMF
+        run: |
+          set -euo pipefail
+          CODE=''; VARS=''
+          for pair in \
+            '/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd' \
+            '/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd' \
+            '/usr/share/edk2/ovmf/OVMF_CODE.fd|/usr/share/edk2/ovmf/OVMF_VARS.fd'
+          do
+            IFS='|' read -r code vars <<< "$pair"
+            if test -f "$code" -a -f "$vars"; then CODE="$code"; VARS="$vars"; break; fi
+          done
+          test -n "$CODE" -a -n "$VARS"
+          printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-hii-platform-commit-v1/interaction-ovmf.env
+
+      - name: Focus speak ENTER commit and reboot verify
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-platform-commit-v1
+          source "$root/interaction-ovmf.env"
+          cp "$VARS" "$root/interaction-vars.fd"
+          rm -rf "$root/interaction-esp"
+          mkdir -p "$root/interaction-esp/EFI/BOOT"
+          cp "$root/INTERACT-COMMIT.EFI" "$root/interaction-esp/EFI/BOOT/BOOTX64.EFI"
+          rm -f "$root/interaction.serial" "$root/interaction.wav" "$root/interaction-qmp.sock" "$root/interaction-result.txt"
+
+          qemu-system-x86_64 \
+            -machine q35,accel=tcg -m 192M -vga std \
+            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,file="$root/interaction-vars.fd" \
+            -drive format=raw,file=fat:rw:"$root/interaction-esp" \
+            -audiodev wav,id=aud,path="$root/interaction.wav",out.frequency=48000,out.channels=2 \
+            -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0 \
+            -device hda-micro,bus=hda0.0,cad=0,audiodev=aud,mixer=on \
+            -display none -monitor none \
+            -qmp unix:"$root/interaction-qmp.sock",server=on,wait=off \
+            -serial file:"$root/interaction.serial" \
+            -parallel none -net none -no-reboot -no-shutdown &
+          qpid=$!
+          trap 'kill $qpid 2>/dev/null || true' EXIT
+
+          ROOT="$root" python - <<'PY'
+          from pathlib import Path
+          import json,os,re,socket,time
+          root=Path(os.environ['ROOT']); serial=root/'interaction.serial'; qmp=root/'interaction-qmp.sock'
+          def raw(): return serial.read_bytes() if serial.exists() else b''
+          def wait(tok,label,seconds=50):
+              end=time.time()+seconds
+              while time.time()<end:
+                  b=raw()
+                  if b'STATUS=BLOCKED\r\n' in b: raise SystemExit(f'blocked {label}: '+repr(b[-30000:]))
+                  if tok in b:return b
+                  time.sleep(.05)
+              raise SystemExit(f'timeout {label}: '+repr(raw()[-30000:]))
+          b=wait(b'HII_NAVIGATION_KEY=WAIT_DOWN\r\n','DOWN')
+          assert b'PLATFORM_WRITABLE_TARGET=PASS\r\n' in b
+          initial=int.from_bytes(bytes.fromhex(re.findall(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',b)[-1].decode())[:4],'little')
+          end=time.time()+10
+          while time.time()<end and not qmp.exists(): time.sleep(.02)
+          assert qmp.exists()
+          with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as s:
+              s.connect(str(qmp)); f=s.makefile('rwb',buffering=0)
+              assert 'QMP' in json.loads(f.readline())
+              f.write(b'{"execute":"qmp_capabilities"}\r\n')
+              while True:
+                  if 'return' in json.loads(f.readline()): break
+              def send(k):
+                  f.write((json.dumps({'execute':'send-key','arguments':{'keys':[{'type':'qcode','data':k}],'hold-time':40}})+'\r\n').encode())
+                  while True:
+                      m=json.loads(f.readline())
+                      if 'return' in m:return
+                      if 'error' in m:raise SystemExit(repr(m))
+              send('down')
+              b=wait(b'HII_COMMIT_KEY=WAIT_ENTER\r\n','ENTER')
+              target=int.from_bytes(bytes.fromhex(re.findall(br'NAV_NEXT_OPTION_VALUE_RAW8_HEX=([0-9A-F]{16})',b)[-1].decode())[:4],'little')
+              label=re.findall(br'NAV_FOCUS_OPTION_TEXT=([^\r\n]+)',b)[-1].decode('ascii','replace').strip()
+              assert target!=initial,(initial,target)
+              assert b'NAV_FOCUS_SPEECH_HDA=PASS\r\n' in b
+              assert b'ROUTE_CONFIG=PASS\r\n' not in b
+              send('ret')
+          b=wait(b'STATUS=PASS\r\n','commit')
+          for t in [b'HII_COMMIT_KEY=PASS\r\n',b'BLOCK_TO_CONFIG=PASS\r\n',b'ROUTE_CONFIG=PASS\r\n',b'COMMIT_CONFIRMATION_SPEECH_HDA=PASS\r\n']:
+              assert t in b,t
+          root.joinpath('interaction-result.txt').write_text(
+              f'initial-value = {initial}\n'
+              f'target-value = {target}\n'
+              f'target-label = {label}\n'
+              'focus-speech = PASS\nenter-gate = PASS\nroute-config-after-enter = PASS\nconfirmation-speech = PASS\n'
+          )
+          print('UEFI_PLATFORM_COMMIT_RUNTIME=PASS')
+          PY
+
+          sleep 1
+          kill $qpid 2>/dev/null || true
+          wait $qpid 2>/dev/null || true
+          trap - EXIT
+
+          cp "$root/INTERACT-VERIFY.EFI" "$root/interaction-esp/EFI/BOOT/BOOTX64.EFI"
+          rm -f "$root/interaction-post.serial"
+          qemu-system-x86_64 \
+            -machine q35,accel=tcg -m 192M -vga std \
+            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,file="$root/interaction-vars.fd" \
+            -drive format=raw,file=fat:rw:"$root/interaction-esp" \
+            -audiodev none,id=noaudio \
+            -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0 \
+            -device hda-micro,bus=hda0.0,cad=0,audiodev=noaudio,mixer=on \
+            -display none -monitor none -serial file:"$root/interaction-post.serial" \
+            -parallel none -net none -no-reboot -no-shutdown &
+          qpid=$!
+          trap 'kill $qpid 2>/dev/null || true' EXIT
+          ROOT="$root" python - <<'PY'
+          from pathlib import Path
+          import os,re,time
+          root=Path(os.environ['ROOT'])
+          vals={}
+          for line in (root/'interaction-result.txt').read_text().splitlines():
+              if ' = ' in line:
+                  k,v=line.split(' = ',1); vals[k]=v
+          target=int(vals['target-value']); label=vals['target-label']; p=root/'interaction-post.serial'
+          end=time.time()+50
+          while time.time()<end:
+              b=p.read_bytes() if p.exists() else b''
+              if b'STATUS=BLOCKED\r\n' in b:raise SystemExit(repr(b[-30000:]))
+              if b'STATUS=PASS\r\n' in b:
+                  current=int.from_bytes(bytes.fromhex(re.findall(br'CURRENT_VALUE_RAW8_HEX=([0-9A-F]{16})',b)[-1].decode())[:4],'little')
+                  selected=re.findall(br'SELECTED_OPTION_TEXT=([^\r\n]+)',b)[-1].decode('ascii','replace').strip()
+                  assert (current,selected)==(target,label),(current,selected,target,label)
+                  with root.joinpath('interaction-result.txt').open('a') as out: out.write('same-vars-reboot-persistence = PASS\n')
+                  print('UEFI_PLATFORM_COMMIT_PERSISTENCE=PASS')
+                  break
+              time.sleep(.05)
+          else: raise SystemExit('timeout platform commit verifier')
+          PY
+          sleep 1
+          kill $qpid 2>/dev/null || true
+          wait $qpid 2>/dev/null || true
+          trap - EXIT
+
+      - name: Validate interaction waveform
+        shell: python
+        run: |
+          from pathlib import Path
+          import struct,wave
+          p=Path('boot/uefi-hii-platform-commit-v1/interaction.wav')
+          assert p.exists() and p.stat().st_size>10000,p
+          with wave.open(str(p),'rb') as w:
+              assert (w.getnchannels(),w.getframerate(),w.getsampwidth())==(2,48000,2)
+              raw=w.readframes(w.getnframes())
+          vals=struct.unpack('<'+'h'*(len(raw)//2),raw)
+          assert max(abs(v) for v in vals)>=5000
+          assert sum(abs(v)>=500 for v in vals)>=6000
+          print('UEFI_PLATFORM_INTERACTION_WAVEFORM=PASS')
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefi-semantic-platform-interaction
+          path: |
+            boot/uefi-hii-platform-commit-v1/INTERACT-COMMIT.EFI
+            boot/uefi-hii-platform-commit-v1/INTERACT-VERIFY.EFI
+            boot/uefi-hii-platform-commit-v1/interaction.serial
+            boot/uefi-hii-platform-commit-v1/interaction-post.serial
+            boot/uefi-hii-platform-commit-v1/interaction.wav
+            boot/uefi-hii-platform-commit-v1/interaction-result.txt
+          if-no-files-found: error
+
+
   realtime-amd5800h-real:
-    needs: [realtime-nav, semantic-current-value]
+    needs: [realtime-nav, semantic-current-value, semantic-platform-commit]
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 25
     defaults:
@@ -410,6 +602,11 @@ jobs:
         with:
           name: uefi-semantic-current-value
           path: src/boot/uefi-hii-current-option-speech-v1/pc-runner-evidence
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: uefi-semantic-platform-interaction
+          path: src/boot/uefi-hii-platform-commit-v1/pc-runner-evidence
 
       - name: Bind exact ASUS Ryzen physical runner
         shell: pwsh
