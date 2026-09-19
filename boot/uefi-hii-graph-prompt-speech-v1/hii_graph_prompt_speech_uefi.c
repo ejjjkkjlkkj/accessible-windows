@@ -270,9 +270,7 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     }
 
     proof_puts(proof,sizeof(proof),&n,"QEVARYNOX-UEFI-PHYSICAL-BOOT-PROOF-V1\r\n");
-    proof_puts(proof,sizeof(proof),&n,"UEFI_SOURCE_BLOB=");
-    proof_puts(proof,sizeof(proof),&n,QEV_SOURCE_BLOB);
-    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"UEFI_SOURCE_BLOB=" QEV_SOURCE_BLOB "\r\n");
     proof_puts(proof,sizeof(proof),&n,"STATUS=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_PROMPT_SOURCE=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_CONTROLLER_SELECTION=");
@@ -1303,7 +1301,7 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     serial_init();
     marker("QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V1");
     marker("STATE=START");
-    serial_puts("UEFI_SOURCE_BLOB="); serial_puts(QEV_SOURCE_BLOB); serial_puts("\r\n");
+    serial_puts("UEFI_SOURCE_BLOB=" QEV_SOURCE_BLOB "\r\n");
     marker("FRAMEWORK=NONE");
     marker("EDK2=NONE");
 
