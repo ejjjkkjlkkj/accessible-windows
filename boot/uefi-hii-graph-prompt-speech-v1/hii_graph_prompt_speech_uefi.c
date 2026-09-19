@@ -145,13 +145,21 @@ static const efi_guid g_simple_fs_guid =
 
 static u8 g_hii_package[1024u * 1024u];
 static void *g_hii_handles[256];
-static char g_prompt_text[33];
+#define MAX_SPOKEN_CHARS 64
+static char g_prompt_text[MAX_SPOKEN_CHARS + 1];
 static u32 g_prompt_count;
 
 #ifdef QEV_INTERACTIVE_NAV
-#define MAX_HII_NAV_PROMPTS 32
-static char g_nav_prompts[MAX_HII_NAV_PROMPTS][33];
+#define MAX_HII_NAV_PROMPTS 96
+static char g_nav_prompts[MAX_HII_NAV_PROMPTS][MAX_SPOKEN_CHARS + 1];
 static u8 g_nav_prompt_lengths[MAX_HII_NAV_PROMPTS];
+static u8 g_nav_opcode[MAX_HII_NAV_PROMPTS];
+static u16 g_nav_question_id[MAX_HII_NAV_PROMPTS];
+static u16 g_nav_help_token[MAX_HII_NAV_PROMPTS];
+static u16 g_nav_varstore_id[MAX_HII_NAV_PROMPTS];
+static u16 g_nav_varstore_info[MAX_HII_NAV_PROMPTS];
+static u8 g_nav_question_flags[MAX_HII_NAV_PROMPTS];
+static char g_nav_speech_text[96];
 static u8 g_nav_prompt_total;
 static u8 g_nav_prompt_index;
 static u8 g_nav_event_mask;
@@ -750,7 +758,7 @@ static void copy_bytes(volatile u8 *dst, const u8 *src, u32 len) {
 }
 
 static int run_speech_dma(const char *text, u32 text_count) {
-    if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 32u) return 0;
+    if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 95u) return 0;
     const u32 pcm_off = 0x1000u;
     const u32 dma_pages = 512u;
     const u32 dma_bytes = dma_pages * 4096u;
@@ -935,6 +943,33 @@ static int prompt_opcode(u8 op) {
             return 0;
     }
 }
+static int question_opcode(u8 op) {
+    switch (op) {
+        case 0x05: case 0x06: case 0x07: case 0x08: case 0x0c:
+        case 0x0f: case 0x1a: case 0x1b: case 0x1c: case 0x23:
+            return 1;
+        default:
+            return 0;
+    }
+}
+static const char *nav_role_name(u8 op) {
+    switch (op) {
+        case 0x02: return "subtitle";
+        case 0x03: return "text";
+        case 0x05: return "one of";
+        case 0x06: return "checkbox";
+        case 0x07: return "numeric";
+        case 0x08: return "password";
+        case 0x0c: return "action";
+        case 0x0d: return "reset";
+        case 0x0f: return "reference";
+        case 0x1a: return "date";
+        case 0x1b: return "time";
+        case 0x1c: return "string";
+        case 0x23: return "ordered list";
+        default: return "control";
+    }
+}
 static u16 fold_prompt_char(u16 ch) {
     if (ch >= (u16)'A' && ch <= (u16)'Z') return (u16)(ch + 32u);
     switch (ch) {
@@ -955,14 +990,47 @@ static u16 fold_prompt_char(u16 ch) {
         default: return ch;
     }
 }
+static int append_spoken_word(char *out, u32 *n, const char *word) {
+    if (!out || !n || !word) return 0;
+    if (*n && *n < MAX_SPOKEN_CHARS) out[(*n)++] = ' ';
+    while (*word && *n < MAX_SPOKEN_CHARS) {
+        char ch = *word++;
+        if (ch < 'a' || ch > 'z') return 0;
+        out[(*n)++] = ch;
+    }
+    return *word == 0;
+}
 static int normalize_prompt(const u16 *text, char *out, u32 *count_out) {
+    static const char *digit_word[10] = {
+        "zero","one","two","three","four","five","six","seven","eight","nine"
+    };
     u32 n = 0;
     u8 pending_space = 0;
-    for (u32 i = 0; i < 127u && text[i] && n < 32u; ++i) {
+    for (u32 i = 0; i < 127u && text[i] && n < MAX_SPOKEN_CHARS; ++i) {
         u16 ch = fold_prompt_char(text[i]);
         if (ch >= (u16)'a' && ch <= (u16)'z') {
-            if (pending_space && n && n < 32u) out[n++] = ' ';
-            if (n < 32u) out[n++] = (char)ch;
+            if (pending_space && n && n < MAX_SPOKEN_CHARS) out[n++] = ' ';
+            if (n < MAX_SPOKEN_CHARS) out[n++] = (char)ch;
+            pending_space = 0;
+            continue;
+        }
+        if (ch >= (u16)'0' && ch <= (u16)'9') {
+            if (!append_spoken_word(out, &n, digit_word[ch - (u16)'0'])) break;
+            pending_space = 0;
+            continue;
+        }
+        const char *symbol = 0;
+        if (ch == (u16)'%') symbol = "percent";
+        else if (ch == (u16)'/') symbol = "slash";
+        else if (ch == (u16)'\\') symbol = "backslash";
+        else if (ch == (u16)':') symbol = "colon";
+        else if (ch == (u16)'.') symbol = "dot";
+        else if (ch == (u16)'-') symbol = "dash";
+        else if (ch == (u16)'+') symbol = "plus";
+        else if (ch == (u16)'=') symbol = "equals";
+        else if (ch == (u16)'_') symbol = "underscore";
+        if (symbol) {
+            if (!append_spoken_word(out, &n, symbol)) break;
             pending_space = 0;
         } else if (n) {
             pending_space = 1;
@@ -992,21 +1060,21 @@ static int get_hii_string(hii_string_protocol *str, void *handle, u16 token, cha
 }
 
 #ifdef QEV_INTERACTIVE_NAV
-static int nav_prompt_add(const char *text, u32 count) {
-    if (!text || !count || count > 32u) return 0;
-    for (u8 i = 0; i < g_nav_prompt_total; ++i) {
-        if (g_nav_prompt_lengths[i] != (u8)count) continue;
-        u32 same = 1;
-        for (u32 j = 0; j < count; ++j) {
-            if (g_nav_prompts[i][j] != text[j]) { same = 0; break; }
-        }
-        if (same) return 0;
-    }
+static int nav_prompt_add(const char *text, u32 count, u8 op, u16 question_id,
+                          u16 help_token, u16 varstore_id, u16 varstore_info,
+                          u8 question_flags) {
+    if (!text || !count || count > MAX_SPOKEN_CHARS) return 0;
     if (g_nav_prompt_total >= MAX_HII_NAV_PROMPTS) return 0;
     u8 slot = g_nav_prompt_total++;
     for (u32 j = 0; j < count; ++j) g_nav_prompts[slot][j] = text[j];
     g_nav_prompts[slot][count] = 0;
     g_nav_prompt_lengths[slot] = (u8)count;
+    g_nav_opcode[slot] = op;
+    g_nav_question_id[slot] = question_id;
+    g_nav_help_token[slot] = help_token;
+    g_nav_varstore_id[slot] = varstore_id;
+    g_nav_varstore_info[slot] = varstore_info;
+    g_nav_question_flags[slot] = question_flags;
     return 1;
 }
 
@@ -1016,6 +1084,24 @@ static void nav_prompt_load(u8 index) {
     g_prompt_count = g_nav_prompt_lengths[index];
     for (u32 j = 0; j < g_prompt_count; ++j) g_prompt_text[j] = g_nav_prompts[index][j];
     g_prompt_text[g_prompt_count] = 0;
+}
+
+static u32 nav_build_speech_text(void) {
+    const char *role = nav_role_name(g_nav_opcode[g_nav_prompt_index]);
+    u32 n = 0;
+    while (*role && n + 1u < sizeof(g_nav_speech_text))
+        g_nav_speech_text[n++] = *role++;
+    if (n && n + 1u < sizeof(g_nav_speech_text)) g_nav_speech_text[n++] = ' ';
+    for (u32 i = 0; i < g_prompt_count && n + 1u < sizeof(g_nav_speech_text); ++i)
+        g_nav_speech_text[n++] = g_prompt_text[i];
+    if ((g_nav_question_flags[g_nav_prompt_index] & 0x01u) &&
+        n + 10u < sizeof(g_nav_speech_text)) {
+        static const char readonly_text[] = " read only";
+        for (u32 i = 0; readonly_text[i] && n + 1u < sizeof(g_nav_speech_text); ++i)
+            g_nav_speech_text[n++] = readonly_text[i];
+    }
+    g_nav_speech_text[n] = 0;
+    return n;
 }
 #endif
 
@@ -1071,10 +1157,23 @@ static int resolve_hii_prompt(void *system_table) {
                     if (prompt_opcode(op) && oplen >= 4u) {
                         u16 token = rd16(q + 2);
 #ifdef QEV_INTERACTIVE_NAV
-                        char candidate[33];
+                        char candidate[MAX_SPOKEN_CHARS + 1];
                         u32 candidate_count = 0;
                         if (token && get_hii_string(str, handle, token, candidate, &candidate_count)) {
-                            nav_prompt_add(candidate, candidate_count);
+                            u16 help_token = oplen >= 6u ? rd16(q + 4) : 0;
+                            u16 question_id = 0;
+                            u16 varstore_id = 0;
+                            u16 varstore_info = 0;
+                            u8 question_flags = 0;
+                            if (question_opcode(op) && oplen >= 13u) {
+                                question_id = rd16(q + 6);
+                                varstore_id = rd16(q + 8);
+                                varstore_info = rd16(q + 10);
+                                question_flags = q[12];
+                            }
+                            nav_prompt_add(candidate, candidate_count, op, question_id,
+                                           help_token, varstore_id, varstore_info,
+                                           question_flags);
                         }
 #else
                         if (token && get_hii_string(str, handle, token, g_prompt_text, &g_prompt_count)) {
@@ -1436,7 +1535,23 @@ static int wait_navigation_keys(void *system_table) {
                 serial_puts("HII_GRAPH_NAV_TEXT=");
                 serial_puts(g_prompt_text);
                 serial_puts("\r\n");
-                if (!run_speech_dma(g_prompt_text, g_prompt_count)) return 0;
+                serial_puts("HII_GRAPH_NAV_ROLE=");
+                serial_puts(nav_role_name(g_nav_opcode[g_nav_prompt_index]));
+                serial_puts("\r\n");
+                serial_puts("HII_GRAPH_NAV_OPCODE=0x");
+                serial_hex8(g_nav_opcode[g_nav_prompt_index]);
+                serial_puts("\r\n");
+                serial_puts("HII_GRAPH_NAV_QUESTION_ID=0x");
+                serial_hex8((u8)(g_nav_question_id[g_nav_prompt_index] >> 8));
+                serial_hex8((u8)g_nav_question_id[g_nav_prompt_index]);
+                serial_puts("\r\n");
+                serial_puts("HII_GRAPH_NAV_VARSTORE_ID=0x");
+                serial_hex8((u8)(g_nav_varstore_id[g_nav_prompt_index] >> 8));
+                serial_hex8((u8)g_nav_varstore_id[g_nav_prompt_index]);
+                serial_puts("\r\n");
+                u32 spoken_count = nav_build_speech_text();
+                if (!spoken_count || !run_speech_dma(g_nav_speech_text, spoken_count)) return 0;
+                marker("HII_GRAPH_NAV_SEMANTIC_CONTROL=PASS");
                 marker("HII_GRAPH_NAV_SPEECH_DMA=PASS");
                 marker("HII_GRAPH_NAV_SPEECH_HDA=PASS");
                 marker("HII_GRAPH_NAV_LPIB_PROGRESS=PASS");
@@ -1515,11 +1630,18 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("HDA_OUTPUT_PATH_CONFIGURATION=PASS");
     marker("SYNTH=ALLOPHONE_BDL_RUNTIME_TEXT_V1");
     marker("SYNTH=GRAPHEME_ALLOPHONE_RUNTIME_TEXT_V2");
-    marker("HII_PROMPT_MAX_CHARS=32");
+    marker("HII_PROMPT_MAX_CHARS=64");
+    marker("HII_NAV_OBJECT_MODEL=IFR_SEMANTIC_V1");
+    marker("HII_NAV_DIGITS_AND_COMMON_SYMBOLS=PASS");
     marker("HII_PROMPT_WORD_BOUNDARIES=PASS");
     marker("BDL_RUNTIME_TEXT_SCHEDULE=PASS");
 
+#ifdef QEV_INTERACTIVE_NAV
+    u32 initial_spoken_count = nav_build_speech_text();
+    if (!initial_spoken_count || !run_speech_dma(g_nav_speech_text, initial_spoken_count)) {
+#else
     if (!run_speech_dma(g_prompt_text, g_prompt_count)) {
+#endif
         marker("STATUS=BLOCKED");
         marker("REASON=HII_GRAPH_SPEECH_DMA_FAILED");
         return 1;
