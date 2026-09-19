@@ -391,6 +391,8 @@ jobs:
             b"HDA_EAPD_POLICY=PASS",
             b"HDA_DAC_STREAM_READBACK=PASS",
             b"HDA_PIN_CONTROL_READBACK=PASS",
+          ]
+          physical_graph_required=[
             b"PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS",
             b"PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS",
             b"PHYSICAL_ASUS_M1603QA_AUDIBLE_SPEAKER=REQUIRES_HUMAN_CONFIRMATION",
@@ -412,6 +414,12 @@ jobs:
           merged=b"".join(p.read_bytes() for p in root.glob("*.EFI"))
           for token in required:
               assert token in merged,token
+          graph_path=root/"hii-graph.EFI"
+          assert graph_path.is_file(),graph_path
+          graph=graph_path.read_bytes()
+          for token in physical_graph_required:
+              assert token in graph,token
+          print("AMD5800H_PHYSICAL_GRAPH_STATIC_WITNESSES=PASS")
           print("AMD5800H_PE_SECURITY=PASS")
           print("AMD5800H_ACCESSIBILITY_WITNESSES=PASS")
           print("W_X=BLOCKED")
