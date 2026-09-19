@@ -278,6 +278,14 @@ jobs:
             'HDA_SELECTOR_WRITES_APPLIED=0x01',
             'HDA_SELECTOR_WRITES_APPLIED=0x00'
           ))
+          Assert-Rejected 'negative-navigation-incomplete' ($raw.Replace(
+            'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS',
+            'HII_GRAPH_NAV_REQUIRED_EVENTS=NOT_ESTABLISHED'
+          ))
+          Assert-Rejected 'negative-navigation-speech-count' ($raw.Replace(
+            'HII_GRAPH_NAV_SPEECH_EVENTS=0x07',
+            'HII_GRAPH_NAV_SPEECH_EVENTS=0x06'
+          ))
           Assert-Rejected 'negative-duplicate-field' ($raw + "`r`nPHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=NOT_ESTABLISHED`r`n")
           Assert-Rejected 'negative-source-mismatch' ($raw.Replace(
             'UEFI_SOURCE_BLOB=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
