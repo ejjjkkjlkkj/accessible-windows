@@ -12,10 +12,10 @@ LETTER_UNITS={
  'd':('d','e'),
  'e':('e',),
  'f':('e','f'),
- 'g':('sh','e'),
+ 'g':('zh','e'),
  'h':('a','sh'),
  'i':('i',),
- 'j':('sh','i'),
+ 'j':('zh','i'),
  'k':('k','a'),
  'l':('e','l'),
  'm':('e','m'),
@@ -67,7 +67,7 @@ def main():
         raise SystemExit('usage: generate_units.py OUTPUT_C METADATA')
     out=Path(sys.argv[1]); meta=Path(sys.argv[2])
     speech=load_source()
-    names=sorted({u for seq in LETTER_UNITS.values() for u in seq})
+    names=sorted({'sil'} | {u for seq in LETTER_UNITS.values() for u in seq})
     source_units=speech.make_units()
     converted={n:convert(source_units[n]) for n in names}
     offsets=[]; lengths=[]; bank=bytearray()
@@ -90,6 +90,7 @@ def main():
         arr_u32('qev_unit_off',offsets),
         arr_u32('qev_unit_len',lengths),
         f'const unsigned int qev_unit_count = {len(names)}u;\n',
+        f'const unsigned int qev_sil_unit_index = {index["sil"]}u;\n',
         arr_u8('qev_letter_unit_count',counts),
         arr_u8('qev_letter_units',flat),
     ]
@@ -105,6 +106,7 @@ def main():
         'letter-map=a-z\n'
         'max-input-graphemes=8\n'
         'max-units-per-letter=8\n'
+        'inter-letter-silence-ms=65\n'
         'full-utterance-asset=false\n'
     )
     print('HII_GRAPH_PROMPT_UNIT_GENERATION=PASS')
