@@ -7,6 +7,7 @@ on:
       - 'boot/uefi-hii-graph-prompt-speech-v1/**'
       - 'boot/uefi-native-speech-v1/build_uefi_native_speech.py'
       - 'boot/uefi-hii-current-option-speech-v1/build_uefi_hii_current_option_speech.py'
+      - 'boot/uefi-hii-option-speech-v1/build_uefi_hii_option_speech.py'
       - '.github/workflows/uefi-realtime-screenreader-ci.yml'
   workflow_dispatch:
 
