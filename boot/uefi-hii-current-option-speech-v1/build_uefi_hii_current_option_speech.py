@@ -28,7 +28,10 @@ def load_module(name: str, path: Path):
  return module
 
 speech=load_module('qevarynx_proven_hii_option_speech_source',SPEECH_BUILDER)
-DMA_PAGES=speech.DMA_PAGES
+# The shared allophone bank grew beyond the legacy 128-page arena.
+# Keep the current-value reader below 4 GiB, but reserve 1 MiB so the complete
+# first-party unit bank fits without truncation or runtime reallocation.
+DMA_PAGES=max(speech.DMA_PAGES,256)
 PCM_OFF=speech.PCM_OFF
 LETTER_UNITS=speech.LETTER_UNITS
 UNIT_LAYOUT=speech.UNIT_LAYOUT
