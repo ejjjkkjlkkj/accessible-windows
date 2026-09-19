@@ -123,6 +123,8 @@ jobs:
             'PHYSICAL_UEFI_HDA_ROUTE=PASS'
             'PHYSICAL_UEFI_HDA_DMA=PASS'
             'PHYSICAL_UEFI_LPIB_PROGRESS=PASS'
+            'PHYSICAL_UEFI_HII_NAVIGATION=PASS'
+            'PHYSICAL_UEFI_HII_NAV_REQUIRED_EVENTS=PASS'
             'PHYSICAL_UEFI_INTERNAL_SPEAKER_PIN=PASS'
             "PHYSICAL_UEFI_AUDIBLE_SPEAKER=$audible"
             "PHYSICAL_UEFI_PROOF_SHA256=$sha"
@@ -161,6 +163,8 @@ jobs:
           if($result -notmatch 'PHYSICAL_UEFI_NATIVE_EXECUTION=PASS'){ throw 'native UEFI execution proof missing' }
           if($result -notmatch "PHYSICAL_UEFI_SOURCE_BLOB=$testedSource"){ throw 'physical UEFI source provenance mismatch' }
           if($result -notmatch 'PHYSICAL_UEFI_HDA_DMA=PASS'){ throw 'native HDA DMA proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_HII_NAVIGATION=PASS'){ throw 'native HII navigation proof missing' }
+          if($result -notmatch 'PHYSICAL_UEFI_HII_NAV_REQUIRED_EVENTS=PASS'){ throw 'complete HII navigation event proof missing' }
           if($result -notmatch 'PHYSICAL_UEFI_INTERNAL_SPEAKER_PIN=PASS'){ throw 'internal speaker pin proof missing' }
           $audible='PENDING_HUMAN_CONFIRMATION'
           if($result -match 'PHYSICAL_UEFI_AUDIBLE_SPEAKER=HUMAN_CONFIRMED'){ $audible='HUMAN_CONFIRMED' }
@@ -182,6 +186,8 @@ jobs:
           $lines += 'proof-hda-route = PASS'
           $lines += 'proof-hda-dma = PASS'
           $lines += 'proof-lpib-progress = PASS'
+          $lines += 'proof-hii-navigation = PASS'
+          $lines += 'proof-hii-navigation-required-events = PASS'
           $lines += 'proof-internal-speaker-pin = PASS'
           $lines += "proof-audible-physical-speaker = $audible"
           $lines += 'proof-workflow-triggered-reboot = false'
