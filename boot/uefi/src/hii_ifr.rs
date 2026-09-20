@@ -98,7 +98,7 @@ fn parse_strings(pkg: &[u8], out: &mut BTreeMap<u16, String>) {
         let block = pkg[r];
         r += 1;
         match block {
-            0x00 => break,                              // END
+            0x00 => break, // END
             0x10 | 0x11 => {
                 // STRING_SCSU / _FONT: (optional font id) then ASCII-ish text.
                 if block == 0x11 && r < pkg.len() {
@@ -141,11 +141,7 @@ fn parse_strings(pkg: &[u8], out: &mut BTreeMap<u16, String>) {
 }
 
 /// Walk one FORMS (IFR) package, recording variable stores and questions.
-fn parse_ifr(
-    pkg: &[u8],
-    strings: &BTreeMap<u16, String>,
-    settings: &mut Vec<Setting>,
-) {
+fn parse_ifr(pkg: &[u8], strings: &BTreeMap<u16, String>, settings: &mut Vec<Setting>) {
     let mut stores: BTreeMap<u16, (String, [u8; 16])> = BTreeMap::new();
     // The index of the one-of question whose options are currently being collected, so the
     // EFI_IFR_ONE_OF_OPTION opcodes that follow attach to it.
@@ -181,7 +177,7 @@ fn parse_ifr(
                     stores.insert(vsid, (name, guid));
                 }
             }
-            0x05 | 0x06 | 0x07 => {
+            0x05..=0x07 => {
                 // ONE_OF / CHECKBOX / NUMERIC: question header at +2 -> prompt(2) help(2)
                 // qid(2) varstoreid(2) varstoreinfo/offset(2) qflags(1); one-of/numeric carry
                 // a size in the flags byte that follows.
@@ -220,26 +216,26 @@ fn parse_ifr(
             0x09 => {
                 // EFI_IFR_ONE_OF_OPTION: header(2) option(StringId u16) flags(u8) type(u8)
                 // value(EFI_IFR_TYPE_VALUE). Attach the choice to the open one-of.
-                if let Some(idx) = current_oneof {
-                    if body.len() >= 6 {
-                        let option = u16le(body, 2);
-                        let value_type = body[5];
-                        let vsize = match value_type {
-                            0x01 => 2, // UINT16
-                            0x02 => 4, // UINT32
-                            0x03 => 8, // UINT64
-                            _ => 1,    // UINT8 / BOOLEAN / other
-                        };
-                        let mut value = [0u8; 8];
-                        if 6 + vsize <= body.len() {
-                            value[..vsize].copy_from_slice(&body[6..6 + vsize]);
-                        }
-                        let text = strings.get(&option).cloned().unwrap_or_default();
-                        if !text.is_empty() {
-                            settings[idx]
-                                .options
-                                .push((u64::from_le_bytes(value), text));
-                        }
+                if let Some(idx) = current_oneof
+                    && body.len() >= 6
+                {
+                    let option = u16le(body, 2);
+                    let value_type = body[5];
+                    let vsize = match value_type {
+                        0x01 => 2, // UINT16
+                        0x02 => 4, // UINT32
+                        0x03 => 8, // UINT64
+                        _ => 1,    // UINT8 / BOOLEAN / other
+                    };
+                    let mut value = [0u8; 8];
+                    if 6 + vsize <= body.len() {
+                        value[..vsize].copy_from_slice(&body[6..6 + vsize]);
+                    }
+                    let text = strings.get(&option).cloned().unwrap_or_default();
+                    if !text.is_empty() {
+                        settings[idx]
+                            .options
+                            .push((u64::from_le_bytes(value), text));
                     }
                 }
             }

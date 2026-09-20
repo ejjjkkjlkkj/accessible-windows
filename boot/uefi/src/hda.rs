@@ -191,9 +191,12 @@ macro_rules! spell_symbol {
     };
 }
 
+/// A spelled symbol: its character and its `(english, french)` clips.
+type SpellSymbol = (char, (&'static [u8], &'static [u8]));
+
 /// `(character, (english_clip, french_clip))` for every spelled symbol. Kept in one table
 /// so the code and the generated assets (`scripts/gen-spell.ps1`) cannot drift.
-static SPELL_SYMBOLS: &[(char, (&[u8], &[u8]))] = &[
+static SPELL_SYMBOLS: &[SpellSymbol] = &[
     ('.', spell_symbol!("dot")),
     ('-', spell_symbol!("dash")),
     (':', spell_symbol!("colon")),
@@ -273,15 +276,10 @@ pub fn spell_clip(character: char, french: bool) -> Option<&'static [u8]> {
         'A'..='Z' => Some(letter_clip(character as usize - 'A' as usize)),
         '0'..='9' => Some(SPELL_DIGITS[character as usize - '0' as usize]),
         ' ' => Some(SPELL_SPACE),
-        _ => SPELL_SYMBOLS.iter().find(|(c, _)| *c == character).map(
-            |(_, (en, fr))| {
-                if french {
-                    *fr
-                } else {
-                    *en
-                }
-            },
-        ),
+        _ => SPELL_SYMBOLS
+            .iter()
+            .find(|(c, _)| *c == character)
+            .map(|(_, (en, fr))| if french { *fr } else { *en }),
     }
 }
 

@@ -1901,8 +1901,12 @@ fn dispatch_agent(
     // Read the firmware's own HII configuration - the real settings the firmware publishes,
     // by GUID store and count. This is the foundation for changing them by name later; for
     // now it lets a blind user hear what the firmware actually exposes, not just our tree.
-    if has("hii") || has("firmware config") || has("firmware options") || has("options firmware")
-        || has("advanced options") || has("options avancees")
+    if has("hii")
+        || has("firmware config")
+        || has("firmware options")
+        || has("options firmware")
+        || has("advanced options")
+        || has("options avancees")
     {
         match read_firmware_config() {
             Some((groups, settings, names)) => {
@@ -1939,8 +1943,21 @@ fn dispatch_agent(
         let terms = descriptive_terms(
             cmd,
             &[
-                "settings", "reglages", "reglage", "parametres", "parametre", "hidden", "cachee",
-                "cachees", "list", "liste", "show", "read", "lire", "les", "the",
+                "settings",
+                "reglages",
+                "reglage",
+                "parametres",
+                "parametre",
+                "hidden",
+                "cachee",
+                "cachees",
+                "list",
+                "liste",
+                "show",
+                "read",
+                "lire",
+                "les",
+                "the",
             ],
         );
         let shown: Vec<&crate::hii_ifr::Setting> = all
@@ -1980,7 +1997,12 @@ fn dispatch_agent(
                 setting.offset,
                 setting.width
             );
-            spell_current(&format!("{}, {value}", setting.name), lang, speaker, pending);
+            spell_current(
+                &format!("{}, {value}", setting.name),
+                lang,
+                speaker,
+                pending,
+            );
         }
         return;
     }
@@ -1992,13 +2014,25 @@ fn dispatch_agent(
         let terms = descriptive_terms(
             cmd,
             &[
-                "enable", "disable", "activer", "activ", "desactiver", "desactiv", "set", "to",
-                "the", "les", "regler", "mettre",
+                "enable",
+                "disable",
+                "activer",
+                "activ",
+                "desactiver",
+                "desactiv",
+                "set",
+                "to",
+                "the",
+                "les",
+                "regler",
+                "mettre",
             ],
         );
         let target = all.iter().find(|s| {
             let name = s.name.to_ascii_lowercase();
-            terms.iter().any(|term| term.len() >= 3 && name.contains(term))
+            terms
+                .iter()
+                .any(|term| term.len() >= 3 && name.contains(term))
         });
         match target {
             Some(setting) => {
@@ -2014,7 +2048,9 @@ fn dispatch_agent(
                         .iter()
                         .find(|(_, label)| {
                             let label = label.to_ascii_lowercase();
-                            terms.iter().any(|term| term.len() >= 3 && label.contains(term))
+                            terms
+                                .iter()
+                                .any(|term| term.len() >= 3 && label.contains(term))
                         })
                         .map(|(value, _)| *value)
                         .unwrap_or(1)
@@ -2027,7 +2063,11 @@ fn dispatch_agent(
                     setting.offset,
                     setting.width
                 );
-                aw_mark!("AW_UEFI_AGENT_SETVAR store={} offset={}", setting.store, setting.offset);
+                aw_mark!(
+                    "AW_UEFI_AGENT_SETVAR store={} offset={}",
+                    setting.store,
+                    setting.offset
+                );
                 if confirm(lang, speaker, pending) {
                     if set_setting_value(setting, value) {
                         play(ag(hda::AGENT_DONE), speaker, pending);
@@ -2065,7 +2105,12 @@ fn dispatch_agent(
                 if pending.is_some() {
                     break;
                 }
-                spell_current(&format!("{}. {}", index + 1, opt.label), lang, speaker, pending);
+                spell_current(
+                    &format!("{}. {}", index + 1, opt.label),
+                    lang,
+                    speaker,
+                    pending,
+                );
             }
             return;
         }
@@ -2216,10 +2261,10 @@ fn descriptive_terms<'a>(cmd: &'a str, stop: &[&str]) -> Vec<&'a str> {
 /// "boot windows"). The command verbs are ignored so they cannot match a label word like
 /// "Boot" in "Windows Boot Manager".
 fn find_boot_target<'a>(cmd: &str, options: &'a [BootOption]) -> Option<&'a BootOption> {
-    if let Some(position) = first_number(cmd) {
-        if position >= 1 && position <= options.len() {
-            return options.get(position - 1);
-        }
+    if let Some(position) = first_number(cmd)
+        && (1..=options.len()).contains(&position)
+    {
+        return options.get(position - 1);
     }
     let terms: Vec<&str> = cmd
         .split(|c: char| !c.is_ascii_alphanumeric())
@@ -2250,12 +2295,10 @@ fn find_boot_target<'a>(cmd: &str, options: &'a [BootOption]) -> Option<&'a Boot
             )
         })
         .collect();
-    options
-        .iter()
-        .find(|opt| {
-            let label = opt.label.to_ascii_lowercase();
-            terms.iter().any(|term| label.contains(term))
-        })
+    options.iter().find(|opt| {
+        let label = opt.label.to_ascii_lowercase();
+        terms.iter().any(|term| label.contains(term))
+    })
 }
 
 /// The first run of decimal digits in `s`, parsed as a 1-based position, or `None`.
@@ -2294,7 +2337,10 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
         // firmware whose varstores are driver-internal buffers (e.g. QEMU/OVMF) it is zero and
         // changing them would need the HII RouteConfig path instead.
         let all = crate::hii_ifr::enumerate_settings();
-        let readable = all.iter().filter(|s| get_setting_value(s).is_some()).count();
+        let readable = all
+            .iter()
+            .filter(|s| get_setting_value(s).is_some())
+            .count();
         let config = firmware_config_values();
         let via_config = all
             .iter()
@@ -2646,23 +2692,30 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
                     // new speech volume on the real channel.
                     sound::cue(300 + level * 2, Duration::from_millis(90));
                     let frame = *stack.last().unwrap();
-                    announce_item(&tree.screens[frame.screen], frame.item, speaker, &mut pending);
+                    announce_item(
+                        &tree.screens[frame.screen],
+                        frame.item,
+                        speaker,
+                        &mut pending,
+                    );
                 }
                 Nav::VolumeDown => {
                     let level = audio::volume_down();
                     aw_mark!("AW_UEFI_VOLUME level={level} muted=false");
                     sound::cue(300 + level * 2, Duration::from_millis(90));
                     let frame = *stack.last().unwrap();
-                    announce_item(&tree.screens[frame.screen], frame.item, speaker, &mut pending);
+                    announce_item(
+                        &tree.screens[frame.screen],
+                        frame.item,
+                        speaker,
+                        &mut pending,
+                    );
                 }
                 Nav::Mute => {
                     let muted = audio::toggle_mute();
                     aw_mark!("AW_UEFI_VOLUME muted={muted}");
                     // The cue is on the PC speaker, so it is heard even while speech is muted.
-                    sound::cue(
-                        if muted { 240 } else { 660 },
-                        Duration::from_millis(120),
-                    );
+                    sound::cue(if muted { 240 } else { 660 }, Duration::from_millis(120));
                     if !muted {
                         let frame = *stack.last().unwrap();
                         announce_item(
