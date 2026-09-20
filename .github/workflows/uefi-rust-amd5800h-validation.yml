@@ -142,6 +142,50 @@ jobs:
           rustc --version
           cargo --version
 
+      - name: Generate complete UEFI speech bank
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./scripts/gen-speech.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'UEFI speech generation failed' }
+
+          $required = @(
+            'setup_setup',
+            'setup_main',
+            'setup_advanced',
+            'setup_boot',
+            'setup_security',
+            'setup_save_exit',
+            'setup_system_information',
+            'setup_cpu_configuration',
+            'setup_boot_option_priorities',
+            'setup_secure_boot',
+            'setup_boot_normally',
+            'setup_reset_system',
+            'setup_shut_down',
+            'setup_back',
+            'setup_confirm_restart',
+            'setup_confirm_shutdown',
+            'setup_cancel',
+            'spell_a',
+            'spell_z',
+            'spell_0',
+            'spell_9',
+            'spell_dash',
+            'spell_dot'
+          )
+          foreach ($name in $required) {
+            $clip = "boot/uefi/src/speech/$name.pcm"
+            if (-not (Test-Path -LiteralPath $clip -PathType Leaf)) {
+              throw "Missing generated UEFI speech clip: $clip"
+            }
+            if ((Get-Item -LiteralPath $clip).Length -le 2) {
+              throw "Invalid generated UEFI speech clip: $clip"
+            }
+          }
+
+          'UEFI_SETUP_SPEECH_GENERATED=PASS'
+
       - name: Strict UEFI quality gates
         shell: pwsh
         run: |
@@ -171,6 +215,7 @@ jobs:
           foreach ($required in @(
             'AW_UEFI_SETUP_BEGIN',
             'AW_UEFI_SETUP_READY',
+            'AW_UEFI_SETUP_SPEECH_MODE mode=real',
             'AW_UEFI_MENU_ITEM',
             'AW_UEFI_SETUP_VALUE',
             'AW_UEFI_SETUP_ACTION'
@@ -228,6 +273,7 @@ jobs:
           foreach ($forbidden in @(
             'AW_UEFI_SR_FAIL',
             'AW_UEFI_SETUP_FAIL',
+            'AW_UEFI_SETUP_SPEECH_MODE mode=fallback',
             'AW_UEFI_HDA_FAIL',
             'AW_NATIVE_EXCEPTION',
             'AW_NATIVE_KERNEL_PANIC'
