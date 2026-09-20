@@ -21,6 +21,7 @@ use uefi::{Status, cstr16, system};
 mod ac97;
 mod audio;
 mod hda;
+mod hii_ifr;
 mod screen_reader;
 mod serial;
 mod setup;

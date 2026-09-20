@@ -49,7 +49,7 @@ use uefi::proto::hii::config_routing::HiiConfigRouting;
 use uefi::proto::hii::config_str::MultiConfigurationStringIter;
 use uefi::runtime::{self, VariableAttributes, VariableVendor};
 use uefi::table::cfg::ConfigTableEntry;
-use uefi::{CStr16, Status, boot, cstr16, system};
+use uefi::{CStr16, CString16, Guid, Status, boot, cstr16, system};
 
 use crate::audio;
 use crate::aw_mark;
@@ -1931,6 +1931,94 @@ fn dispatch_agent(
         return;
     }
 
+    // Read the firmware's own named settings, parsed from its IFR - optionally filtered by a
+    // word - with their current values. This is what a blind user cannot otherwise discover.
+    if has("settings") || has("reglage") || has("parametre") || has("hidden") || has("cachee") {
+        let all = crate::hii_ifr::enumerate_settings();
+        let terms = descriptive_terms(
+            cmd,
+            &[
+                "settings", "reglages", "reglage", "parametres", "parametre", "hidden", "cachee",
+                "cachees", "list", "liste", "show", "read", "lire", "les", "the",
+            ],
+        );
+        let shown: Vec<&crate::hii_ifr::Setting> = all
+            .iter()
+            .filter(|s| {
+                terms.is_empty() || {
+                    let name = s.name.to_ascii_lowercase();
+                    terms.iter().any(|term| name.contains(term))
+                }
+            })
+            .take(12)
+            .collect();
+        uefi::println!("  {} firmware settings, {} shown", all.len(), shown.len());
+        play(ag(hda::AGENT_VALUE_IS), speaker, pending);
+        spell_current(&format!("{}", all.len()), lang, speaker, pending);
+        for setting in &shown {
+            if pending.is_some() {
+                break;
+            }
+            let value = get_setting_value(setting)
+                .map(|v| format!("{v}"))
+                .unwrap_or_default();
+            uefi::println!(
+                "    {} = {} [{}:{:#06x}/{}]",
+                setting.name,
+                value,
+                setting.store,
+                setting.offset,
+                setting.width
+            );
+            spell_current(&format!("{}, {value}", setting.name), lang, speaker, pending);
+        }
+        return;
+    }
+
+    // Change a firmware setting by name - the setup_var method (enable / disable / set to N).
+    // Confirmed first, because a wrong write can soft-brick the firmware configuration.
+    if has("enable") || has("disable") || has("activ") || has("desactiv") || has("set ") {
+        let all = crate::hii_ifr::enumerate_settings();
+        let terms = descriptive_terms(
+            cmd,
+            &[
+                "enable", "disable", "activer", "activ", "desactiver", "desactiv", "set", "to",
+                "the", "les", "regler", "mettre",
+            ],
+        );
+        let target = all.iter().find(|s| {
+            let name = s.name.to_ascii_lowercase();
+            terms.iter().any(|term| term.len() >= 3 && name.contains(term))
+        });
+        match target {
+            Some(setting) => {
+                let value = if has("disable") || has("desactiv") {
+                    0
+                } else {
+                    first_number(cmd).map(|n| n as u64).unwrap_or(1)
+                };
+                uefi::println!(
+                    "  Set {} = {} [{}:{:#06x}/{}]",
+                    setting.name,
+                    value,
+                    setting.store,
+                    setting.offset,
+                    setting.width
+                );
+                aw_mark!("AW_UEFI_AGENT_SETVAR store={} offset={}", setting.store, setting.offset);
+                if confirm(lang, speaker, pending) {
+                    if set_setting_value(setting, value) {
+                        play(ag(hda::AGENT_DONE), speaker, pending);
+                    } else {
+                        play(ag(hda::AGENT_FAILED), speaker, pending);
+                    }
+                }
+            }
+            None => play(ag(hda::AGENT_NO_MATCH), speaker, pending),
+        }
+        return;
+    }
+
     // Open the firmware's own setup (for everything a loaded app cannot reach).
     if has("firmware") || has("setup") || has("bios") || has("config") {
         play(ag(hda::AGENT_OPENING_SETUP), speaker, pending);
@@ -2020,6 +2108,59 @@ fn set_boot_timeout(seconds: u16) -> bool {
         &seconds.to_le_bytes(),
     )
     .is_ok()
+}
+
+/// Read the whole variable that backs a firmware setting's varstore, or `None`.
+fn read_varstore(store: &str, guid: [u8; 16]) -> Option<Vec<u8>> {
+    let name = CString16::try_from(store).ok()?;
+    let vendor = VariableVendor(Guid::from_bytes(guid));
+    runtime::get_variable_boxed(&name, &vendor)
+        .ok()
+        .map(|(data, _)| data.into_vec())
+}
+
+/// The current value of one firmware setting, read from its varstore at the parsed offset.
+fn get_setting_value(setting: &crate::hii_ifr::Setting) -> Option<u64> {
+    let buffer = read_varstore(&setting.store, setting.guid)?;
+    let (offset, width) = (setting.offset as usize, setting.width as usize);
+    if width == 0 || width > 8 || offset + width > buffer.len() {
+        return None;
+    }
+    let mut value = [0u8; 8];
+    value[..width].copy_from_slice(&buffer[offset..offset + width]);
+    Some(u64::from_le_bytes(value))
+}
+
+/// Change one firmware setting in place - the `setup_var` method: read the varstore variable,
+/// overwrite the setting's bytes at its offset, and write the whole variable back with its own
+/// attributes. Returns whether the write stuck. The caller confirms first, since a wrong value
+/// can soft-brick the firmware configuration.
+fn set_setting_value(setting: &crate::hii_ifr::Setting, value: u64) -> bool {
+    let name = match CString16::try_from(setting.store.as_str()) {
+        Ok(name) => name,
+        Err(_) => return false,
+    };
+    let vendor = VariableVendor(Guid::from_bytes(setting.guid));
+    let Ok((data, attributes)) = runtime::get_variable_boxed(&name, &vendor) else {
+        return false;
+    };
+    let mut buffer = data.into_vec();
+    let (offset, width) = (setting.offset as usize, setting.width as usize);
+    if width == 0 || width > 8 || offset + width > buffer.len() {
+        return false;
+    }
+    let bytes = value.to_le_bytes();
+    buffer[offset..offset + width].copy_from_slice(&bytes[..width]);
+    runtime::set_variable(&name, &vendor, attributes, &buffer).is_ok()
+}
+
+/// The descriptive words of a command, with the given verbs and small filler words removed -
+/// so "enable intel vt-d" searches firmware settings for "intel" and "vt-d", not "enable".
+fn descriptive_terms<'a>(cmd: &'a str, stop: &[&str]) -> Vec<&'a str> {
+    cmd.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| word.len() >= 2)
+        .filter(|word| !stop.contains(word))
+        .collect()
 }
 
 /// Resolve which boot entry a command refers to: first by a position number ("boot 2"),
