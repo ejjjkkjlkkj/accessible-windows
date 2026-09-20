@@ -1601,17 +1601,24 @@ fn announce_help(screen: &Screen, item_index: usize) {
 /// reader's "read by character", and the answer to the one line a blind user cannot
 /// otherwise hear by name: the runtime-composed device names and machine-state values
 /// that have no whole-line clip. Letters, digits and spaces are spoken from the spelling
-/// alphabet; punctuation is skipped. The full text is also emitted as a marker and shown
-/// on the console.
-fn spell_current(text: &str, speaker: &mut Option<audio::Speaker>, pending: &mut Option<Key>) {
+/// alphabet, and meaningful punctuation is spoken by name in the active language so a
+/// value's separators are not silently lost. The full text is also emitted as a marker and
+/// shown on the console.
+fn spell_current(
+    text: &str,
+    lang: Lang,
+    speaker: &mut Option<audio::Speaker>,
+    pending: &mut Option<Key>,
+) {
     uefi::println!("  Spelling: {text}");
     aw_mark!("AW_UEFI_SETUP_SPELL \"{text}\"");
+    let french = matches!(lang, Lang::Fr);
     for character in text.chars() {
         // Barge-in: a key during a long spelling stops it at once.
         if pending.is_some() {
             break;
         }
-        if let Some(clip) = hda::spell_clip(character) {
+        if let Some(clip) = hda::spell_clip(character, french) {
             play(clip, speaker, pending);
         }
     }
@@ -1932,6 +1939,7 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
                     let frame = *stack.last().unwrap();
                     spell_current(
                         &tree.screens[frame.screen].items[frame.item].text,
+                        lang,
                         speaker,
                         &mut pending,
                     );

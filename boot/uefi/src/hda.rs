@@ -137,16 +137,56 @@ static SPELL_DIGITS: [&[u8]; 10] = [
 ];
 static SPELL_SPACE: &[u8] = include_bytes!("speech/spell_space.pcm");
 
-/// The spoken clip for one character when spelling a dynamic line: the letter's or
-/// digit's name, or "space". Letters fold to lower case; anything else (punctuation) has
-/// no clip and is skipped, so spelling a name reads its letters, digits and spaces.
-pub fn spell_clip(character: char) -> Option<&'static [u8]> {
+/// Spoken name of one punctuation symbol, in English and French. Firmware values carry
+/// separators - `1280x800`, `USB 3.0`, dates, `85%`, boot paths - and dropping them when
+/// spelling loses information ("3.0" heard as "three zero"). Each symbol's name differs by
+/// language, so both are recorded: English with an English voice, French with a French one.
+macro_rules! spell_symbol {
+    ($name:literal) => {
+        (
+            include_bytes!(concat!("speech/spell_", $name, ".pcm")),
+            include_bytes!(concat!("speech/fr_spell_", $name, ".pcm")),
+        )
+    };
+}
+
+/// `(character, (english_clip, french_clip))` for every spelled symbol. Kept in one table
+/// so the code and the generated assets (`scripts/gen-spell.ps1`) cannot drift.
+static SPELL_SYMBOLS: &[(char, (&[u8], &[u8]))] = &[
+    ('.', spell_symbol!("dot")),
+    ('-', spell_symbol!("dash")),
+    (':', spell_symbol!("colon")),
+    ('/', spell_symbol!("slash")),
+    ('\\', spell_symbol!("backslash")),
+    ('%', spell_symbol!("percent")),
+    (',', spell_symbol!("comma")),
+    ('_', spell_symbol!("underscore")),
+    ('(', spell_symbol!("lparen")),
+    (')', spell_symbol!("rparen")),
+    ('+', spell_symbol!("plus")),
+    ('=', spell_symbol!("equals")),
+    ('@', spell_symbol!("at")),
+];
+
+/// The spoken clip for one character when spelling a dynamic line: the letter's or digit's
+/// name, "space", or a punctuation symbol's name in the active language (`french`). Letters
+/// fold to lower case. A character with no clip (an unlisted symbol) is skipped, but the
+/// meaningful separators in firmware values are now spoken instead of silently lost.
+pub fn spell_clip(character: char, french: bool) -> Option<&'static [u8]> {
     match character {
         'a'..='z' => Some(SPELL_LETTERS[character as usize - 'a' as usize]),
         'A'..='Z' => Some(SPELL_LETTERS[character as usize - 'A' as usize]),
         '0'..='9' => Some(SPELL_DIGITS[character as usize - '0' as usize]),
         ' ' => Some(SPELL_SPACE),
-        _ => None,
+        _ => SPELL_SYMBOLS.iter().find(|(c, _)| *c == character).map(
+            |(_, (en, fr))| {
+                if french {
+                    *fr
+                } else {
+                    *en
+                }
+            },
+        ),
     }
 }
 
