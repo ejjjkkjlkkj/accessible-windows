@@ -1767,6 +1767,22 @@ fn dispatch_agent(
         return;
     }
 
+    // System information: print the full machine facts (including the long CPU brand) on
+    // the console, and speak the shorter ones - installed memory and virtualization - which
+    // are what a user usually checks here.
+    if has("info") || has("system") || has("systeme") || has("machine") {
+        let mem = installed_memory_mib();
+        let virt = virtualization_status(lang);
+        uefi::println!("  {}: {}", tx(lang, "Processeur", "Processor"), cpu_brand());
+        uefi::println!("  {}: {mem} MiB", tx(lang, "Memoire", "Memory"));
+        uefi::println!("  {}: {virt}", tx(lang, "Virtualisation", "Virtualization"));
+        aw_mark!("AW_UEFI_AGENT_INFO mem={mem}");
+        play(ag(hda::AGENT_VALUE_IS), speaker, pending);
+        let summary = format!("{mem} {}, {virt}", tx(lang, "mega-octets", "megabytes"));
+        spell_current(&summary, lang, speaker, pending);
+        return;
+    }
+
     // Open the firmware's own setup (for everything a loaded app cannot reach).
     if has("firmware") || has("setup") || has("bios") || has("config") {
         play(ag(hda::AGENT_OPENING_SETUP), speaker, pending);
