@@ -1283,6 +1283,14 @@ fn announce_item(
     if let Some(clip) = item.clip {
         play(clip, speaker, pending);
     }
+    // Read-only state lines (CPU, memory, display, Secure Boot, virtualization) carry their
+    // value only in text, with no whole-line clip. Speak it automatically on focus - spelled
+    // through the alphabet bank - so a blind user hears the value on arrival instead of
+    // having to ask for it with the spell key. Interruptible: moving on stops a long value.
+    if matches!(item.action, Action::Info) {
+        let french = CURRENT_FRENCH.load(core::sync::atomic::Ordering::Relaxed);
+        spell_chars(&item.text, french, speaker, pending);
+    }
     true
 }
 
@@ -1627,9 +1635,19 @@ fn spell_current(
 ) {
     uefi::println!("  Spelling: {text}");
     aw_mark!("AW_UEFI_SETUP_SPELL \"{text}\"");
-    let french = matches!(lang, Lang::Fr);
+    spell_chars(text, matches!(lang, Lang::Fr), speaker, pending);
+}
+
+/// Play one clip per character of `text`, honouring phonetic mode and language, and
+/// stopping at once on any key (barge-in). The shared core of both the explicit "spell"
+/// command and the automatic reading of a focused value.
+fn spell_chars(
+    text: &str,
+    french: bool,
+    speaker: &mut Option<audio::Speaker>,
+    pending: &mut Option<Key>,
+) {
     for character in text.chars() {
-        // Barge-in: a key during a long spelling stops it at once.
         if pending.is_some() {
             break;
         }
@@ -1637,6 +1655,19 @@ fn spell_current(
             play(clip, speaker, pending);
         }
     }
+}
+
+/// The active setup language, mirrored into a flag so [`announce_item`] can read a focused
+/// value aloud without threading the language through every call site. Set when the setup
+/// starts and whenever the language is toggled.
+static CURRENT_FRENCH: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
+
+/// Record the active language for [`announce_item`]'s automatic value reading.
+fn set_current_lang(lang: Lang) {
+    CURRENT_FRENCH.store(
+        matches!(lang, Lang::Fr),
+        core::sync::atomic::Ordering::Relaxed,
+    );
 }
 
 /// The command agent: type a plain instruction ("boot usb", "secure boot", "restart")
@@ -1821,6 +1852,7 @@ struct Frame {
 pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
     // French is the default language; the Language item on the Main tab switches it.
     let mut lang = Lang::Fr;
+    set_current_lang(lang);
     let mut tree = build_tree(lang, width, height);
 
     // Open on the Boot tab with "Boot normally" focused: the safe default a user or the
@@ -2051,6 +2083,7 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
                         // land back on the same tab so the change is heard immediately.
                         Action::ToggleLang => {
                             lang = lang.toggled();
+                            set_current_lang(lang);
                             aw_mark!(
                                 "AW_UEFI_SETUP_LANG lang={}",
                                 match lang {
