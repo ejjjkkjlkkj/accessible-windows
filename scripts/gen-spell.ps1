@@ -121,5 +121,20 @@ $synth.SelectVoice($frVoice)
 Write-Host "`nFrench punctuation voice: $frVoice"
 foreach ($name in $punct.Keys) { Write-Clip $synth "fr_spell_$name" $punct[$name].fr }
 
+# 4) NATO phonetic alphabet - unambiguous letter names (Alpha, Bravo, Charlie...) for a
+# user who turns on phonetic spelling, so b/d/p and m/n are never confused. One set,
+# spoken with the English voice; the NATO words are used the same internationally.
+$nato = [ordered]@{
+    a = 'Alpha';   b = 'Bravo';    c = 'Charlie'; d = 'Delta';   e = 'Echo'
+    f = 'Foxtrot'; g = 'Golf';     h = 'Hotel';   i = 'India';   j = 'Juliett'
+    k = 'Kilo';    l = 'Lima';     m = 'Mike';    n = 'November'; o = 'Oscar'
+    p = 'Papa';    q = 'Quebec';   r = 'Romeo';   s = 'Sierra';  t = 'Tango'
+    u = 'Uniform'; v = 'Victor';   w = 'Whiskey'; x = 'X-ray';   y = 'Yankee'
+    z = 'Zulu'
+}
+$synth.SelectVoice($enVoice)
+Write-Host "`nNATO phonetic voice: $enVoice"
+foreach ($letter in $nato.Keys) { Write-Clip $synth "spell_nato_$letter" $nato[$letter] }
+
 $synth.Dispose()
 Write-Host "`nWrote spelling clips to $outDir"

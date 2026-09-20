@@ -1179,11 +1179,11 @@ fn render(tree: &Tree, tab_index: usize, screen_index: usize, item_index: usize,
     uefi::println!();
     if depth == 0 {
         uefi::println!(
-            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  M: mute.  H: help."
+            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  M: mute.  P: phonetic.  H: help."
         );
     } else {
         uefi::println!(
-            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  M: mute.  H: help.  W: where."
+            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  M: mute.  P: phonetic.  H: help.  W: where."
         );
     }
 }
@@ -1564,6 +1564,8 @@ enum Nav {
     VolumeDown,
     /// Toggle mute (M).
     Mute,
+    /// Toggle NATO phonetic spelling (P).
+    Phonetic,
     Ignore,
 }
 
@@ -1593,6 +1595,7 @@ fn classify(key: Key) -> Nav {
             '+' | '=' => Nav::VolumeUp,
             '-' | '_' => Nav::VolumeDown,
             'm' | 'M' => Nav::Mute,
+            'p' | 'P' => Nav::Phonetic,
             _ => Nav::Ignore,
         },
         Key::Special(_) => Nav::Ignore,
@@ -2163,6 +2166,16 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
                             speaker,
                             &mut pending,
                         );
+                    }
+                }
+                Nav::Phonetic => {
+                    let on = hda::toggle_phonetic();
+                    aw_mark!("AW_UEFI_PHONETIC on={on}");
+                    sound::cue(if on { 660 } else { 440 }, Duration::from_millis(90));
+                    // Spell the letter A at once, so the user hears the new mode: the NATO
+                    // word "Alpha" when on, the plain letter when off.
+                    if let Some(clip) = hda::spell_clip('a', matches!(lang, Lang::Fr)) {
+                        play(clip, speaker, &mut pending);
                     }
                 }
                 Nav::Ignore => {}

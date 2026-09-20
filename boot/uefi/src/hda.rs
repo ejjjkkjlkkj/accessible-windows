@@ -17,6 +17,8 @@
 //! during boot services, so a `static`'s address is its physical address and no
 //! page mapping is needed.
 
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use uefi::boot;
 
 use crate::aw_mark;
@@ -199,14 +201,68 @@ static SPELL_SYMBOLS: &[(char, (&[u8], &[u8]))] = &[
     ('@', spell_symbol!("at")),
 ];
 
+/// NATO phonetic names (Alpha, Bravo, Charlie...), one clip per letter. When phonetic
+/// spelling is on, a letter is read as its NATO word so it cannot be confused with a
+/// similar-sounding one (b/d/p, m/n) - the classic screen-reader "phonetic" mode.
+static SPELL_NATO: [&[u8]; 26] = [
+    include_bytes!("speech/spell_nato_a.pcm"),
+    include_bytes!("speech/spell_nato_b.pcm"),
+    include_bytes!("speech/spell_nato_c.pcm"),
+    include_bytes!("speech/spell_nato_d.pcm"),
+    include_bytes!("speech/spell_nato_e.pcm"),
+    include_bytes!("speech/spell_nato_f.pcm"),
+    include_bytes!("speech/spell_nato_g.pcm"),
+    include_bytes!("speech/spell_nato_h.pcm"),
+    include_bytes!("speech/spell_nato_i.pcm"),
+    include_bytes!("speech/spell_nato_j.pcm"),
+    include_bytes!("speech/spell_nato_k.pcm"),
+    include_bytes!("speech/spell_nato_l.pcm"),
+    include_bytes!("speech/spell_nato_m.pcm"),
+    include_bytes!("speech/spell_nato_n.pcm"),
+    include_bytes!("speech/spell_nato_o.pcm"),
+    include_bytes!("speech/spell_nato_p.pcm"),
+    include_bytes!("speech/spell_nato_q.pcm"),
+    include_bytes!("speech/spell_nato_r.pcm"),
+    include_bytes!("speech/spell_nato_s.pcm"),
+    include_bytes!("speech/spell_nato_t.pcm"),
+    include_bytes!("speech/spell_nato_u.pcm"),
+    include_bytes!("speech/spell_nato_v.pcm"),
+    include_bytes!("speech/spell_nato_w.pcm"),
+    include_bytes!("speech/spell_nato_x.pcm"),
+    include_bytes!("speech/spell_nato_y.pcm"),
+    include_bytes!("speech/spell_nato_z.pcm"),
+];
+
+/// Whether spelling reads letters as their NATO phonetic word. Off by default, toggled from
+/// the setup with the P key.
+static PHONETIC: AtomicBool = AtomicBool::new(false);
+
+/// Turn phonetic (NATO) spelling on or off; returns the new state.
+pub fn toggle_phonetic() -> bool {
+    let on = !PHONETIC.load(Ordering::Relaxed);
+    PHONETIC.store(on, Ordering::Relaxed);
+    on
+}
+
+/// The clip for one alphabetic index (0 = a), NATO word when phonetic spelling is on, plain
+/// letter otherwise.
+fn letter_clip(index: usize) -> &'static [u8] {
+    if PHONETIC.load(Ordering::Relaxed) {
+        SPELL_NATO[index]
+    } else {
+        SPELL_LETTERS[index]
+    }
+}
+
 /// The spoken clip for one character when spelling a dynamic line: the letter's or digit's
 /// name, "space", or a punctuation symbol's name in the active language (`french`). Letters
-/// fold to lower case. A character with no clip (an unlisted symbol) is skipped, but the
-/// meaningful separators in firmware values are now spoken instead of silently lost.
+/// fold to lower case and become NATO words when phonetic spelling is on. A character with no
+/// clip (an unlisted symbol) is skipped, but the meaningful separators in firmware values are
+/// now spoken instead of silently lost.
 pub fn spell_clip(character: char, french: bool) -> Option<&'static [u8]> {
     match character {
-        'a'..='z' => Some(SPELL_LETTERS[character as usize - 'a' as usize]),
-        'A'..='Z' => Some(SPELL_LETTERS[character as usize - 'A' as usize]),
+        'a'..='z' => Some(letter_clip(character as usize - 'a' as usize)),
+        'A'..='Z' => Some(letter_clip(character as usize - 'A' as usize)),
         '0'..='9' => Some(SPELL_DIGITS[character as usize - '0' as usize]),
         ' ' => Some(SPELL_SPACE),
         _ => SPELL_SYMBOLS.iter().find(|(c, _)| *c == character).map(
