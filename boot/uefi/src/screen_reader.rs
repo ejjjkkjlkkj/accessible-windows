@@ -255,7 +255,7 @@ fn review_and_continue(
 /// invariant violation it emits `AW_UEFI_SR_FAIL` and withholds the proof marker
 /// rather than claiming success, but it still lets the machine boot - stranding a
 /// user at a dead firmware screen would be the worse failure.
-pub fn run(width: usize, height: usize) {
+pub fn run(width: usize, height: usize) -> Option<hda::Speaker> {
     log::info!("AW_UEFI_SR_BEGIN");
 
     // Bring up the machine's real audio (HDA) once: each line is then spoken aloud
@@ -301,11 +301,12 @@ pub fn run(width: usize, height: usize) {
         if !speak(line, *clip, &mut speaker) {
             // A constant node failed to validate: a bug, not a runtime condition.
             // Report it and skip the success marker, but keep booting.
-            return;
+            return speaker;
         }
     }
 
     review_and_continue(&screen, &clips, &mut speaker);
 
     log::info!("AW_UEFI_SR_PROOF_OK");
+    speaker
 }
