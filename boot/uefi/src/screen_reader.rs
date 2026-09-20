@@ -40,6 +40,7 @@ use uefi::proto::console::text::{Key, ScanCode};
 use uefi::system;
 
 use crate::hda;
+use crate::setup_speech::{self, Clip};
 use crate::sound;
 
 /// Pitch of the audible cue when the reading cursor moves during review.
@@ -297,11 +298,18 @@ pub fn run(width: usize, height: usize) -> Option<hda::Speaker> {
         Some(hda::CLIP_LOADING),
     ];
 
-    for (line, clip) in screen.iter().zip(clips.iter()) {
+    for (index, (line, clip)) in screen.iter().zip(clips.iter()).enumerate() {
         if !speak(line, *clip, &mut speaker) {
             // A constant node failed to validate: a bug, not a runtime condition.
             // Report it and skip the success marker, but keep booting.
             return speaker;
+        }
+        if index == 3 {
+            // The display value is dynamic and cannot have one fixed recording.
+            // Spell it through the same HDA path so it is never visual-only.
+            setup_speech::say(Clip::DisplayInformation, &mut speaker);
+            setup_speech::spell(&display, &mut speaker);
+            log::info!("AW_UEFI_SR_DYNAMIC_SPEECH field=display");
         }
     }
 
