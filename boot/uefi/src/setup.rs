@@ -1748,22 +1748,36 @@ fn dispatch_agent(
         return;
     }
 
-    // Boot from USB, or make USB the default. The real Boot#### entries are enumerated and
-    // matched by name, so this drives the machine's own firmware boot variables.
-    if has("usb") {
+    // Boot management, on the machine's real Boot#### entries: list them, or boot / set as
+    // default any one - by name ("boot usb", "boot windows") or by its position ("boot 2").
+    if has("boot") || has("demarr") || has("default") || has("defaut") || has("par def") {
+        let options = enumerate_boot_options();
+
+        // "list" / "liste": read every entry with its number, so a blind user can choose.
+        if has("list") || has("liste") {
+            play(ag(hda::AGENT_BOOT_LIST), speaker, pending);
+            for (index, opt) in options.iter().enumerate() {
+                if pending.is_some() {
+                    break;
+                }
+                // Number, then the device name spelled out.
+                let line = format!("{}. {}", index + 1, opt.label);
+                spell_current(&line, lang, speaker, pending);
+            }
+            return;
+        }
+
         let want_default = has("default") || has("defaut") || has("par def");
-        let usb = enumerate_boot_options()
-            .into_iter()
-            .find(|opt| opt.label.to_ascii_lowercase().contains("usb"));
-        match usb {
-            None => play(ag(hda::AGENT_NO_USB), speaker, pending),
+        let target = find_boot_target(cmd, &options);
+        match target {
+            None => play(ag(hda::AGENT_NO_MATCH), speaker, pending),
             Some(opt) if want_default => {
                 if make_default(opt.id) {
-                    play(ag(hda::AGENT_DEFAULT_USB), speaker, pending);
+                    play(ag(hda::AGENT_SET_DEFAULT), speaker, pending);
                 }
             }
             Some(opt) => {
-                play(ag(hda::AGENT_BOOTING_USB), speaker, pending);
+                play(ag(hda::AGENT_BOOTING), speaker, pending);
                 boot_now(opt.id); // sets BootNext and resets; does not return
             }
         }
@@ -1836,6 +1850,54 @@ fn dispatch_agent(
 
     // Nothing matched.
     play(ag(hda::AGENT_UNKNOWN), speaker, pending);
+}
+
+/// Resolve which boot entry a command refers to: first by a position number ("boot 2"),
+/// then by a descriptive word the user typed that appears in a device's name ("boot usb",
+/// "boot windows"). The command verbs are ignored so they cannot match a label word like
+/// "Boot" in "Windows Boot Manager".
+fn find_boot_target<'a>(cmd: &str, options: &'a [BootOption]) -> Option<&'a BootOption> {
+    if let Some(position) = first_number(cmd) {
+        if position >= 1 && position <= options.len() {
+            return options.get(position - 1);
+        }
+    }
+    let terms: Vec<&str> = cmd
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| word.len() >= 2)
+        .filter(|word| {
+            !matches!(
+                *word,
+                "boot"
+                    | "default"
+                    | "defaut"
+                    | "demarrer"
+                    | "demarre"
+                    | "demarrage"
+                    | "par"
+                    | "def"
+                    | "sur"
+                    | "now"
+                    | "maintenant"
+            )
+        })
+        .collect();
+    options
+        .iter()
+        .find(|opt| {
+            let label = opt.label.to_ascii_lowercase();
+            terms.iter().any(|term| label.contains(term))
+        })
+}
+
+/// The first run of decimal digits in `s`, parsed as a 1-based position, or `None`.
+fn first_number(s: &str) -> Option<usize> {
+    let digits: String = s
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
 }
 
 /// One level of the descent: which screen we are in and which item is focused.

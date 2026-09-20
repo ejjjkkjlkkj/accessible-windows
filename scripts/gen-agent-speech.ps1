@@ -29,9 +29,6 @@ $replies = [ordered]@{
     'prompt'          = @{ en = 'Command. Type an instruction, Enter to run, Escape to cancel.';        fr = "Commande. Tapez une instruction, Entree pour lancer, Echap pour annuler." }
     'help'            = @{ en = 'Commands: boot USB, default USB, firmware setup, secure boot, virtualization, system information, restart, shut down.'; fr = "Commandes : demarrer USB, USB par defaut, configuration du firmware, secure boot, virtualisation, informations systeme, redemarrer, eteindre." }
     'unknown'         = @{ en = 'Command not recognized. Type help for the list.';                       fr = "Commande non reconnue. Tapez aide pour la liste." }
-    'no_usb'          = @{ en = 'No USB boot entry was found.';                                          fr = "Aucune entree de demarrage USB n'a ete trouvee." }
-    'booting_usb'     = @{ en = 'Booting from USB now.';                                                 fr = "Demarrage sur l'USB maintenant." }
-    'default_usb'     = @{ en = 'USB set as the default boot device.';                                   fr = "USB defini comme peripherique de demarrage par defaut." }
     'firmware_only'   = @{ en = 'This is a firmware setting I cannot change from here. Opening firmware setup so you can change it.'; fr = "Ce reglage appartient au firmware, je ne peux pas le changer d'ici. Ouverture de la configuration du firmware pour que vous puissiez le changer." }
     'opening_setup'   = @{ en = 'Opening firmware setup and restarting.';                                fr = "Ouverture de la configuration du firmware et redemarrage." }
     'setup_denied'    = @{ en = 'This firmware does not allow opening its setup from here.';             fr = "Ce firmware n'autorise pas l'ouverture de sa configuration d'ici." }
@@ -39,6 +36,10 @@ $replies = [ordered]@{
     'shutting_down'   = @{ en = 'Shutting down the system.';                                             fr = "Arret du systeme." }
     'secure_boot_is'  = @{ en = 'Secure Boot is';                                                        fr = "Secure Boot est" }
     'value_is'        = @{ en = 'Current value:';                                                        fr = "Valeur actuelle :" }
+    'booting'         = @{ en = 'Booting the selected device now.';                                      fr = "Demarrage du peripherique selectionne." }
+    'set_default'     = @{ en = 'Set as the default boot device.';                                       fr = "Defini comme peripherique de demarrage par defaut." }
+    'no_match'        = @{ en = 'No matching boot device. Type list to hear them.';                      fr = "Aucun peripherique de demarrage correspondant. Tapez liste pour les entendre." }
+    'boot_list'       = @{ en = 'Boot devices:';                                                         fr = "Peripheriques de demarrage :" }
 }
 
 $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(

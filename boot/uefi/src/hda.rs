@@ -108,9 +108,6 @@ macro_rules! agent_pair {
 agent_pair!(AGENT_PROMPT, "prompt");
 agent_pair!(AGENT_HELP, "help");
 agent_pair!(AGENT_UNKNOWN, "unknown");
-agent_pair!(AGENT_NO_USB, "no_usb");
-agent_pair!(AGENT_BOOTING_USB, "booting_usb");
-agent_pair!(AGENT_DEFAULT_USB, "default_usb");
 agent_pair!(AGENT_FIRMWARE_ONLY, "firmware_only");
 agent_pair!(AGENT_OPENING_SETUP, "opening_setup");
 agent_pair!(AGENT_SETUP_DENIED, "setup_denied");
@@ -118,6 +115,10 @@ agent_pair!(AGENT_RESTARTING, "restarting");
 agent_pair!(AGENT_SHUTTING_DOWN, "shutting_down");
 agent_pair!(AGENT_SECURE_BOOT_IS, "secure_boot_is");
 agent_pair!(AGENT_VALUE_IS, "value_is");
+agent_pair!(AGENT_BOOTING, "booting");
+agent_pair!(AGENT_SET_DEFAULT, "set_default");
+agent_pair!(AGENT_NO_MATCH, "no_match");
+agent_pair!(AGENT_BOOT_LIST, "boot_list");
 
 /// Pick the English or French half of an agent reply pair for the active language.
 pub fn agent_clip(pair: (&'static [u8], &'static [u8]), french: bool) -> &'static [u8] {
