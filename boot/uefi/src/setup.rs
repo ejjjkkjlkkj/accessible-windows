@@ -2224,14 +2224,21 @@ fn get_setting_value(setting: &crate::hii_ifr::Setting) -> Option<u64> {
     Some(u64::from_le_bytes(value))
 }
 
-/// Change one firmware setting in place - the `setup_var` method: read the varstore variable,
-/// overwrite the setting's bytes at its offset, and write the whole variable back with its own
-/// attributes. Returns whether the write stuck. The caller confirms first, since a wrong value
-/// can soft-brick the firmware configuration.
+/// Change one firmware setting, trying both methods so it works on any firmware. First the
+/// `setup_var` method (read the varstore's NVRAM variable, overwrite the bytes at the offset,
+/// write it back) which real BIOSes back with a plain variable; if that varstore is not a
+/// reachable variable (driver-internal, as under QEMU/OVMF), fall back to HII RouteConfig,
+/// which reaches any varstore through its driver. The caller confirms first, since a wrong
+/// value can soft-brick the firmware configuration.
 fn set_setting_value(setting: &crate::hii_ifr::Setting, value: u64) -> bool {
-    let name = match CString16::try_from(setting.store.as_str()) {
-        Ok(name) => name,
-        Err(_) => return false,
+    set_setting_via_variable(setting, value) || route_config_write(setting, value)
+}
+
+/// Write a setting through its NVRAM varstore variable (the `setup_var` method). Returns false
+/// when the varstore is not a reachable EFI variable.
+fn set_setting_via_variable(setting: &crate::hii_ifr::Setting, value: u64) -> bool {
+    let Ok(name) = CString16::try_from(setting.store.as_str()) else {
+        return false;
     };
     let vendor = VariableVendor(Guid::from_bytes(setting.guid));
     let Ok((data, attributes)) = runtime::get_variable_boxed(&name, &vendor) else {
@@ -2245,6 +2252,84 @@ fn set_setting_value(setting: &crate::hii_ifr::Setting, value: u64) -> bool {
     let bytes = value.to_le_bytes();
     buffer[offset..offset + width].copy_from_slice(&bytes[..width]);
     runtime::set_variable(&name, &vendor, attributes, &buffer).is_ok()
+}
+
+/// Write a setting through HII RouteConfig - the driver-agnostic path that also reaches
+/// varstores which are not plain NVRAM variables. Builds `<ConfigHdr>&OFFSET&WIDTH&VALUE` by
+/// reusing the ConfigHdr the firmware itself exports for that varstore, then routes it. Returns
+/// whether the firmware accepted the change.
+fn route_config_write(setting: &crate::hii_ifr::Setting, value: u64) -> bool {
+    use uefi_raw::protocol::hii::config::HiiConfigRoutingProtocol;
+
+    let width = setting.width as usize;
+    if width == 0 || width > 8 {
+        return false;
+    }
+    let Ok(handle) = boot::get_handle_for_protocol::<HiiConfigRouting>() else {
+        return false;
+    };
+    let Ok(routing) = boot::open_protocol_exclusive::<HiiConfigRouting>(handle) else {
+        return false;
+    };
+    let Ok(export) = routing.export() else {
+        return false;
+    };
+
+    // Locate this varstore's ConfigResp by its GUID, then take its ConfigHdr (everything up to
+    // the first block element) verbatim, so the routing header matches the firmware exactly.
+    let guid_hex: String = setting
+        .guid
+        .iter()
+        .map(|b| alloc::format!("{b:02x}"))
+        .collect();
+    let lower = export.to_ascii_lowercase();
+    let key = alloc::format!("guid={guid_hex}");
+    let Some(start) = lower.find(&key) else {
+        return false;
+    };
+    let resp_end = lower[start + 1..]
+        .find("guid=")
+        .map(|i| start + 1 + i)
+        .unwrap_or(export.len());
+    let resp = &export[start..resp_end];
+    let Some(hdr_len) = resp.to_ascii_lowercase().find("&offset=") else {
+        return false;
+    };
+    let config_hdr = &resp[..hdr_len];
+
+    // VALUE is the value's bytes most-significant first (big-endian hex of the little-endian
+    // field), which is how the firmware's own export encodes it.
+    let mut value_hex = String::new();
+    for i in (0..width).rev() {
+        let byte = ((value >> (i * 8)) & 0xff) as u8;
+        value_hex.push_str(&alloc::format!("{byte:02X}"));
+    }
+    let request = alloc::format!(
+        "{config_hdr}&OFFSET={:04X}&WIDTH={:04X}&VALUE={value_hex}",
+        setting.offset,
+        width
+    );
+    let Ok(request16) = CString16::try_from(request.as_str()) else {
+        return false;
+    };
+
+    // SAFETY: `routing` is an open HiiConfigRouting whose wrapper is repr(transparent) over the
+    // raw protocol, so the cast yields a valid protocol pointer; `request16` is a live
+    // NUL-terminated UCS-2 string for the duration of the call, and `progress` is a scratch
+    // out-pointer the firmware fills.
+    let raw = (&*routing) as *const HiiConfigRouting as *const HiiConfigRoutingProtocol;
+    let mut progress: *const uefi_raw::Char16 = core::ptr::null();
+    let status = unsafe {
+        ((*raw).route_config)(
+            raw,
+            request16.as_ptr() as *const uefi_raw::Char16,
+            &mut progress,
+        )
+    };
+    if status != uefi_raw::Status::SUCCESS {
+        log::error!("AW_UEFI_ROUTECONFIG_FAIL status={status:?}");
+    }
+    status == uefi_raw::Status::SUCCESS
 }
 
 /// The descriptive words of a command, with the given verbs and small filler words removed -
