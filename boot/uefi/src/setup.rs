@@ -1748,44 +1748,56 @@ fn dispatch_agent(
         return;
     }
 
-    // Boot management, on the machine's real Boot#### entries: list them, or boot / set as
-    // default any one - by name ("boot usb", "boot windows") or by its position ("boot 2").
-    if has("boot") || has("demarr") || has("default") || has("defaut") || has("par def") {
-        let options = enumerate_boot_options();
-
-        // "list" / "liste": read every entry with its number, so a blind user can choose.
-        if has("list") || has("liste") {
-            play(ag(hda::AGENT_BOOT_LIST), speaker, pending);
-            for (index, opt) in options.iter().enumerate() {
-                if pending.is_some() {
-                    break;
-                }
-                // Number, then the device name spelled out.
-                let line = format!("{}. {}", index + 1, opt.label);
-                spell_current(&line, lang, speaker, pending);
-            }
-            return;
-        }
-
-        let want_default = has("default") || has("defaut") || has("par def");
-        let target = find_boot_target(cmd, &options);
-        match target {
-            None => play(ag(hda::AGENT_NO_MATCH), speaker, pending),
-            Some(opt) if want_default => {
-                if make_default(opt.id) {
-                    play(ag(hda::AGENT_SET_DEFAULT), speaker, pending);
-                }
-            }
-            Some(opt) => {
-                play(ag(hda::AGENT_BOOTING), speaker, pending);
-                boot_now(opt.id); // sets BootNext and resets; does not return
-            }
+    // Restart / reboot - checked before the boot commands, so "reboot" is not mistaken for a
+    // boot-device request. Confirmed first, like the menu.
+    if has("restart") || has("reboot") || has("redemarr") {
+        if confirm(lang, speaker, pending) {
+            play(ag(hda::AGENT_RESTARTING), speaker, pending);
+            runtime::reset(runtime::ResetType::COLD, Status::SUCCESS, None);
         }
         return;
     }
 
-    // Secure Boot: a loaded application cannot change it (the SecureBoot variable is
-    // immutable per the UEFI spec), so read its state aloud and route to firmware setup.
+    // Shut down / power off - confirmed first.
+    if has("shut") || has("eteind") || has("arret") || has("power off") || has("poweroff") {
+        if confirm(lang, speaker, pending) {
+            play(ag(hda::AGENT_SHUTTING_DOWN), speaker, pending);
+            runtime::reset(runtime::ResetType::SHUTDOWN, Status::SUCCESS, None);
+        }
+        return;
+    }
+
+    // Set the firmware boot-manager timeout - the architected global `Timeout` variable a
+    // loaded application is allowed to write ("set timeout 5", "delai 5").
+    if has("timeout") || has("delai") {
+        match first_number(cmd) {
+            Some(secs) if set_boot_timeout(secs as u16) => {
+                play(ag(hda::AGENT_TIMEOUT_SET), speaker, pending);
+                spell_current(&format!("{secs}"), lang, speaker, pending);
+            }
+            Some(_) => play(ag(hda::AGENT_FAILED), speaker, pending),
+            None => play(ag(hda::AGENT_UNKNOWN), speaker, pending),
+        }
+        return;
+    }
+
+    // Reorder a boot entry, earlier ("move up") or later ("move down") in BootOrder.
+    if has("move") || has("monter") || has("descendre") || has("priorit") {
+        let up = has("up") || has("monter") || has("haut");
+        let options = enumerate_boot_options();
+        match find_boot_target(cmd, &options) {
+            Some(opt) if move_in_boot_order(opt.id, up) => {
+                play(ag(hda::AGENT_DONE), speaker, pending)
+            }
+            Some(_) => play(ag(hda::AGENT_FAILED), speaker, pending),
+            None => play(ag(hda::AGENT_NO_MATCH), speaker, pending),
+        }
+        return;
+    }
+
+    // Secure Boot: always speak its state. Only when the user asks to CHANGE it do we explain
+    // a loaded app cannot (the spec makes SecureBoot immutable) and route to firmware setup -
+    // so simply asking the status never reboots the machine.
     if has("secure") {
         let state = one_byte_state(
             cstr16!("SecureBoot"),
@@ -1795,26 +1807,81 @@ fn dispatch_agent(
         );
         play(ag(hda::AGENT_SECURE_BOOT_IS), speaker, pending);
         spell_current(&state, lang, speaker, pending);
-        play(ag(hda::AGENT_FIRMWARE_ONLY), speaker, pending);
-        enter_firmware_setup(); // resets into firmware setup when supported
-        play(ag(hda::AGENT_SETUP_DENIED), speaker, pending);
+        if wants_change(cmd) {
+            play(ag(hda::AGENT_FIRMWARE_ONLY), speaker, pending);
+            enter_firmware_setup();
+            play(ag(hda::AGENT_SETUP_DENIED), speaker, pending);
+        }
         return;
     }
 
-    // Virtualization: also a firmware-owned strap. Speak the live CPU state and route.
+    // Virtualization: read the live CPU state; route to firmware setup only on a change ask.
     if has("virtu") || has("vt-x") || has("vmx") || has("svm") {
         let state = virtualization_status(lang);
         play(ag(hda::AGENT_VALUE_IS), speaker, pending);
         spell_current(&state, lang, speaker, pending);
-        play(ag(hda::AGENT_FIRMWARE_ONLY), speaker, pending);
-        enter_firmware_setup();
-        play(ag(hda::AGENT_SETUP_DENIED), speaker, pending);
+        if wants_change(cmd) {
+            play(ag(hda::AGENT_FIRMWARE_ONLY), speaker, pending);
+            enter_firmware_setup();
+            play(ag(hda::AGENT_SETUP_DENIED), speaker, pending);
+        }
         return;
     }
 
-    // System information: print the full machine facts (including the long CPU brand) on
-    // the console, and speak the shorter ones - installed memory and virtualization - which
-    // are what a user usually checks here.
+    // The firmware clock: time and date. ("timeout" was already handled above.)
+    if has("time") || has("heure") || has("date") || has("clock") || has("horloge") {
+        if let Ok(t) = runtime::get_time() {
+            let text = format!(
+                "{:04}-{:02}-{:02} {:02}:{:02}",
+                t.year(),
+                t.month(),
+                t.day(),
+                t.hour(),
+                t.minute()
+            );
+            play(ag(hda::AGENT_TIME_IS), speaker, pending);
+            spell_current(&text, lang, speaker, pending);
+        } else {
+            play(ag(hda::AGENT_FAILED), speaker, pending);
+        }
+        return;
+    }
+
+    // Installed memory.
+    if has("memory") || has("memoire") || has("ram") {
+        let mem = installed_memory_mib();
+        play(ag(hda::AGENT_MEMORY_IS), speaker, pending);
+        spell_current(
+            &format!("{mem} {}", tx(lang, "mega-octets", "megabytes")),
+            lang,
+            speaker,
+            pending,
+        );
+        return;
+    }
+
+    // Processor.
+    if has("cpu") || has("processor") || has("processeur") {
+        play(ag(hda::AGENT_PROCESSOR_IS), speaker, pending);
+        spell_current(&cpu_brand(), lang, speaker, pending);
+        return;
+    }
+
+    // Firmware identity (vendor and revision) - distinct from opening firmware setup below.
+    if (has("firmware") || has("micrologiciel") || has("bios"))
+        && (has("version") || has("revision") || has("vendor") || has("fabricant"))
+    {
+        let text = format!(
+            "{}, {}",
+            system::firmware_vendor(),
+            system::firmware_revision()
+        );
+        play(ag(hda::AGENT_FIRMWARE_IS), speaker, pending);
+        spell_current(&text, lang, speaker, pending);
+        return;
+    }
+
+    // Full system information: the long facts on the console, the short ones spoken.
     if has("info") || has("system") || has("systeme") || has("machine") {
         let mem = installed_memory_mib();
         let virt = virtualization_status(lang);
@@ -1836,27 +1903,66 @@ fn dispatch_agent(
         return;
     }
 
-    // Restart now - confirmed first, like the menu, so a mistyped command cannot reboot the
-    // machine out from under a blind user.
-    if has("restart") || has("reboot") || has("redemarr") || has("reset") {
-        if confirm(lang, speaker, pending) {
-            play(ag(hda::AGENT_RESTARTING), speaker, pending);
-            runtime::reset(runtime::ResetType::COLD, Status::SUCCESS, None);
+    // Boot management: list the entries, or boot / set-default one by name or position.
+    if has("boot")
+        || has("demarr")
+        || has("default")
+        || has("defaut")
+        || has("par def")
+        || has("list")
+        || has("liste")
+    {
+        let options = enumerate_boot_options();
+        if has("list") || has("liste") {
+            play(ag(hda::AGENT_BOOT_LIST), speaker, pending);
+            for (index, opt) in options.iter().enumerate() {
+                if pending.is_some() {
+                    break;
+                }
+                spell_current(&format!("{}. {}", index + 1, opt.label), lang, speaker, pending);
+            }
+            return;
         }
-        return;
-    }
-
-    // Shut down now - also confirmed first.
-    if has("shut") || has("eteind") || has("arret") || has("power") {
-        if confirm(lang, speaker, pending) {
-            play(ag(hda::AGENT_SHUTTING_DOWN), speaker, pending);
-            runtime::reset(runtime::ResetType::SHUTDOWN, Status::SUCCESS, None);
+        let want_default = has("default") || has("defaut") || has("par def");
+        match find_boot_target(cmd, &options) {
+            None => play(ag(hda::AGENT_NO_MATCH), speaker, pending),
+            Some(opt) if want_default => {
+                if make_default(opt.id) {
+                    play(ag(hda::AGENT_SET_DEFAULT), speaker, pending);
+                }
+            }
+            Some(opt) => {
+                play(ag(hda::AGENT_BOOTING), speaker, pending);
+                boot_now(opt.id); // sets BootNext and resets; does not return
+            }
         }
         return;
     }
 
     // Nothing matched.
     play(ag(hda::AGENT_UNKNOWN), speaker, pending);
+}
+
+/// Whether a command asks to change a setting rather than just read it - the verbs that turn
+/// a "secure boot" query into a request to open firmware setup.
+fn wants_change(cmd: &str) -> bool {
+    [
+        "change", "chang", "enable", "enabl", "disable", "activ", "desactiv", "turn", "modif",
+        "set", "off", "on ",
+    ]
+    .iter()
+    .any(|verb| cmd.contains(verb))
+}
+
+/// Write the firmware boot-manager timeout (`Timeout`, seconds). Returns whether it stuck.
+fn set_boot_timeout(seconds: u16) -> bool {
+    runtime::set_variable(
+        cstr16!("Timeout"),
+        &VariableVendor::GLOBAL_VARIABLE,
+        boot_var_attributes(),
+        &seconds.to_le_bytes(),
+    )
+    .is_ok()
 }
 
 /// Resolve which boot entry a command refers to: first by a position number ("boot 2"),
@@ -1884,6 +1990,15 @@ fn find_boot_target<'a>(cmd: &str, options: &'a [BootOption]) -> Option<&'a Boot
                     | "par"
                     | "def"
                     | "sur"
+                    | "move"
+                    | "up"
+                    | "down"
+                    | "monter"
+                    | "descendre"
+                    | "haut"
+                    | "bas"
+                    | "list"
+                    | "liste"
                     | "now"
                     | "maintenant"
             )

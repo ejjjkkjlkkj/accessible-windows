@@ -119,6 +119,13 @@ agent_pair!(AGENT_BOOTING, "booting");
 agent_pair!(AGENT_SET_DEFAULT, "set_default");
 agent_pair!(AGENT_NO_MATCH, "no_match");
 agent_pair!(AGENT_BOOT_LIST, "boot_list");
+agent_pair!(AGENT_DONE, "done");
+agent_pair!(AGENT_FAILED, "failed");
+agent_pair!(AGENT_TIME_IS, "time_is");
+agent_pair!(AGENT_MEMORY_IS, "memory_is");
+agent_pair!(AGENT_PROCESSOR_IS, "processor_is");
+agent_pair!(AGENT_FIRMWARE_IS, "firmware_is");
+agent_pair!(AGENT_TIMEOUT_SET, "timeout_set");
 
 /// Pick the English or French half of an agent reply pair for the active language.
 pub fn agent_clip(pair: (&'static [u8], &'static [u8]), french: bool) -> &'static [u8] {

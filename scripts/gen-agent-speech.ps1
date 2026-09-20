@@ -27,7 +27,7 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 # Clip name -> English / French reply.
 $replies = [ordered]@{
     'prompt'          = @{ en = 'Command. Type an instruction, Enter to run, Escape to cancel.';        fr = "Commande. Tapez une instruction, Entree pour lancer, Echap pour annuler." }
-    'help'            = @{ en = 'Commands: boot USB, default USB, firmware setup, secure boot, virtualization, system information, restart, shut down.'; fr = "Commandes : demarrer USB, USB par defaut, configuration du firmware, secure boot, virtualisation, informations systeme, redemarrer, eteindre." }
+    'help'            = @{ en = 'Commands: list, boot a device by name or number, set default, move up, move down, secure boot, virtualization, time, memory, processor, firmware version, set timeout, firmware setup, system information, restart, shut down.'; fr = "Commandes : liste, demarrer un peripherique par nom ou numero, definir par defaut, monter, descendre, secure boot, virtualisation, heure, memoire, processeur, version du firmware, definir le delai, configuration du firmware, informations systeme, redemarrer, eteindre." }
     'unknown'         = @{ en = 'Command not recognized. Type help for the list.';                       fr = "Commande non reconnue. Tapez aide pour la liste." }
     'firmware_only'   = @{ en = 'This is a firmware setting I cannot change from here. Opening firmware setup so you can change it.'; fr = "Ce reglage appartient au firmware, je ne peux pas le changer d'ici. Ouverture de la configuration du firmware pour que vous puissiez le changer." }
     'opening_setup'   = @{ en = 'Opening firmware setup and restarting.';                                fr = "Ouverture de la configuration du firmware et redemarrage." }
@@ -40,6 +40,13 @@ $replies = [ordered]@{
     'set_default'     = @{ en = 'Set as the default boot device.';                                       fr = "Defini comme peripherique de demarrage par defaut." }
     'no_match'        = @{ en = 'No matching boot device. Type list to hear them.';                      fr = "Aucun peripherique de demarrage correspondant. Tapez liste pour les entendre." }
     'boot_list'       = @{ en = 'Boot devices:';                                                         fr = "Peripheriques de demarrage :" }
+    'done'            = @{ en = 'Done.';                                                                 fr = "C'est fait." }
+    'failed'          = @{ en = 'That could not be done.';                                               fr = "Cela n'a pas pu etre fait." }
+    'time_is'         = @{ en = 'The time is';                                                           fr = "L'heure est" }
+    'memory_is'       = @{ en = 'Installed memory:';                                                     fr = "Memoire installee :" }
+    'processor_is'    = @{ en = 'Processor:';                                                            fr = "Processeur :" }
+    'firmware_is'     = @{ en = 'Firmware:';                                                             fr = "Micrologiciel :" }
+    'timeout_set'     = @{ en = 'Boot timeout set to';                                                   fr = "Delai de demarrage regle sur" }
 }
 
 $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(
