@@ -21,7 +21,23 @@ function Write-Gate {
 
 function Get-RunnerService {
     param([string]$Root)
-    Get-CimInstance Win32_Service |
+
+    # On Windows, GitHub stores the configured service name in .service.
+    # Prefer that authoritative mapping before falling back to executable-path discovery.
+    $serviceFile = Join-Path $Root '.service'
+    if (Test-Path $serviceFile) {
+        $serviceName = (Get-Content $serviceFile -Raw -ErrorAction SilentlyContinue).Trim()
+        if ($serviceName) {
+            $service = Get-CimInstance Win32_Service -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -eq $serviceName } |
+                Select-Object -First 1
+            if ($service) {
+                return $service
+            }
+        }
+    }
+
+    Get-CimInstance Win32_Service -ErrorAction SilentlyContinue |
         Where-Object {
             $_.PathName -match 'RunnerService\.exe' -and
             $_.PathName -like "*$Root*"
@@ -90,7 +106,6 @@ Write-Host ("RUNNER_DIR = {0}" -f $RunnerDir)
 
 $required = @(
     '.runner',
-    'svc.cmd',
     'bin\RunnerService.exe',
     'bin\Runner.Listener.exe'
 )
@@ -121,18 +136,15 @@ try {
 $service = Get-RunnerService $RunnerDir
 
 if (-not $service) {
-    Write-Host 'SERVICE = NOT_INSTALLED; installing with svc.cmd'
-    & (Join-Path $RunnerDir 'svc.cmd') install
-    if ($LASTEXITCODE -ne 0) {
-        throw "svc.cmd install failed with exit code $LASTEXITCODE"
-    }
-    Start-Sleep -Seconds 2
-    $service = Get-RunnerService $RunnerDir
+    Write-Gate 'WINDOWS_SERVICE_CONFIGURED' $false
+    throw @"
+GitHub Actions Runner Windows service is not installed for this runner.
+This is not a missing svc.cmd problem: Windows runners do not use svc.cmd.
+Reconfigure the runner with config.cmd and choose service mode, then rerun this recovery script.
+"@
 }
 
-if (-not $service) {
-    throw 'GitHub Actions Runner service still not found after install.'
-}
+Write-Gate 'WINDOWS_SERVICE_CONFIGURED' $true $service.Name
 
 Write-Host ("SERVICE = {0}" -f $service.Name)
 Write-Host ("SERVICE_ACCOUNT = {0}" -f $service.StartName)
@@ -158,9 +170,12 @@ Set-Service -Name $service.Name -StartupType Automatic
 & sc.exe failureflag $service.Name 1 | Out-Host
 
 try {
-    & (Join-Path $RunnerDir 'svc.cmd') start | Out-Host
+    $serviceNow = Get-Service -Name $service.Name -ErrorAction Stop
+    if ($serviceNow.Status -ne 'Running') {
+        Start-Service -Name $service.Name -ErrorAction Stop
+    }
 } catch {
-    Write-Host ("SVC_START_EXCEPTION = {0}" -f $_.Exception.Message)
+    Write-Host ("SERVICE_START_EXCEPTION = {0}" -f $_.Exception.Message)
 }
 
 $deadline = (Get-Date).AddSeconds(20)
