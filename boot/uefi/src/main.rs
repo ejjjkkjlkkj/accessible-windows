@@ -22,6 +22,7 @@ mod hda;
 mod screen_reader;
 mod setup;
 mod setup_speech;
+mod setup_speech;
 mod sound;
 
 const UEFI_PAGE_SIZE: usize = 4096;
@@ -556,11 +557,12 @@ fn main() -> Status {
     // lets the user review it and continue by keyboard, while boot services (and
     // so the console and its keyboard) are still available. Unattended, it reads
     // the screen and continues on its own.
-    screen_reader::run(width, height);
+    let speaker = screen_reader::run(width, height);
 
-    // Accessible hierarchical firmware Setup. With no key it times out to the
-    // normal boot path; after the first key it never auto-advances.
-    setup::run(width, height);
+    // Accessible hierarchical firmware Setup. It reuses the already initialized
+    // HDA speaker, so speech remains continuous from first boot announcement
+    // through every menu and submenu without resetting the codec.
+    setup::run(width, height, speaker);
 
     let normalized_memory_map_buffer = match boot::allocate_pages(
         AllocateType::AnyPages,
