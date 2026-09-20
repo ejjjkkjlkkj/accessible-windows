@@ -31,7 +31,12 @@ param(
 
     # COM1 backend for QEMU's `-serial` (default 'none'). Set to e.g.
     # "file:C:\path\com1.log" to route the serial console to a file.
-    [string]$Serial = 'none'
+    [string]$Serial = 'none',
+
+    # Optional deterministic QEMU HMP keyboard script. Each entry is
+    # <debug marker>|||<monitor command>. A command is sent only after a NEW
+    # occurrence of its marker appears in debug.log.
+    [string[]]$MonitorScript = @()
 )
 
 Set-StrictMode -Version Latest
@@ -95,13 +100,18 @@ try {
     $log = Join-Path $run 'debug.log'
     if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
 
+    $useMonitorScript = $MonitorScript.Count -gt 0
+    $monitorBackend = if ($useMonitorScript) { 'stdio' } else { 'none' }
+
     $start = [System.Diagnostics.ProcessStartInfo]::new($Qemu)
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.RedirectStandardError = $true
+    $start.RedirectStandardInput = $useMonitorScript
+    $start.RedirectStandardOutput = $useMonitorScript
     $baseArgs = @(
         '-machine', 'q35', '-accel', 'tcg', '-cpu', 'max', '-m', '256M',
-        '-display', 'none', '-serial', $Serial, '-monitor', 'none',
+        '-display', 'none', '-serial', $Serial, '-monitor', $monitorBackend,
         '-no-reboot', '-net', 'none',
         '-debugcon', "file:$log",
         '-drive', "if=pflash,format=raw,readonly=on,file=$code",
@@ -112,17 +122,64 @@ try {
 
     $process = [System.Diagnostics.Process]::Start($start)
     $stderrTask = $process.StandardError.ReadToEndAsync()
+    $stdoutTask = if ($useMonitorScript) { $process.StandardOutput.ReadToEndAsync() } else { $null }
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+
     try {
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        if ($useMonitorScript) {
+            $logCursor = 0
+            foreach ($step in $MonitorScript) {
+                $parts = @($step -split '\|\|\|', 2)
+                if ($parts.Count -ne 2 -or -not $parts[0] -or -not $parts[1]) {
+                    throw "Invalid MonitorScript entry: $step"
+                }
+                $marker = $parts[0]
+                $command = $parts[1]
+                $seen = $false
+                while (-not $seen) {
+                    if ($process.HasExited) {
+                        throw "QEMU exited before monitor marker appeared: $marker"
+                    }
+                    if ([DateTimeOffset]::UtcNow -ge $deadline) {
+                        throw "Timed out waiting for monitor marker: $marker"
+                    }
+                    if (Test-Path -LiteralPath $log -PathType Leaf) {
+                        $current = ((Get-Content -LiteralPath $log -Raw) -replace "`0", '')
+                        if ($current.Length -lt $logCursor) { $logCursor = 0 }
+                        if ($current.Length -gt $logCursor) {
+                            $delta = $current.Substring($logCursor)
+                            if ($delta.Contains($marker)) {
+                                $logCursor = $current.Length
+                                $seen = $true
+                                break
+                            }
+                        }
+                    }
+                    Start-Sleep -Milliseconds 50
+                }
+                Write-Verbose "QEMU monitor after '$marker': $command"
+                $process.StandardInput.WriteLine($command)
+                $process.StandardInput.Flush()
+            }
+        }
+
+        $remainingMs = [int]($deadline - [DateTimeOffset]::UtcNow).TotalMilliseconds
+        if ($remainingMs -lt 1) { $remainingMs = 1 }
+        if (-not $process.WaitForExit($remainingMs)) {
             $process.Kill()
             $process.WaitForExit()
         }
     } finally {
         if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
-        $process.Dispose()
+        if ($useMonitorScript) {
+            try { $process.StandardInput.Close() } catch {}
+        }
     }
     $stderr = $stderrTask.GetAwaiter().GetResult()
+    $stdout = if ($stdoutTask) { $stdoutTask.GetAwaiter().GetResult() } else { '' }
     if ($stderr) { Write-Verbose "QEMU stderr: $stderr" }
+    if ($stdout) { Write-Verbose "QEMU monitor: $stdout" }
+    $process.Dispose()
 
     if (-not (Test-Path -LiteralPath $log)) { throw "QEMU produced no debug log for run '$Name'." }
     $text = ((Get-Content -LiteralPath $log -Raw) -replace "`0", '')
