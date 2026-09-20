@@ -1836,16 +1836,23 @@ fn dispatch_agent(
         return;
     }
 
-    // Restart now.
+    // Restart now - confirmed first, like the menu, so a mistyped command cannot reboot the
+    // machine out from under a blind user.
     if has("restart") || has("reboot") || has("redemarr") || has("reset") {
-        play(ag(hda::AGENT_RESTARTING), speaker, pending);
-        runtime::reset(runtime::ResetType::COLD, Status::SUCCESS, None);
+        if confirm(lang, speaker, pending) {
+            play(ag(hda::AGENT_RESTARTING), speaker, pending);
+            runtime::reset(runtime::ResetType::COLD, Status::SUCCESS, None);
+        }
+        return;
     }
 
-    // Shut down now.
+    // Shut down now - also confirmed first.
     if has("shut") || has("eteind") || has("arret") || has("power") {
-        play(ag(hda::AGENT_SHUTTING_DOWN), speaker, pending);
-        runtime::reset(runtime::ResetType::SHUTDOWN, Status::SUCCESS, None);
+        if confirm(lang, speaker, pending) {
+            play(ag(hda::AGENT_SHUTTING_DOWN), speaker, pending);
+            runtime::reset(runtime::ResetType::SHUTDOWN, Status::SUCCESS, None);
+        }
+        return;
     }
 
     // Nothing matched.
