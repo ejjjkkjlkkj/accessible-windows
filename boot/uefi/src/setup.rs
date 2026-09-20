@@ -1917,6 +1917,14 @@ fn dispatch_agent(
                     tx(lang, "reglages", "settings")
                 );
                 spell_current(&summary, lang, speaker, pending);
+                // Read the real store names aloud too, so the firmware's own configuration is
+                // heard by ear, not just counted. Interruptible.
+                for name in &names {
+                    if pending.is_some() {
+                        break;
+                    }
+                    spell_current(name, lang, speaker, pending);
+                }
             }
             None => play(ag(hda::AGENT_FAILED), speaker, pending),
         }
