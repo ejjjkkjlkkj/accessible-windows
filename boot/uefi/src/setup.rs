@@ -420,16 +420,14 @@ fn boot_description(id: u16) -> String {
 }
 
 fn cpu_model() -> String {
-    // SAFETY: CPUID is available in x86_64 long mode and has no memory side effects.
-    let max_extended = unsafe { __cpuid(0x8000_0000) }.eax;
+    let max_extended = __cpuid(0x8000_0000).eax;
     if max_extended < 0x8000_0004 {
         return "x86 64".to_string();
     }
 
     let mut bytes = Vec::with_capacity(48);
     for leaf in 0x8000_0002..=0x8000_0004 {
-        // SAFETY: the maximum extended CPUID leaf was checked above.
-        let value = unsafe { __cpuid(leaf) };
+        let value = __cpuid(leaf);
         bytes.extend_from_slice(&value.eax.to_le_bytes());
         bytes.extend_from_slice(&value.ebx.to_le_bytes());
         bytes.extend_from_slice(&value.ecx.to_le_bytes());
@@ -437,6 +435,7 @@ fn cpu_model() -> String {
     }
 
     core::str::from_utf8(&bytes)
+        .ok()
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .unwrap_or("x86 64")
@@ -444,14 +443,11 @@ fn cpu_model() -> String {
 }
 
 fn virtualization_supported() -> bool {
-    // SAFETY: CPUID is available in x86_64 long mode and has no memory side effects.
-    unsafe {
-        let max_basic = __cpuid(0).eax;
-        let vmx = max_basic >= 1 && (__cpuid(1).ecx & (1 << 5)) != 0;
-        let max_extended = __cpuid(0x8000_0000).eax;
-        let svm = max_extended >= 0x8000_0001 && (__cpuid(0x8000_0001).ecx & (1 << 2)) != 0;
-        vmx || svm
-    }
+    let max_basic = __cpuid(0).eax;
+    let vmx = max_basic >= 1 && (__cpuid(1).ecx & (1 << 5)) != 0;
+    let max_extended = __cpuid(0x8000_0000).eax;
+    let svm = max_extended >= 0x8000_0001 && (__cpuid(0x8000_0001).ecx & (1 << 2)) != 0;
+    vmx || svm
 }
 
 fn set_boot_next(id: u16) -> bool {
@@ -865,10 +861,8 @@ fn activate(
 /// Unattended boots wait briefly and continue. Once any key is received, the
 /// timeout is permanently disabled for this boot so nonvisual navigation is never
 /// raced by automatic startup.
-pub fn run(width: usize, height: usize) {
+pub fn run(width: usize, height: usize, mut speaker: Option<hda::Speaker>) {
     log::info!("AW_UEFI_SETUP_BEGIN");
-
-    let mut speaker = hda::bring_up();
     setup_speech::log_mode();
     setup_speech::say(Clip::Setup, &mut speaker);
     setup_speech::say(Clip::InstructionsNavigation, &mut speaker);
