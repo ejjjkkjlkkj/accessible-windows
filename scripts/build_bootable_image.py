@@ -25,9 +25,10 @@ RESERVED_SECTORS = 1
 NUM_FATS = 2
 ROOT_ENTRIES = 512
 # Cluster count kept comfortably inside the FAT16 range (4085..65524). At 2 KiB
-# per cluster this is a ~10 MiB ESP - far more than the loader and kernel need,
-# small enough to write to USB quickly.
-DATA_CLUSTERS = 5000
+# per cluster this is a ~16 MiB ESP - room for the loader and kernel plus the
+# embedded speech bank (the accessible UEFI Setup carries hundreds of PCM clips
+# for French and English), and still small enough to write to USB quickly.
+DATA_CLUSTERS = 8000
 
 FAT16_EOC = 0xFFFF
 # A fixed, valid FAT date/time (2026-01-01 00:00:00) so entries are not zero.
