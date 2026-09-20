@@ -124,13 +124,21 @@ $configurations = @(
             'AW_UEFI_SR_SPEAK "Starting Accessible Windows"'
             'AW_UEFI_SR_SPEAK "Loading the operating system"'
             'AW_UEFI_SR_READY'
+            # The firmware-stage accessible Setup Utility (AMI/ASUS-style tabs: Main,
+            # Advanced, Boot, Security, Save and Exit), operated on the firmware's own
+            # keyboard (so a USB keyboard works on every machine, before any kernel USB
+            # stack) and voiced through HDA. Real boot entries are enumerated from the
+            # firmware's BootOrder/Boot#### variables; the Boot tab opens on the safe
+            # default. The setup defaults to French (a Language item switches to English),
+            # so the default item is "Demarrer normalement"; the tab title is "Demarrage".
+            # The engine's role words ("tab", "menu item") stay English in the markers. The
+            # 1-of count varies with the number of boot entries, so assert only the prefix.
+            'AW_UEFI_SETUP_TAB "Démarrage, tab,'
+            'AW_UEFI_BOOT_ENUM count='
+            'AW_UEFI_MENU_ITEM "Démarrer normalement, menu item, 1 of'
+            # With no key pressed the countdown boots normally on its own.
             'AW_UEFI_SR_CONTINUE reason=timeout'
             'AW_UEFI_SR_PROOF_OK'
-            'AW_UEFI_SETUP_BEGIN'
-            'AW_UEFI_SETUP_READY'
-            'AW_UEFI_MENU_ITEM page=Root index=0 selected=true label="Main"'
-            'AW_UEFI_SETUP_ACTION action=boot_normally reason=timeout'
-            'AW_UEFI_SETUP_PROOF_OK'
             'AW_KERNEL_FILE_READ_OK'
             'AW_KERNEL_IMAGE_HEADER_OK base=0x200000'
             'AW_NATIVE_KERNEL_LOAD_OK address=0x200000'
@@ -330,7 +338,7 @@ $configurations = @(
             'AW_CLOCK_FAIL'
             'AW_RTC_FAIL'
             'AW_UEFI_SR_FAIL'
-            'AW_UEFI_SETUP_FAIL'
+            'AW_UEFI_MENU_FAIL'
             'AW_UEFI_SND_FAIL'
             'AW_SR_FAIL'
             'AW_BRAILLE_FAIL'
@@ -573,7 +581,7 @@ $configurations = @(
             # the codec answering and the clips streaming (link position advanced).
             'AW_UEFI_HDA_CODEC_ID vendor_device='
             'AW_UEFI_HDA_READY dac='
-            'AW_UEFI_HDA_SPEAK bytes='
+            'AW_UEFI_AUDIO_SPEAK bytes='
             # Then the kernel brings the same controller up again for the installer.
             'AW_HDA_FOUND'
             'AW_HDA_RESET_OK'
@@ -604,6 +612,35 @@ $configurations = @(
             'AW_HDA_FAIL'
             'AW_HDA_SPEECH_FAIL'
             'AW_HDA_SPEECH_UNAVAILABLE'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
+        # AC'97 audio: a second self-built firmware-stage backend, so the spoken screen
+        # reader works on machines whose codec is AC'97 rather than Intel HDA (and what
+        # several virtual machines expose). No HDA device is present here, so the audio
+        # layer falls through HDA to AC'97: it finds the controller on PCI, brings up its
+        # NAM/NABM I/O windows, and streams the boot-screen speech clips by bus-master DMA
+        # over a Buffer Descriptor List. The `none` audiodev discards the sound, but the bus
+        # master still runs the descriptor list, which is all the DMA path needs to prove.
+        Name           = 'ac97'
+        Features       = @()
+        QemuArgs       = @(
+            '-audiodev', 'none,id=snd0'
+            '-device', 'AC97,audiodev=snd0'
+        )
+        # The UEFI stage streams several seconds of pre-recorded speech through AC'97 before
+        # the kernel loads, so this configuration needs more than the default budget.
+        TimeoutSeconds = 150
+        Required       = @(
+            'AW_UEFI_AC97_READY nam='
+            'AW_UEFI_AUDIO_BACKEND channel=ac97'
+            'AW_UEFI_AUDIO_SPEAK bytes='
+            'AW_UEFI_SR_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden      = @(
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )

@@ -19,12 +19,136 @@
 
 use uefi::boot;
 
+use crate::aw_mark;
+
 /// The boot screen's spoken lines, synthesized offline to 24 kHz 16-bit mono PCM.
 /// Regenerate with `scripts/gen-speech.ps1` to change wording or voice.
 pub static CLIP_WELCOME: &[u8] = include_bytes!("speech/welcome.pcm");
 pub static CLIP_ACTIVE: &[u8] = include_bytes!("speech/active.pcm");
 pub static CLIP_STARTING: &[u8] = include_bytes!("speech/starting.pcm");
 pub static CLIP_LOADING: &[u8] = include_bytes!("speech/loading.pcm");
+
+/// The accessible firmware Setup Utility's fixed spoken lines (`boot/uefi/src/setup.rs`),
+/// synthesized to the same 24 kHz mono PCM by `scripts/gen-speech.ps1`. The setup is
+/// voiced and operated at the firmware stage, where the keyboard is the firmware's own -
+/// so it works with a USB keyboard on every machine, before any kernel USB stack exists.
+/// The fixed scaffolding - the intro, the interaction instructions, the five tab names,
+/// the submenu titles and the fixed action labels - each carries a clip, so a blind user
+/// hears the whole navigable structure. Dynamic lines (Main/Advanced/Security values and
+/// the enumerated Boot#### device names, composed at runtime) carry no clip: they are
+/// spoken on the console with a move cue, and runtime speech synthesis for them is future
+/// work.
+pub static CLIP_SETUP_INTRO: &[u8] = include_bytes!("speech/menu_intro.pcm");
+pub static CLIP_INSTRUCTIONS: &[u8] = include_bytes!("speech/instructions.pcm");
+pub static CLIP_TAB_MAIN: &[u8] = include_bytes!("speech/tab_main.pcm");
+pub static CLIP_TAB_ADVANCED: &[u8] = include_bytes!("speech/tab_advanced.pcm");
+pub static CLIP_TAB_BOOT: &[u8] = include_bytes!("speech/tab_boot.pcm");
+pub static CLIP_TAB_SECURITY: &[u8] = include_bytes!("speech/tab_security.pcm");
+pub static CLIP_TAB_SAVEEXIT: &[u8] = include_bytes!("speech/tab_saveexit.pcm");
+pub static CLIP_ACT_BOOT_NORMALLY: &[u8] = include_bytes!("speech/act_boot_normally.pcm");
+pub static CLIP_ACT_ENTER_SETUP: &[u8] = include_bytes!("speech/act_enter_setup.pcm");
+pub static CLIP_ACT_RESET: &[u8] = include_bytes!("speech/act_reset.pcm");
+pub static CLIP_ACT_SHUTDOWN: &[u8] = include_bytes!("speech/act_shutdown.pcm");
+pub static CLIP_SUB_CPU: &[u8] = include_bytes!("speech/sub_cpu.pcm");
+pub static CLIP_SUB_BOOT_PRIO: &[u8] = include_bytes!("speech/sub_boot_prio.pcm");
+pub static CLIP_SUB_SECURE_BOOT: &[u8] = include_bytes!("speech/sub_secure_boot.pcm");
+pub static CLIP_ACT_BOOT_NOW: &[u8] = include_bytes!("speech/act_boot_now.pcm");
+pub static CLIP_ACT_MAKE_DEFAULT: &[u8] = include_bytes!("speech/act_make_default.pcm");
+pub static CLIP_ACT_MOVE_UP: &[u8] = include_bytes!("speech/act_move_up.pcm");
+pub static CLIP_ACT_MOVE_DOWN: &[u8] = include_bytes!("speech/act_move_down.pcm");
+pub static CLIP_ACT_BACK: &[u8] = include_bytes!("speech/act_back.pcm");
+pub static CLIP_BOOT_DEVICE: &[u8] = include_bytes!("speech/boot_device.pcm");
+pub static CLIP_CONFIRM_PROMPT: &[u8] = include_bytes!("speech/confirm_prompt.pcm");
+pub static CLIP_CONFIRM_CANCEL: &[u8] = include_bytes!("speech/confirm_cancel.pcm");
+pub static CLIP_CONFIRM_DONE: &[u8] = include_bytes!("speech/confirm_done.pcm");
+pub static CLIP_ACT_LANGUAGE: &[u8] = include_bytes!("speech/act_language.pcm");
+
+/// The French clip set: the setup can be operated in French (the default) or English, the
+/// way a real ASUS/AMI BIOS offers a "System Language" option. These are spoken by an
+/// installed French voice, so they sound native. Regenerate with `scripts/gen-speech-fr.ps1`.
+pub static CLIP_FR_INTRO: &[u8] = include_bytes!("speech/fr_intro.pcm");
+pub static CLIP_FR_INSTRUCTIONS: &[u8] = include_bytes!("speech/fr_instructions.pcm");
+pub static CLIP_FR_TAB_MAIN: &[u8] = include_bytes!("speech/fr_tab_main.pcm");
+pub static CLIP_FR_TAB_ADVANCED: &[u8] = include_bytes!("speech/fr_tab_advanced.pcm");
+pub static CLIP_FR_TAB_BOOT: &[u8] = include_bytes!("speech/fr_tab_boot.pcm");
+pub static CLIP_FR_TAB_SECURITY: &[u8] = include_bytes!("speech/fr_tab_security.pcm");
+pub static CLIP_FR_TAB_SAVEEXIT: &[u8] = include_bytes!("speech/fr_tab_saveexit.pcm");
+pub static CLIP_FR_ACT_BOOT_NORMALLY: &[u8] = include_bytes!("speech/fr_act_boot_normally.pcm");
+pub static CLIP_FR_ACT_ENTER_SETUP: &[u8] = include_bytes!("speech/fr_act_enter_setup.pcm");
+pub static CLIP_FR_ACT_RESET: &[u8] = include_bytes!("speech/fr_act_reset.pcm");
+pub static CLIP_FR_ACT_SHUTDOWN: &[u8] = include_bytes!("speech/fr_act_shutdown.pcm");
+pub static CLIP_FR_SUB_CPU: &[u8] = include_bytes!("speech/fr_sub_cpu.pcm");
+pub static CLIP_FR_SUB_BOOT_PRIO: &[u8] = include_bytes!("speech/fr_sub_boot_prio.pcm");
+pub static CLIP_FR_SUB_SECURE_BOOT: &[u8] = include_bytes!("speech/fr_sub_secure_boot.pcm");
+pub static CLIP_FR_ACT_BOOT_NOW: &[u8] = include_bytes!("speech/fr_act_boot_now.pcm");
+pub static CLIP_FR_ACT_MAKE_DEFAULT: &[u8] = include_bytes!("speech/fr_act_make_default.pcm");
+pub static CLIP_FR_ACT_MOVE_UP: &[u8] = include_bytes!("speech/fr_act_move_up.pcm");
+pub static CLIP_FR_ACT_MOVE_DOWN: &[u8] = include_bytes!("speech/fr_act_move_down.pcm");
+pub static CLIP_FR_ACT_BACK: &[u8] = include_bytes!("speech/fr_act_back.pcm");
+pub static CLIP_FR_BOOT_DEVICE: &[u8] = include_bytes!("speech/fr_boot_device.pcm");
+pub static CLIP_FR_CONFIRM_PROMPT: &[u8] = include_bytes!("speech/fr_confirm_prompt.pcm");
+pub static CLIP_FR_CONFIRM_CANCEL: &[u8] = include_bytes!("speech/fr_confirm_cancel.pcm");
+pub static CLIP_FR_CONFIRM_DONE: &[u8] = include_bytes!("speech/fr_confirm_done.pcm");
+pub static CLIP_FR_LANG: &[u8] = include_bytes!("speech/fr_lang.pcm");
+
+/// The spelling alphabet: one clip per letter and digit, so a dynamic line the setup
+/// cannot pre-record whole - a boot-device name, a machine-state value - can still be
+/// read aloud character by character (a screen reader's "read by character"), on the "S"
+/// key. Regenerate with `scripts/gen-spell.ps1`.
+static SPELL_LETTERS: [&[u8]; 26] = [
+    include_bytes!("speech/spell_a.pcm"),
+    include_bytes!("speech/spell_b.pcm"),
+    include_bytes!("speech/spell_c.pcm"),
+    include_bytes!("speech/spell_d.pcm"),
+    include_bytes!("speech/spell_e.pcm"),
+    include_bytes!("speech/spell_f.pcm"),
+    include_bytes!("speech/spell_g.pcm"),
+    include_bytes!("speech/spell_h.pcm"),
+    include_bytes!("speech/spell_i.pcm"),
+    include_bytes!("speech/spell_j.pcm"),
+    include_bytes!("speech/spell_k.pcm"),
+    include_bytes!("speech/spell_l.pcm"),
+    include_bytes!("speech/spell_m.pcm"),
+    include_bytes!("speech/spell_n.pcm"),
+    include_bytes!("speech/spell_o.pcm"),
+    include_bytes!("speech/spell_p.pcm"),
+    include_bytes!("speech/spell_q.pcm"),
+    include_bytes!("speech/spell_r.pcm"),
+    include_bytes!("speech/spell_s.pcm"),
+    include_bytes!("speech/spell_t.pcm"),
+    include_bytes!("speech/spell_u.pcm"),
+    include_bytes!("speech/spell_v.pcm"),
+    include_bytes!("speech/spell_w.pcm"),
+    include_bytes!("speech/spell_x.pcm"),
+    include_bytes!("speech/spell_y.pcm"),
+    include_bytes!("speech/spell_z.pcm"),
+];
+static SPELL_DIGITS: [&[u8]; 10] = [
+    include_bytes!("speech/spell_0.pcm"),
+    include_bytes!("speech/spell_1.pcm"),
+    include_bytes!("speech/spell_2.pcm"),
+    include_bytes!("speech/spell_3.pcm"),
+    include_bytes!("speech/spell_4.pcm"),
+    include_bytes!("speech/spell_5.pcm"),
+    include_bytes!("speech/spell_6.pcm"),
+    include_bytes!("speech/spell_7.pcm"),
+    include_bytes!("speech/spell_8.pcm"),
+    include_bytes!("speech/spell_9.pcm"),
+];
+static SPELL_SPACE: &[u8] = include_bytes!("speech/spell_space.pcm");
+
+/// The spoken clip for one character when spelling a dynamic line: the letter's or
+/// digit's name, or "space". Letters fold to lower case; anything else (punctuation) has
+/// no clip and is skipped, so spelling a name reads its letters, digits and spaces.
+pub fn spell_clip(character: char) -> Option<&'static [u8]> {
+    match character {
+        'a'..='z' => Some(SPELL_LETTERS[character as usize - 'a' as usize]),
+        'A'..='Z' => Some(SPELL_LETTERS[character as usize - 'A' as usize]),
+        '0'..='9' => Some(SPELL_DIGITS[character as usize - '0' as usize]),
+        ' ' => Some(SPELL_SPACE),
+        _ => None,
+    }
+}
 
 // ---- PCI mechanism #1 (CF8/CFC) and MMIO -------------------------------
 
@@ -60,7 +184,10 @@ fn pci_address(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
 unsafe fn pci_read32(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
     // SAFETY: CF8/CFC are the architected PCI configuration ports.
     unsafe {
-        outl(PCI_CONFIG_ADDRESS, pci_address(bus, device, function, offset));
+        outl(
+            PCI_CONFIG_ADDRESS,
+            pci_address(bus, device, function, offset),
+        );
         inl(PCI_CONFIG_DATA)
     }
 }
@@ -68,7 +195,10 @@ unsafe fn pci_read32(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
 unsafe fn pci_write32(bus: u8, device: u8, function: u8, offset: u8, value: u32) {
     // SAFETY: CF8/CFC are the architected PCI configuration ports.
     unsafe {
-        outl(PCI_CONFIG_ADDRESS, pci_address(bus, device, function, offset));
+        outl(
+            PCI_CONFIG_ADDRESS,
+            pci_address(bus, device, function, offset),
+        );
         outl(PCI_CONFIG_DATA, value);
     }
 }
@@ -133,12 +263,18 @@ const PARAM_SUBNODE_COUNT: u32 = 0x04;
 const PARAM_FUNCTION_GROUP_TYPE: u32 = 0x05;
 const PARAM_WIDGET_CAP: u32 = 0x09;
 const PARAM_PIN_CAP: u32 = 0x0c;
+const PARAM_CONNECTION_LIST_LEN: u32 = 0x0e;
 
 const WIDGET_AUDIO_OUTPUT: u32 = 0x0;
+const WIDGET_AUDIO_MIXER: u32 = 0x2;
+const WIDGET_AUDIO_SELECTOR: u32 = 0x3;
 const WIDGET_PIN_COMPLEX: u32 = 0x4;
 
 const VERB4_SET_FORMAT: u32 = 0x2;
 const VERB4_SET_AMP: u32 = 0x3;
+const VERB_GET_CONNECTION_ENTRY: u32 = 0xf02;
+const VERB_GET_CONFIG_DEFAULT: u32 = 0xf1c;
+const VERB_SET_CONNECTION_SELECT: u32 = 0x701;
 const VERB_SET_POWER_STATE: u32 = 0x705;
 const VERB_SET_STREAM_CHANNEL: u32 = 0x706;
 const VERB_SET_PIN_CONTROL: u32 = 0x707;
@@ -146,7 +282,19 @@ const VERB_SET_EAPD: u32 = 0x70c;
 
 const PIN_CONTROL_OUT_ENABLE: u32 = 1 << 6;
 const EAPD_ENABLE: u32 = 1 << 1;
-const AMP_OUT_UNMUTE: u16 = (1 << 15) | (1 << 13) | (1 << 12) | 0x2a;
+
+// Set Amplifier Gain/Mute (verb 0x3) payload bits. An output path is only audible
+// when every stage on it - the DAC, any mixer or selector between, and the pin -
+// has its amp unmuted. QEMU's codec is a bare DAC->pin, so unmuting the ends was
+// enough; a real codec (VMware's, physical hardware's) routes DAC->mixer->pin, and
+// the mixer's per-input amp is muted at reset, which silences everything.
+const AMP_SET_OUTPUT: u16 = 1 << 15;
+const AMP_SET_INPUT: u16 = 1 << 14;
+const AMP_LEFT: u16 = 1 << 13;
+const AMP_RIGHT: u16 = 1 << 12;
+const AMP_INDEX_SHIFT: u16 = 8;
+const AMP_GAIN: u16 = 0x2a;
+const AMP_OUT_UNMUTE: u16 = AMP_SET_OUTPUT | AMP_LEFT | AMP_RIGHT | AMP_GAIN;
 
 /// Clips are 24 kHz mono; played as 24 kHz 16-bit stereo (each sample duplicated
 /// to both channels), the format value for base 48 kHz / 2, 16-bit, 2 channels.
@@ -175,8 +323,9 @@ static mut RIRB: Page = Page([0; 4096]);
 static mut BDL: Page = Page([0; 4096]);
 
 /// Playback buffer, page-aligned and identity-mapped. Sized for the longest clip
-/// as stereo (mono clip bytes * 2): 384 KiB holds ~4 s of 24 kHz stereo.
-const AUDIO_BYTES: usize = 393_216;
+/// as stereo (mono clip bytes * 2): 512 KiB holds ~5.5 s of 24 kHz stereo, enough
+/// for the longest firmware boot-menu line without truncation.
+const AUDIO_BYTES: usize = 524_288;
 #[repr(C, align(4096))]
 struct AudioBuffer([u8; AUDIO_BYTES]);
 static mut AUDIO: AudioBuffer = AudioBuffer([0; AUDIO_BYTES]);
@@ -284,14 +433,63 @@ impl Speaker {
         Ok((self.get_parameter(nid, PARAM_WIDGET_CAP)? >> 20) & 0xf)
     }
 
+    /// Number of entries in a widget's connection list (short form; the long-form
+    /// bit is ignored, which is safe for the small graphs at this stage).
+    fn connection_len(&mut self, nid: u8) -> u8 {
+        (self
+            .get_parameter(nid, PARAM_CONNECTION_LIST_LEN)
+            .unwrap_or(0)
+            & 0x7f) as u8
+    }
+
+    /// The source node id at `index` in a widget's connection list. Short form:
+    /// one response carries four one-byte entries, so read the aligned group and
+    /// pick the byte. Returns 0 on error, which is never a valid widget id here.
+    fn connection_entry(&mut self, nid: u8, index: u8) -> u8 {
+        let group = self
+            .command(nid, VERB_GET_CONNECTION_ENTRY, u32::from(index & 0xfc))
+            .unwrap_or(0);
+        let shift = (index & 0x3) * 8;
+        ((group >> shift) & 0xff) as u8
+    }
+
+    /// Read a widget's connection list into `out`, returning how many entries were
+    /// written (capped by the buffer).
+    fn connections(&mut self, nid: u8, out: &mut [u8]) -> usize {
+        let len = (self.connection_len(nid) as usize).min(out.len());
+        for (index, slot) in out.iter_mut().enumerate().take(len) {
+            *slot = self.connection_entry(nid, index as u8);
+        }
+        len
+    }
+
+    /// Unmute and set a moderate gain on a widget's output amplifier.
+    fn unmute_output(&mut self, nid: u8) -> Result<(), &'static str> {
+        self.command16(nid, VERB4_SET_AMP, AMP_OUT_UNMUTE)
+    }
+
+    /// Unmute and set a moderate gain on a widget's input amplifier for one input
+    /// index - needed on a mixer, whose per-input amps are muted at reset.
+    fn unmute_input(&mut self, nid: u8, index: u8) -> Result<(), &'static str> {
+        let payload = AMP_SET_INPUT
+            | AMP_LEFT
+            | AMP_RIGHT
+            | ((u16::from(index) & 0xf) << AMP_INDEX_SHIFT)
+            | AMP_GAIN;
+        self.command16(nid, VERB4_SET_AMP, payload)
+    }
+
     fn output_stream_base(&self) -> u64 {
         self.base + STREAM_BASE + u64::from(self.input_streams) * STREAM_STRIDE
     }
 
-    /// Play one 24 kHz mono PCM clip through the codec, blocking until it has
-    /// finished. Returns true when the link position advanced (the controller
-    /// streamed the samples), which on real hardware is audible speech.
-    pub fn speak(&mut self, clip: &[u8]) -> bool {
+    /// Play one 24 kHz mono PCM clip through the codec, blocking until it has finished
+    /// or `interrupted` returns true. The interrupt is barge-in: a screen-reader user
+    /// who has heard enough presses a key, the caller's `interrupted` closure sees it,
+    /// and the clip is cut short instead of talking over the next keystroke. Returns
+    /// true when the link position advanced (the controller streamed samples), which on
+    /// real hardware is audible speech.
+    pub fn speak_until(&mut self, clip: &[u8], mut interrupted: impl FnMut() -> bool) -> bool {
         // Duplicate each mono 16-bit sample to both channels into the aligned DMA
         // buffer, clamped to its capacity.
         let mono_samples = (clip.len() / 2).min(AUDIO_BYTES / 4);
@@ -310,7 +508,10 @@ impl Speaker {
         }
 
         // Per-clip: set the converter format (all clips share it here).
-        if self.command16(self.dac, VERB4_SET_FORMAT, STREAM_FORMAT).is_err() {
+        if self
+            .command16(self.dac, VERB4_SET_FORMAT, STREAM_FORMAT)
+            .is_err()
+        {
             return false;
         }
 
@@ -354,6 +555,9 @@ impl Speaker {
         let mut moved = 0u32;
         let mut waited = 0u32;
         while waited < duration_ms + 150 {
+            if interrupted() {
+                break;
+            }
             boot::stall(core::time::Duration::from_millis(20));
             waited += 20;
             // SAFETY: reading LPIB is side-effect-free.
@@ -426,35 +630,182 @@ fn setup_rings(base: u64) {
     }
 }
 
-fn find_output(speaker: &mut Speaker) -> Result<(u8, u8), &'static str> {
-    let root = speaker.get_parameter(0, PARAM_SUBNODE_COUNT)?;
+/// Walk the codec's audio function group and log every widget - node id, type,
+/// and connection list, plus each pin's capabilities and configuration default -
+/// to the serial mirror. This is diagnostic: it is how the real topology of an
+/// unfamiliar codec (VMware's, a physical machine's) is read, so the output path
+/// can be routed from data rather than guessed. Widget types: 0 audio output
+/// (DAC), 1 audio input, 2 mixer, 3 selector, 4 pin complex.
+fn dump_graph(speaker: &mut Speaker) {
+    let Ok(root) = speaker.get_parameter(0, PARAM_SUBNODE_COUNT) else {
+        return;
+    };
     let first_group = ((root >> 16) & 0xff) as u8;
     let group_count = (root & 0xff) as u8;
     for group in 0..group_count {
         let nid = first_group + group;
-        if speaker.get_parameter(nid, PARAM_FUNCTION_GROUP_TYPE)? & 0xff != 0x01 {
+        if speaker
+            .get_parameter(nid, PARAM_FUNCTION_GROUP_TYPE)
+            .unwrap_or(0)
+            & 0xff
+            != 0x01
+        {
             continue;
         }
-        speaker.set(nid, VERB_SET_POWER_STATE, 0)?;
-        let widgets = speaker.get_parameter(nid, PARAM_SUBNODE_COUNT)?;
+        let Ok(widgets) = speaker.get_parameter(nid, PARAM_SUBNODE_COUNT) else {
+            continue;
+        };
         let first_widget = ((widgets >> 16) & 0xff) as u8;
         let widget_count = (widgets & 0xff) as u8;
-        let mut dac: Option<u8> = None;
-        let mut pin: Option<u8> = None;
         for index in 0..widget_count {
             let widget = first_widget + index;
-            let widget_type = speaker.widget_type(widget)?;
-            if widget_type == WIDGET_AUDIO_OUTPUT && dac.is_none() {
-                dac = Some(widget);
-            } else if widget_type == WIDGET_PIN_COMPLEX
-                && pin.is_none()
-                && speaker.get_parameter(widget, PARAM_PIN_CAP)? & (1 << 4) != 0
-            {
-                pin = Some(widget);
+            let Ok(wtype) = speaker.widget_type(widget) else {
+                continue;
+            };
+            let len = speaker.connection_len(widget).min(8);
+            let mut conns = [0u8; 8];
+            for entry in 0..len {
+                conns[entry as usize] = speaker.connection_entry(widget, entry);
+            }
+            let conns = &conns[..len as usize];
+            if wtype == WIDGET_PIN_COMPLEX {
+                let pincap = speaker.get_parameter(widget, PARAM_PIN_CAP).unwrap_or(0);
+                // Get Configuration Default (verb 0xf1c): its "default device"
+                // nibble says whether a pin is a line-out/speaker/headphone sink.
+                let cfg = speaker
+                    .command(widget, VERB_GET_CONFIG_DEFAULT, 0)
+                    .unwrap_or(0);
+                aw_mark!(
+                    "AW_UEFI_HDA_NODE nid={widget} type={wtype} pin pincap=0x{pincap:x} cfg=0x{cfg:08x} conns={conns:?}"
+                );
+            } else {
+                aw_mark!("AW_UEFI_HDA_NODE nid={widget} type={wtype} conns={conns:?}");
             }
         }
-        if let (Some(dac), Some(pin)) = (dac, pin) {
-            return Ok((dac, pin));
+    }
+}
+
+/// A complete, routable output path from a stream-carrying DAC to a connected
+/// output pin, with any single mixer or selector stage between them. Every stage
+/// on it must be unmuted for sound to reach the pin.
+#[derive(Clone, Copy)]
+struct OutputPath {
+    dac: u8,
+    pin: u8,
+    /// The pin's connection index that reaches the DAC (its input selector).
+    pin_conn_index: u8,
+    /// An intermediate mixer/selector, if the DAC is not on the pin's own list.
+    node: Option<u8>,
+    /// The DAC's input index on that intermediate node.
+    node_input_index: u8,
+    /// Whether the intermediate node is a selector (needs a connection-select) or
+    /// a mixer (needs its per-input amp unmuted).
+    node_is_selector: bool,
+}
+
+/// Rank a pin as an output sink, or `None` if it is not one: it must be output
+/// capable, physically connected (config default not "no connection"), and its
+/// default device an output. Lower rank is preferred: speaker, then line-out,
+/// then headphone - the order most likely to reach a machine's actual speakers.
+fn output_pin_rank(speaker: &mut Speaker, pin: u8) -> Option<u8> {
+    if speaker.get_parameter(pin, PARAM_PIN_CAP).unwrap_or(0) & (1 << 4) == 0 {
+        return None;
+    }
+    let cfg = speaker
+        .command(pin, VERB_GET_CONFIG_DEFAULT, 0)
+        .unwrap_or(0);
+    if (cfg >> 30) & 0x3 == 0x1 {
+        return None; // "no physical connection"
+    }
+    match (cfg >> 20) & 0xf {
+        0x1 => Some(0), // speaker
+        0x0 => Some(1), // line out
+        0x2 => Some(2), // headphone out
+        _ => None,
+    }
+}
+
+/// Trace a route from `pin` back to a DAC: directly if the DAC is on the pin's
+/// connection list, otherwise through one mixer or selector level. Returns the
+/// full path, or `None` if the pin does not reach a DAC.
+fn route_pin(speaker: &mut Speaker, pin: u8) -> Option<OutputPath> {
+    let mut pins = [0u8; 16];
+    let n = speaker.connections(pin, &mut pins);
+    for (i, &src) in pins.iter().enumerate().take(n) {
+        if speaker.widget_type(src).ok()? == WIDGET_AUDIO_OUTPUT {
+            return Some(OutputPath {
+                dac: src,
+                pin,
+                pin_conn_index: i as u8,
+                node: None,
+                node_input_index: 0,
+                node_is_selector: false,
+            });
+        }
+    }
+    for (i, &mid) in pins.iter().enumerate().take(n) {
+        let mid_type = speaker.widget_type(mid).ok()?;
+        if mid_type != WIDGET_AUDIO_MIXER && mid_type != WIDGET_AUDIO_SELECTOR {
+            continue;
+        }
+        let mut mids = [0u8; 16];
+        let m = speaker.connections(mid, &mut mids);
+        for (j, &src) in mids.iter().enumerate().take(m) {
+            if speaker.widget_type(src).ok()? == WIDGET_AUDIO_OUTPUT {
+                return Some(OutputPath {
+                    dac: src,
+                    pin,
+                    pin_conn_index: i as u8,
+                    node: Some(mid),
+                    node_input_index: j as u8,
+                    node_is_selector: mid_type == WIDGET_AUDIO_SELECTOR,
+                });
+            }
+        }
+    }
+    None
+}
+
+fn find_output(speaker: &mut Speaker) -> Result<OutputPath, &'static str> {
+    let root = speaker.get_parameter(0, PARAM_SUBNODE_COUNT)?;
+    let first_group = ((root >> 16) & 0xff) as u8;
+    let group_count = (root & 0xff) as u8;
+    for group in 0..group_count {
+        let fg = first_group + group;
+        if speaker.get_parameter(fg, PARAM_FUNCTION_GROUP_TYPE)? & 0xff != 0x01 {
+            continue;
+        }
+        speaker.set(fg, VERB_SET_POWER_STATE, 0)?;
+        let widgets = speaker.get_parameter(fg, PARAM_SUBNODE_COUNT)?;
+        let first_widget = ((widgets >> 16) & 0xff) as u8;
+        let widget_count = (widgets & 0xff) as u8;
+
+        // Prefer the best-ranked connected output pin (speaker, then line-out,
+        // then headphone) and route it to a DAC through any intermediate stage.
+        for rank_target in 0u8..=2 {
+            for index in 0..widget_count {
+                let widget = first_widget + index;
+                if speaker.widget_type(widget)? != WIDGET_PIN_COMPLEX {
+                    continue;
+                }
+                if output_pin_rank(speaker, widget) == Some(rank_target)
+                    && let Some(path) = route_pin(speaker, widget)
+                {
+                    return Ok(path);
+                }
+            }
+        }
+
+        // Fallback for a codec with blank config defaults (QEMU's): the first
+        // output-capable pin routed to the first DAC, directly or through a stage.
+        for index in 0..widget_count {
+            let widget = first_widget + index;
+            if speaker.widget_type(widget)? == WIDGET_PIN_COMPLEX
+                && speaker.get_parameter(widget, PARAM_PIN_CAP)? & (1 << 4) != 0
+                && let Some(path) = route_pin(speaker, widget)
+            {
+                return Ok(path);
+            }
         }
     }
     Err("no_output_path")
@@ -522,32 +873,80 @@ pub fn bring_up() -> Option<Speaker> {
             return None;
         }
     };
-    log::info!("AW_UEFI_HDA_CODEC_ID vendor_device=0x{vendor:08x}");
+    aw_mark!("AW_UEFI_HDA_CODEC_ID vendor_device=0x{vendor:08x}");
 
-    let (dac, pin) = match find_output(&mut speaker) {
+    // Diagnostic: log the real codec graph so an unfamiliar codec's output path
+    // can be routed from data. Cheap, one-time, and only on the serial mirror.
+    dump_graph(&mut speaker);
+
+    let path = match find_output(&mut speaker) {
         Ok(path) => path,
         Err(reason) => {
             log::error!("AW_UEFI_HDA_FAIL reason={reason}");
             return None;
         }
     };
-    speaker.dac = dac;
-    speaker.pin = pin;
+    speaker.dac = path.dac;
+    speaker.pin = path.pin;
 
-    // Configure the output path once (format is set per clip in `speak`).
-    let configured = speaker.set(dac, VERB_SET_POWER_STATE, 0).is_ok()
+    // Configure the whole path once (the per-clip format is set in `speak`). Every
+    // stage must be powered and unmuted: the DAC, the pin, and - the piece a real
+    // codec needs that a trivial one does not - the mixer or selector between them,
+    // whose amp is muted at reset and silences the output until unmuted/selected.
+    let stage_ok = if let Some(node) = path.node {
+        let base = speaker.set(node, VERB_SET_POWER_STATE, 0).is_ok()
+            && speaker.unmute_output(node).is_ok();
+        base && if path.node_is_selector {
+            speaker
+                .set(
+                    node,
+                    VERB_SET_CONNECTION_SELECT,
+                    u32::from(path.node_input_index),
+                )
+                .is_ok()
+        } else {
+            speaker.unmute_input(node, path.node_input_index).is_ok()
+        }
+    } else {
+        true
+    };
+
+    let configured = speaker.set(path.dac, VERB_SET_POWER_STATE, 0).is_ok()
         && speaker
-            .set(dac, VERB_SET_STREAM_CHANNEL, u32::from(STREAM_TAG) << 4)
+            .set(
+                path.dac,
+                VERB_SET_STREAM_CHANNEL,
+                u32::from(STREAM_TAG) << 4,
+            )
             .is_ok()
-        && speaker.command16(dac, VERB4_SET_AMP, AMP_OUT_UNMUTE).is_ok()
-        && speaker.set(pin, VERB_SET_POWER_STATE, 0).is_ok()
-        && speaker.set(pin, VERB_SET_PIN_CONTROL, PIN_CONTROL_OUT_ENABLE).is_ok()
-        && speaker.set(pin, VERB_SET_EAPD, EAPD_ENABLE).is_ok()
-        && speaker.command16(pin, VERB4_SET_AMP, AMP_OUT_UNMUTE).is_ok();
+        && speaker.unmute_output(path.dac).is_ok()
+        && stage_ok
+        && speaker
+            .set(
+                path.pin,
+                VERB_SET_CONNECTION_SELECT,
+                u32::from(path.pin_conn_index),
+            )
+            .is_ok()
+        && speaker.set(path.pin, VERB_SET_POWER_STATE, 0).is_ok()
+        && speaker
+            .set(path.pin, VERB_SET_PIN_CONTROL, PIN_CONTROL_OUT_ENABLE)
+            .is_ok()
+        && speaker.set(path.pin, VERB_SET_EAPD, EAPD_ENABLE).is_ok()
+        && speaker.unmute_output(path.pin).is_ok();
     if !configured {
         log::error!("AW_UEFI_HDA_FAIL reason=configure");
         return None;
     }
-    log::info!("AW_UEFI_HDA_READY dac={dac} pin={pin}");
+    match path.node {
+        Some(node) => aw_mark!(
+            "AW_UEFI_HDA_READY dac={} pin={} via={} conn={}",
+            path.dac,
+            path.pin,
+            node,
+            path.pin_conn_index
+        ),
+        None => aw_mark!("AW_UEFI_HDA_READY dac={} pin={}", path.dac, path.pin),
+    }
     Some(speaker)
 }
