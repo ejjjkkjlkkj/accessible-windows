@@ -153,6 +153,18 @@ fn parse_ifr(
                     stores.insert(vsid, (name, guid));
                 }
             }
+            0x26 => {
+                // EFI_IFR_VARSTORE_EFI: header(2) varstore_id(2) guid(16) attributes(4)
+                // size(2) name(ascii). The modern form carries Name (older ones stop at
+                // attributes); only the named form can be reached as an EFI variable.
+                if body.len() >= 26 {
+                    let vsid = u16le(body, 2);
+                    let mut guid = [0u8; 16];
+                    guid.copy_from_slice(&body[4..20]);
+                    let (name, _) = read_ascii(body, 26);
+                    stores.insert(vsid, (name, guid));
+                }
+            }
             0x05 | 0x06 | 0x07 => {
                 // ONE_OF / CHECKBOX / NUMERIC: question header at +2 -> prompt(2) help(2)
                 // qid(2) varstoreid(2) varstoreinfo/offset(2) qflags(1); one-of/numeric carry
@@ -188,6 +200,20 @@ fn parse_ifr(
         }
         r += oplen;
     }
+}
+
+/// Size in bytes of the firmware's exported HII database (0 if the protocol is absent). A
+/// non-zero value with zero parsed settings means the firmware exposes an HII database but no
+/// varstore-bound questions this parser recognizes - useful boot evidence to tell the two
+/// apart.
+pub fn database_len() -> usize {
+    let Ok(handle) = boot::get_handle_for_protocol::<HiiDatabase>() else {
+        return 0;
+    };
+    let Ok(db) = boot::open_protocol_exclusive::<HiiDatabase>(handle) else {
+        return 0;
+    };
+    db.export_all_raw().map(|raw| raw.len()).unwrap_or(0)
 }
 
 /// Enumerate every named setting the firmware publishes through its HII database, or an empty
@@ -227,9 +253,10 @@ pub fn enumerate_settings() -> Vec<Setting> {
                     break;
                 }
                 let pkg = &list[q..q + plen];
+                // HII package types: FORMS (IFR) = 0x02, STRINGS = 0x04.
                 match (want_strings, ptype) {
-                    (true, 0x02) => parse_strings(pkg, &mut strings),
-                    (false, 0x04) => parse_ifr(pkg, &strings, settings),
+                    (true, 0x04) => parse_strings(pkg, &mut strings),
+                    (false, 0x02) => parse_ifr(pkg, &strings, settings),
                     (_, 0xdf) => break, // END package
                     _ => {}
                 }

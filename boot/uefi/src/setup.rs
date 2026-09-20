@@ -2235,6 +2235,16 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
     // French is the default language; the Language item on the Main tab switches it.
     let mut lang = Lang::Fr;
     set_current_lang(lang);
+
+    // Prove, at boot, that the firmware's own settings were parsed out of its HII database -
+    // the evidence the `list settings` / `enable <name>` commands rest on. Zero on firmware
+    // (or QEMU/OVMF) that publishes no IFR; non-zero on a real BIOS.
+    aw_mark!(
+        "AW_UEFI_HII_SETTINGS count={} db_bytes={}",
+        crate::hii_ifr::enumerate_settings().len(),
+        crate::hii_ifr::database_len()
+    );
+
     let mut tree = build_tree(lang, width, height);
 
     // Open on the Boot tab with "Boot normally" focused: the safe default a user or the
