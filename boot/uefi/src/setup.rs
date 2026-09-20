@@ -1179,11 +1179,11 @@ fn render(tree: &Tree, tab_index: usize, screen_index: usize, item_index: usize,
     uefi::println!();
     if depth == 0 {
         uefi::println!(
-            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  C: command.  H: help."
+            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  M: mute.  H: help."
         );
     } else {
         uefi::println!(
-            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  C: command.  H: help.  W: where."
+            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  M: mute.  H: help.  W: where."
         );
     }
 }
@@ -1558,6 +1558,12 @@ enum Nav {
     SayAll,
     /// Open the command agent (C): type a plain instruction instead of walking the tree.
     Command,
+    /// Raise the speech volume (+ or =).
+    VolumeUp,
+    /// Lower the speech volume (-).
+    VolumeDown,
+    /// Toggle mute (M).
+    Mute,
     Ignore,
 }
 
@@ -1584,6 +1590,9 @@ fn classify(key: Key) -> Nav {
             's' | 'S' => Nav::Spell,
             'a' | 'A' => Nav::SayAll,
             'c' | 'C' => Nav::Command,
+            '+' | '=' => Nav::VolumeUp,
+            '-' | '_' => Nav::VolumeDown,
+            'm' | 'M' => Nav::Mute,
             _ => Nav::Ignore,
         },
         Key::Special(_) => Nav::Ignore,
@@ -2120,6 +2129,41 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
                         speaker,
                         &mut pending,
                     );
+                }
+                Nav::VolumeUp => {
+                    let level = audio::volume_up();
+                    aw_mark!("AW_UEFI_VOLUME level={level} muted=false");
+                    // A PC-speaker cue whose pitch rises with the level gives instant,
+                    // always-audible feedback; re-announcing the item lets the user hear the
+                    // new speech volume on the real channel.
+                    sound::cue(300 + level * 2, Duration::from_millis(90));
+                    let frame = *stack.last().unwrap();
+                    announce_item(&tree.screens[frame.screen], frame.item, speaker, &mut pending);
+                }
+                Nav::VolumeDown => {
+                    let level = audio::volume_down();
+                    aw_mark!("AW_UEFI_VOLUME level={level} muted=false");
+                    sound::cue(300 + level * 2, Duration::from_millis(90));
+                    let frame = *stack.last().unwrap();
+                    announce_item(&tree.screens[frame.screen], frame.item, speaker, &mut pending);
+                }
+                Nav::Mute => {
+                    let muted = audio::toggle_mute();
+                    aw_mark!("AW_UEFI_VOLUME muted={muted}");
+                    // The cue is on the PC speaker, so it is heard even while speech is muted.
+                    sound::cue(
+                        if muted { 240 } else { 660 },
+                        Duration::from_millis(120),
+                    );
+                    if !muted {
+                        let frame = *stack.last().unwrap();
+                        announce_item(
+                            &tree.screens[frame.screen],
+                            frame.item,
+                            speaker,
+                            &mut pending,
+                        );
+                    }
                 }
                 Nav::Ignore => {}
             }

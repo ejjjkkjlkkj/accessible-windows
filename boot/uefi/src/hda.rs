@@ -566,7 +566,8 @@ impl Speaker {
         let mono_samples = (clip.len() / 2).min(AUDIO_BYTES / 4);
         let audio = core::ptr::addr_of_mut!(AUDIO) as *mut i16;
         for index in 0..mono_samples {
-            let sample = i16::from_le_bytes([clip[index * 2], clip[index * 2 + 1]]);
+            let sample =
+                crate::audio::scale(i16::from_le_bytes([clip[index * 2], clip[index * 2 + 1]]));
             // SAFETY: index*2+1 < AUDIO_BYTES/2, inside the buffer.
             unsafe {
                 audio.add(index * 2).write_volatile(sample);

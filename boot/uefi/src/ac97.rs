@@ -178,7 +178,8 @@ impl Speaker {
         }
         let audio = core::ptr::addr_of_mut!(AUDIO) as *mut i16;
         for index in 0..mono_samples {
-            let sample = i16::from_le_bytes([clip[index * 2], clip[index * 2 + 1]]);
+            let sample =
+                crate::audio::scale(i16::from_le_bytes([clip[index * 2], clip[index * 2 + 1]]));
             // SAFETY: index*4+3 < AUDIO_BYTES/2, inside the buffer.
             unsafe {
                 let base = index * 4;
