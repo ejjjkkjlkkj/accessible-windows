@@ -6,6 +6,9 @@ on:
     branches: [gdt-idt-fix-v3-local]
     paths:
       - 'boot/uefi/src/setup.rs'
+      - 'boot/uefi/src/setup_parts/**'
+      - 'boot/uefi/src/setup_speech.rs'
+      - 'boot/uefi/build.rs'
       - 'boot/uefi/src/main.rs'
       - 'boot/uefi/src/screen_reader.rs'
       - 'boot/uefi/src/hda.rs'
@@ -149,42 +152,31 @@ jobs:
           & ./scripts/gen-speech.ps1
           if ($LASTEXITCODE -ne 0) { throw 'UEFI speech generation failed' }
 
-          $required = @(
-            'setup_setup',
-            'setup_main',
-            'setup_advanced',
-            'setup_boot',
-            'setup_security',
-            'setup_save_exit',
-            'setup_system_information',
-            'setup_cpu_configuration',
-            'setup_boot_option_priorities',
-            'setup_secure_boot',
-            'setup_boot_normally',
-            'setup_reset_system',
-            'setup_shut_down',
-            'setup_back',
-            'setup_confirm_restart',
-            'setup_confirm_shutdown',
-            'setup_cancel',
-            'spell_a',
-            'spell_z',
-            'spell_0',
-            'spell_9',
-            'spell_dash',
-            'spell_dot'
-          )
-          foreach ($name in $required) {
-            $clip = "boot/uefi/src/speech/$name.pcm"
-            if (-not (Test-Path -LiteralPath $clip -PathType Leaf)) {
-              throw "Missing generated UEFI speech clip: $clip"
-            }
-            if ((Get-Item -LiteralPath $clip).Length -le 2) {
-              throw "Invalid generated UEFI speech clip: $clip"
-            }
+          $speechDir = 'boot/uefi/src/speech'
+          $manifest = Join-Path $speechDir 'speech-manifest.txt'
+          if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
+            throw 'speech manifest was not generated'
+          }
+          $manifestText = Get-Content -LiteralPath $manifest -Raw
+          if (-not $manifestText.Contains('format=pcm_s16le_24000_mono')) {
+            throw 'unexpected firmware speech format'
+          }
+          if (-not $manifestText.Contains('clip-count=89')) {
+            throw 'firmware speech bank is incomplete'
           }
 
-          'UEFI_SETUP_SPEECH_GENERATED=PASS'
+          $clips = @(Get-ChildItem -LiteralPath $speechDir -Filter '*.pcm' -File)
+          if ($clips.Count -ne 89) {
+            throw "expected 89 firmware speech clips, found $($clips.Count)"
+          }
+          foreach ($clip in $clips) {
+            if ($clip.Length -le 0 -or $clip.Length -gt 196608) {
+              throw "invalid HDA speech clip length: $($clip.Name) = $($clip.Length)"
+            }
+          }
+          Copy-Item -LiteralPath $manifest -Destination target/amd5800h-validation/speech-manifest.txt
+
+          'UEFI_REAL_SPEECH_ASSETS=PASS'
 
       - name: Strict UEFI quality gates
         shell: pwsh
@@ -211,14 +203,26 @@ jobs:
             throw 'boot/uefi/src/setup.rs is missing'
           }
 
-          $text = Get-Content -LiteralPath $setup -Raw
+          $setupSources = @(
+            $setup
+            'boot/uefi/src/setup_speech.rs'
+          ) + @(Get-ChildItem -LiteralPath 'boot/uefi/src/setup_parts' -Filter '*.rs' -File |
+            Select-Object -ExpandProperty FullName)
+          $text = [string]::Join("`n", @($setupSources | ForEach-Object {
+            Get-Content -LiteralPath $_ -Raw
+          }))
           foreach ($required in @(
             'AW_UEFI_SETUP_BEGIN',
             'AW_UEFI_SETUP_READY',
             'AW_UEFI_SETUP_SPEECH_MODE mode=real',
             'AW_UEFI_MENU_ITEM',
             'AW_UEFI_SETUP_VALUE',
-            'AW_UEFI_SETUP_ACTION'
+            'AW_UEFI_SETUP_ACTION',
+            'AW_UEFI_SETUP_PROOF_OK',
+            'BootNext',
+            'BootOrder',
+            'SecureBoot',
+            'SetupMode'
           )) {
             if (-not $text.Contains($required)) {
               throw "Setup marker missing from source: $required"
@@ -246,6 +250,8 @@ jobs:
             'AW_UEFI_SETUP_BEGIN',
             'AW_UEFI_SETUP_READY',
             'AW_UEFI_MENU_ITEM',
+            'AW_UEFI_SETUP_PROOF_OK',
+            'AW_UEFI_SETUP_SPEECH_MODE mode=real',
             'AW_UEFI_SR_PROOF_OK',
             'AW_NATIVE_KERNEL_IDLE'
           )) {
@@ -258,6 +264,10 @@ jobs:
             'AW_UEFI_SETUP_BEGIN',
             'AW_UEFI_SETUP_READY',
             'AW_UEFI_MENU_ITEM',
+            'AW_UEFI_SETUP_PROOF_OK',
+            'AW_UEFI_SETUP_SPEECH_MODE mode=real',
+            'AW_UEFI_SR_DYNAMIC_SPEECH field=display',
+            'AW_UEFI_HDA_SPELL char=',
             'AW_UEFI_HDA_CODEC_ID vendor_device=',
             'AW_UEFI_HDA_READY dac=',
             'AW_UEFI_HDA_SPEAK bytes=',
@@ -327,6 +337,7 @@ jobs:
           name: uefi-rust-amd5800h-validation
           path: |
             target/amd5800h-validation/**
+            boot/uefi/src/speech/speech-manifest.txt
             target/boot-evidence/normal/debug.log
             target/boot-evidence/hda/debug.log
             target/bootimage-boot.log
