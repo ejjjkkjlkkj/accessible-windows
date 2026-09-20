@@ -35,6 +35,7 @@
 
 extern crate alloc;
 
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -1955,13 +1956,16 @@ fn dispatch_agent(
         uefi::println!("  {} firmware settings, {} shown", all.len(), shown.len());
         play(ag(hda::AGENT_VALUE_IS), speaker, pending);
         spell_current(&format!("{}", all.len()), lang, speaker, pending);
+        let config = firmware_config_values();
         for setting in &shown {
             if pending.is_some() {
                 break;
             }
-            // Speak the value by meaning when the question is a one-of ("Enabled"), else the
-            // number.
-            let value = match get_setting_value(setting) {
+            // Current value: a real NVRAM variable if there is one, else the HII config export
+            // (which covers driver varstores too). Spoken by meaning for a one-of ("Enabled").
+            let raw = get_setting_value(setting)
+                .or_else(|| config.get(&(setting.guid, setting.offset as u64)).copied());
+            let value = match raw {
                 Some(v) => setting
                     .label_for(v)
                     .map(String::from)
@@ -2137,6 +2141,32 @@ fn read_varstore(store: &str, guid: [u8; 16]) -> Option<Vec<u8>> {
         .map(|(data, _)| data.into_vec())
 }
 
+/// Current values of every firmware setting, keyed by `(varstore guid, offset)`, read from
+/// the HII Config Routing export. This works even for driver-internal varstores that are not
+/// plain NVRAM variables (so values can be spoken where `GetVariable` alone returns nothing).
+fn firmware_config_values() -> BTreeMap<([u8; 16], u64), u64> {
+    let mut map = BTreeMap::new();
+    let Ok(handle) = boot::get_handle_for_protocol::<HiiConfigRouting>() else {
+        return map;
+    };
+    let Ok(routing) = boot::open_protocol_exclusive::<HiiConfigRouting>(handle) else {
+        return map;
+    };
+    let Ok(export) = routing.export() else {
+        return map;
+    };
+    for cfg in MultiConfigurationStringIter::new(&export).flatten() {
+        let guid = cfg.guid.to_bytes();
+        for element in &cfg.elements {
+            let mut value = [0u8; 8];
+            let width = element.value.len().min(8);
+            value[..width].copy_from_slice(&element.value[..width]);
+            map.insert((guid, element.offset), u64::from_le_bytes(value));
+        }
+    }
+    map
+}
+
 /// The current value of one firmware setting, read from its varstore at the parsed offset.
 fn get_setting_value(setting: &crate::hii_ifr::Setting) -> Option<u64> {
     let buffer = read_varstore(&setting.store, setting.guid)?;
@@ -2257,11 +2287,27 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
     // Prove, at boot, that the firmware's own settings were parsed out of its HII database -
     // the evidence the `list settings` / `enable <name>` commands rest on. Zero on firmware
     // (or QEMU/OVMF) that publishes no IFR; non-zero on a real BIOS.
-    aw_mark!(
-        "AW_UEFI_HII_SETTINGS count={} db_bytes={}",
-        crate::hii_ifr::enumerate_settings().len(),
-        crate::hii_ifr::database_len()
-    );
+    {
+        // Evidence at boot: how many named settings the firmware's IFR yields, and how many are
+        // reachable as real NVRAM variables (`readable`). On a real BIOS whose Setup varstore is
+        // NVRAM-backed, `readable` is non-zero and those settings can be changed by name; on
+        // firmware whose varstores are driver-internal buffers (e.g. QEMU/OVMF) it is zero and
+        // changing them would need the HII RouteConfig path instead.
+        let all = crate::hii_ifr::enumerate_settings();
+        let readable = all.iter().filter(|s| get_setting_value(s).is_some()).count();
+        let config = firmware_config_values();
+        let via_config = all
+            .iter()
+            .filter(|s| config.contains_key(&(s.guid, s.offset as u64)))
+            .count();
+        aw_mark!(
+            "AW_UEFI_HII_SETTINGS count={} readable={} via_config={} db_bytes={}",
+            all.len(),
+            readable,
+            via_config,
+            crate::hii_ifr::database_len()
+        );
+    }
 
     let mut tree = build_tree(lang, width, height);
 
