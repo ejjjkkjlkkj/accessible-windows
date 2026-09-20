@@ -17,6 +17,10 @@ on:
       - 'scripts/Invoke-KernelBoot.ps1'
       - 'scripts/Build-BootableImage.ps1'
       - 'scripts/gen-speech.ps1'
+      - '.github/workflows/uefi-rust-amd5800h-validation.yml'
+
+permissions:
+  contents: read
 
 concurrency:
   group: uefi-rust-amd5800h-${{ github.ref }}
