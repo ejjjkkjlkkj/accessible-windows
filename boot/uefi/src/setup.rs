@@ -45,6 +45,8 @@ use aw_accessibility::{NodeId, Rect, Role, SemanticNode, State, validate_node};
 use aw_screen_reader::{FocusContext, announce_focus};
 use uefi::mem::memory_map::MemoryMap;
 use uefi::proto::console::text::{Key, ScanCode};
+use uefi::proto::hii::config_routing::HiiConfigRouting;
+use uefi::proto::hii::config_str::MultiConfigurationStringIter;
 use uefi::runtime::{self, VariableAttributes, VariableVendor};
 use uefi::table::cfg::ConfigTableEntry;
 use uefi::{CStr16, Status, boot, cstr16, system};
@@ -1895,6 +1897,32 @@ fn dispatch_agent(
         return;
     }
 
+    // Read the firmware's own HII configuration - the real settings the firmware publishes,
+    // by GUID store and count. This is the foundation for changing them by name later; for
+    // now it lets a blind user hear what the firmware actually exposes, not just our tree.
+    if has("hii") || has("firmware config") || has("firmware options") || has("options firmware")
+        || has("advanced options") || has("options avancees")
+    {
+        match read_firmware_config() {
+            Some((groups, settings, names)) => {
+                uefi::println!("  HII: {groups} config groups, {settings} settings");
+                for name in &names {
+                    uefi::println!("    {name}");
+                }
+                aw_mark!("AW_UEFI_AGENT_HII groups={groups} settings={settings}");
+                play(ag(hda::AGENT_VALUE_IS), speaker, pending);
+                let summary = format!(
+                    "{groups} {}, {settings} {}",
+                    tx(lang, "groupes", "groups"),
+                    tx(lang, "reglages", "settings")
+                );
+                spell_current(&summary, lang, speaker, pending);
+            }
+            None => play(ag(hda::AGENT_FAILED), speaker, pending),
+        }
+        return;
+    }
+
     // Open the firmware's own setup (for everything a loaded app cannot reach).
     if has("firmware") || has("setup") || has("bios") || has("config") {
         play(ag(hda::AGENT_OPENING_SETUP), speaker, pending);
@@ -1952,6 +1980,27 @@ fn wants_change(cmd: &str) -> bool {
     ]
     .iter()
     .any(|verb| cmd.contains(verb))
+}
+
+/// Read the firmware's own HII configuration through the Config Routing protocol: the real
+/// settings the firmware publishes. Returns `(config groups, total settings, up to eight
+/// store names)`, or `None` if the firmware exposes no HII routing (e.g. minimal firmware).
+/// Read-only; a first step toward letting a blind user change these by name.
+fn read_firmware_config() -> Option<(usize, usize, Vec<String>)> {
+    let handle = boot::get_handle_for_protocol::<HiiConfigRouting>().ok()?;
+    let routing = boot::open_protocol_exclusive::<HiiConfigRouting>(handle).ok()?;
+    let export = routing.export().ok()?;
+    let mut groups = 0usize;
+    let mut settings = 0usize;
+    let mut names = Vec::new();
+    for entry in MultiConfigurationStringIter::new(&export).flatten() {
+        groups += 1;
+        settings += entry.elements.len();
+        if !entry.name.is_empty() && names.len() < 8 {
+            names.push(entry.name);
+        }
+    }
+    Some((groups, settings, names))
 }
 
 /// Write the firmware boot-manager timeout (`Timeout`, seconds). Returns whether it stuck.
