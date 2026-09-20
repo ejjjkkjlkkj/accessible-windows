@@ -198,8 +198,9 @@ jobs:
           cp "$OVMF_VARS" ovmf-vars.fd
 
           set +e
-          timeout 20s qemu-system-x86_64 \
+          timeout 45s qemu-system-x86_64 \
             -machine q35 \
+            -cpu max \
             -m 256M \
             -display none \
             -serial none \
@@ -217,7 +218,7 @@ jobs:
           grep -F "AW_BOOT_OK stage=uefi_init arch=x86_64" uefi-debug.log
           grep -F "AW_KERNEL_FILE_READ_OK" uefi-debug.log
           grep -F "AW_NATIVE_KERNEL_LOAD_OK" uefi-debug.log
-          grep -F "mode=dynamic_pic" uefi-debug.log
+          grep -F "mode=fixed_base" uefi-debug.log
           grep -F "AW_MEMORY_MAP_OK" uefi-debug.log
           grep -F "AW_ACPI_OK" uefi-debug.log
           grep -F "AW_ACPI_VALIDATE_OK" uefi-debug.log
@@ -236,6 +237,11 @@ jobs:
           grep -F "AW_PAGING_BASELINE_OK" uefi-debug.log
           grep -F "AW_NATIVE_FRAMEBUFFER_WRITE_OK" uefi-debug.log
           grep -F "AW_NATIVE_KERNEL_IDLE" uefi-debug.log
+          grep -F "AW_VMM_IDENTITY_MAP_OK" uefi-debug.log
+          if [ "$QEMU_STATUS" -ne 0 ] && [ "$QEMU_STATUS" -ne 124 ]; then
+            echo "Unexpected QEMU status: $QEMU_STATUS" >&2
+            exit "$QEMU_STATUS"
+          fi
 
       - name: Generate checksums
         shell: bash

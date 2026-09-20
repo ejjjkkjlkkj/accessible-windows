@@ -5,7 +5,10 @@ mod memory;
 mod offline;
 
 pub use memory::BootstrapFrameAllocator;
-pub use offline::{FrameAllocator, OfflinePageTableBuilder, ResolvedMapping};
+pub use offline::{
+    FrameAllocator, HUGE_PAGE_1G_SIZE, HUGE_PAGE_2M_SIZE, LeafSize, OfflinePageTableBuilder,
+    ResolvedLeaf, ResolvedMapping,
+};
 
 pub const PAGE_SIZE: u64 = 4096;
 pub const PAGE_TABLE_ENTRIES: usize = 512;
@@ -387,9 +390,100 @@ impl Default for PageTable {
     }
 }
 
+/// Number of 1 GiB entries a single PDPT can hold, i.e. the largest low
+/// identity window a single PML4+PDPT pair can describe (512 GiB).
+pub const MAX_IDENTITY_GIB: u64 = PAGE_TABLE_ENTRIES as u64;
+
+/// Fill a PML4 and a PDPT with a low identity map built entirely from 1 GiB
+/// huge pages: virtual address V maps to physical address V for the first
+/// `gib` gibibytes.
+///
+/// `pml4[0]` is pointed at `pdpt_frame` (the physical frame the caller will
+/// materialize `pdpt` into), and `pdpt[0..gib]` become 1 GiB leaves at
+/// 0, 1 GiB, 2 GiB, ... Every mapping is supervisor, present and writable;
+/// execute permission is left enabled (no NX) so freestanding code anywhere in
+/// the window keeps running when the map becomes active.
+///
+/// This is a pure, inactive builder: it writes only the two `PageTable`s it is
+/// given, never physical memory and never CR3. The caller materializes the
+/// tables at their frames and loads CR3.
+pub fn identity_map_low_gib(
+    pml4: &mut PageTable,
+    pdpt: &mut PageTable,
+    pdpt_frame: PhysicalFrame,
+    gib: u64,
+) -> Result<(), MappingError> {
+    if gib == 0 {
+        return Err(MappingError::NotMapped);
+    }
+    if gib > MAX_IDENTITY_GIB {
+        return Err(MappingError::Overflow);
+    }
+
+    let link = PageTableFlags::PRESENT.union(PageTableFlags::WRITABLE);
+    if !pml4.set_entry(0, PageTableEntry::from_frame(pdpt_frame, link)) {
+        return Err(MappingError::InvalidAddress);
+    }
+
+    let leaf = PageTableFlags::PRESENT
+        .union(PageTableFlags::WRITABLE)
+        .union(PageTableFlags::HUGE_PAGE);
+    for index in 0..gib {
+        let physical = index.checked_mul(1 << 30).ok_or(MappingError::Overflow)?;
+        let frame = PhysicalFrame::new(physical, MAX_X86_64_PHYSICAL_ADDRESS_BITS)
+            .ok_or(MappingError::InvalidAddress)?;
+        if !pdpt.set_entry(index as usize, PageTableEntry::from_frame(frame, leaf)) {
+            return Err(MappingError::InvalidAddress);
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identity_map_low_gib_builds_huge_page_leaves() {
+        let mut pml4 = PageTable::new();
+        let mut pdpt = PageTable::new();
+        let pdpt_frame = PhysicalFrame::new(0x10_0000, MAX_X86_64_PHYSICAL_ADDRESS_BITS).unwrap();
+
+        identity_map_low_gib(&mut pml4, &mut pdpt, pdpt_frame, 4).unwrap();
+
+        let root = pml4.entry(0).unwrap();
+        assert!(root.is_present());
+        assert!(root.flags().contains(PageTableFlags::WRITABLE));
+        assert!(!root.flags().contains(PageTableFlags::HUGE_PAGE));
+        assert_eq!(root.frame_address(), 0x10_0000);
+
+        for index in 0..4u64 {
+            let leaf = pdpt.entry(index as usize).unwrap();
+            assert!(leaf.is_present());
+            assert!(leaf.flags().contains(PageTableFlags::HUGE_PAGE));
+            assert!(leaf.flags().contains(PageTableFlags::WRITABLE));
+            assert!(!leaf.flags().contains(PageTableFlags::NO_EXECUTE));
+            assert_eq!(leaf.frame_address(), index * (1 << 30));
+        }
+        assert!(!pdpt.entry(4).unwrap().is_present());
+    }
+
+    #[test]
+    fn identity_map_low_gib_rejects_bad_window() {
+        let mut pml4 = PageTable::new();
+        let mut pdpt = PageTable::new();
+        let frame = PhysicalFrame::new(0x1000, MAX_X86_64_PHYSICAL_ADDRESS_BITS).unwrap();
+        assert_eq!(
+            identity_map_low_gib(&mut pml4, &mut pdpt, frame, 0),
+            Err(MappingError::NotMapped)
+        );
+        assert_eq!(
+            identity_map_low_gib(&mut pml4, &mut pdpt, frame, MAX_IDENTITY_GIB + 1),
+            Err(MappingError::Overflow)
+        );
+        assert!(identity_map_low_gib(&mut pml4, &mut pdpt, frame, MAX_IDENTITY_GIB).is_ok());
+    }
 
     #[test]
     fn validates_canonical_48_bit_virtual_addresses() {

@@ -6,7 +6,7 @@ extern crate alloc;
 use alloc::vec;
 use aw_acpi::{McfgError, RsdpError, RsdpInfo, SdtError};
 use aw_kernel_core::{
-    FramebufferHandoff, HandoffPixelFormat, KernelHandoff, KernelImageHandoff,
+    AwknImageHeader, FramebufferHandoff, HandoffPixelFormat, KernelHandoff, KernelImageHandoff,
     MemoryDescriptorHandoff, MemoryMapHandoff, PciEcamHandoff, MAX_PCIE_ECAM_REGIONS,
 };
 use uefi::boot::{self, AllocateType};
@@ -18,13 +18,22 @@ use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::cfg::ConfigTableEntry;
 use uefi::{cstr16, system, Status};
 
+mod hda;
+mod screen_reader;
+mod setup;
+mod setup_speech;
+mod sound;
+
 const UEFI_PAGE_SIZE: usize = 4096;
 const MAX_ACPI_SDT_LEN: usize = 1024 * 1024;
 const NORMALIZED_MEMORY_MAP_PAGES: usize = 16;
 
 #[derive(Clone, Copy, Debug)]
 struct LoadedKernel {
+    /// Absolute address of `_start` inside the loaded image.
     entry_address: usize,
+    /// Physical base the image was placed at, i.e. its `AWKN` load base.
+    image_base: usize,
     image_size: usize,
     allocation_size: usize,
 }
@@ -315,44 +324,68 @@ fn load_native_kernel() -> Result<LoadedKernel, Status> {
 
     log::info!("AW_KERNEL_FILE_READ_OK bytes={}", kernel_image.len());
 
-    let pages = kernel_image.len().div_ceil(UEFI_PAGE_SIZE);
+    let header = AwknImageHeader::parse(&kernel_image).map_err(|error| {
+        log::error!("AW_KERNEL_IMAGE_HEADER_FAIL error={:?}", error);
+        Status::LOAD_ERROR
+    })?;
+    log::info!(
+        "AW_KERNEL_IMAGE_HEADER_OK base=0x{:x} file={} memory={} entry=0x{:x} bss={}",
+        header.load_base,
+        header.file_byte_len,
+        header.memory_byte_len,
+        header.entry_point,
+        header.bss_byte_len
+    );
+
+    let load_address = usize::try_from(header.load_base).map_err(|_| Status::LOAD_ERROR)?;
+    let allocation_len = usize::try_from(header.memory_byte_len).map_err(|_| Status::LOAD_ERROR)?;
+    let pages = usize::try_from(header.page_count()).map_err(|_| Status::LOAD_ERROR)?;
+
+    // The kernel is linked non-relocatable at `header.load_base`, so this
+    // allocation must succeed at that exact address. There is deliberately no
+    // fallback: loading elsewhere would corrupt every absolute reference in the
+    // image instead of failing, which is the class of silent breakage this
+    // header was introduced to end.
     let allocation = boot::allocate_pages(
-        AllocateType::AnyPages,
+        AllocateType::Address(header.load_base),
         MemoryType::LOADER_DATA,
         pages,
     )
-    .map_err(|error| error.status())?;
-    let load_address = allocation.as_ptr() as usize;
-    let allocation_len = pages * UEFI_PAGE_SIZE;
+    .map_err(|error| {
+        log::error!(
+            "AW_NATIVE_KERNEL_LOAD_FAIL reason=fixed_base_unavailable base=0x{:x} pages={} status={:?}",
+            header.load_base,
+            pages,
+            error.status()
+        );
+        error.status()
+    })?;
+    debug_assert_eq!(allocation.as_ptr() as usize, load_address);
 
-    // SAFETY: `allocation` owns `allocation_len` writable bytes allocated by
-    // UEFI. The kernel is linked from virtual address zero using PIC, so its
-    // flat image can execute at the firmware-selected page-aligned address.
-    // The copy length is bounded by the allocated page count.
+    // SAFETY: `allocation` owns `allocation_len` writable bytes starting at
+    // `header.load_base`, which the header validated as page aligned and
+    // non-overflowing. The whole allocation is zeroed first, so the BSS window
+    // and the zero tail `objcopy` truncated from the file are both correct
+    // before the file bytes (never longer than the allocation) are copied in.
     unsafe {
+        core::ptr::write_bytes(allocation.as_ptr(), 0, allocation_len);
         core::ptr::copy_nonoverlapping(
             kernel_image.as_ptr(),
             allocation.as_ptr(),
             kernel_image.len(),
         );
-        if allocation_len > kernel_image.len() {
-            core::ptr::write_bytes(
-                allocation.as_ptr().add(kernel_image.len()),
-                0,
-                allocation_len - kernel_image.len(),
-            );
-        }
     }
 
     log::info!(
-        "AW_NATIVE_KERNEL_LOAD_OK address=0x{:x} bytes={} pages={} mode=dynamic_pic",
+        "AW_NATIVE_KERNEL_LOAD_OK address=0x{:x} bytes={} pages={} mode=fixed_base",
         load_address,
         kernel_image.len(),
         pages
     );
 
     Ok(LoadedKernel {
-        entry_address: load_address,
+        entry_address: usize::try_from(header.entry_point).map_err(|_| Status::LOAD_ERROR)?,
+        image_base: load_address,
         image_size: kernel_image.len(),
         allocation_size: allocation_len,
     })
@@ -518,10 +551,17 @@ fn main() -> Status {
         })
     };
 
-    uefi::println!("Accessible Windows");
-    uefi::println!("BOOT_STAGE=UEFI_HARDWARE_DISCOVERY");
-    uefi::println!("ARCH=x86_64");
-    uefi::println!("DISPLAY={}x{}", width, height);
+    // Accessibility before the operating system: with the display mode now known,
+    // the native screen reader voices the boot screen on the visible console and
+    // lets the user review it and continue by keyboard, while boot services (and
+    // so the console and its keyboard) are still available. Unattended, it reads
+    // the screen and continues on its own.
+    let speaker = screen_reader::run(width, height);
+
+    // Accessible hierarchical firmware Setup. It reuses the already initialized
+    // HDA speaker, so speech remains continuous from first boot announcement
+    // through every menu and submenu without resetting the codec.
+    setup::run(width, height, speaker);
 
     let normalized_memory_map_buffer = match boot::allocate_pages(
         AllocateType::AnyPages,
@@ -587,7 +627,7 @@ fn main() -> Status {
     );
 
     let kernel_image_handoff = KernelImageHandoff {
-        physical_address: loaded_kernel.entry_address as u64,
+        physical_address: loaded_kernel.image_base as u64,
         image_byte_len: loaded_kernel.image_size as u64,
         allocation_byte_len: loaded_kernel.allocation_size as u64,
     };
@@ -630,15 +670,18 @@ fn main() -> Status {
         handoff.pcie_ecam_count
     );
     log::info!(
-        "AW_NATIVE_KERNEL_TRANSFER address=0x{:x} bytes={}",
+        "AW_NATIVE_KERNEL_TRANSFER address=0x{:x} entry=0x{:x} bytes={}",
+        loaded_kernel.image_base,
         loaded_kernel.entry_address,
         loaded_kernel.image_size
     );
 
     type KernelEntry = extern "sysv64" fn(*const KernelHandoff) -> !;
-    // SAFETY: The kernel was linked at offset zero with position-independent
-    // code, copied into the allocated page range, and `_start` is the first
-    // byte in the flat image. The ABI is shared with the kernel crate.
+    // SAFETY: The kernel image was placed at exactly the load base it was
+    // linked against and its BSS window was zeroed, so every absolute reference
+    // in the image resolves correctly. `entry_address` is the `_start` address
+    // the validated `AWKN` header declares. The ABI is shared with the kernel
+    // crate.
     let kernel_entry: KernelEntry = unsafe { core::mem::transmute(loaded_kernel.entry_address) };
     kernel_entry(core::ptr::addr_of!(handoff));
 }
