@@ -1959,9 +1959,15 @@ fn dispatch_agent(
             if pending.is_some() {
                 break;
             }
-            let value = get_setting_value(setting)
-                .map(|v| format!("{v}"))
-                .unwrap_or_default();
+            // Speak the value by meaning when the question is a one-of ("Enabled"), else the
+            // number.
+            let value = match get_setting_value(setting) {
+                Some(v) => setting
+                    .label_for(v)
+                    .map(String::from)
+                    .unwrap_or_else(|| format!("{v}")),
+                None => String::new(),
+            };
             uefi::println!(
                 "    {} = {} [{}:{:#06x}/{}]",
                 setting.name,
@@ -1994,8 +2000,20 @@ fn dispatch_agent(
             Some(setting) => {
                 let value = if has("disable") || has("desactiv") {
                     0
+                } else if let Some(number) = first_number(cmd) {
+                    number as u64
                 } else {
-                    first_number(cmd).map(|n| n as u64).unwrap_or(1)
+                    // Accept an option label too: "set iSCSI mode to enabled" -> that option's
+                    // value; otherwise default to 1 (enable).
+                    setting
+                        .options
+                        .iter()
+                        .find(|(_, label)| {
+                            let label = label.to_ascii_lowercase();
+                            terms.iter().any(|term| term.len() >= 3 && label.contains(term))
+                        })
+                        .map(|(value, _)| *value)
+                        .unwrap_or(1)
                 };
                 uefi::println!(
                     "  Set {} = {} [{}:{:#06x}/{}]",
