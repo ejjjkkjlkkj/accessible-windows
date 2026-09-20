@@ -30,11 +30,10 @@ sgdisk --zap-all "$out" >/dev/null
 sgdisk   --new=1:2048:0   --typecode=1:EF00   --change-name=1:ACCESSIBLE_EFI   "$out" >/dev/null
 sgdisk --verify "$out"
 
-first_sector=$(sgdisk --info=1 "$out" | awk -F: '/First sector/ {gsub(/^[[:space:]]+|[[:space:]].*$/, "", $2); print $2}')
-if ! [[ "$first_sector" =~ ^[0-9]+$ ]]; then
-  echo "unable to resolve EFI partition first sector" >&2
-  exit 1
-fi
+# The partition start is deliberately fixed above with --new=1:2048:0.
+# Do not re-parse human-readable sgdisk output here: its formatting can vary
+# across builds/locales and previously broke an otherwise valid CI image build.
+first_sector=2048
 offset=$((first_sector * 512))
 image_spec="$out@@$offset"
 
