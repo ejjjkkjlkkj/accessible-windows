@@ -21,6 +21,7 @@ use uefi::{cstr16, system, Status};
 mod hda;
 mod screen_reader;
 mod setup;
+mod setup_speech;
 mod sound;
 
 const UEFI_PAGE_SIZE: usize = 4096;
