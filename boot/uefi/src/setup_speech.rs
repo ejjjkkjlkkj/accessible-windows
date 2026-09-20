@@ -19,11 +19,17 @@ pub enum Clip {
     Boot,
     Security,
     SaveExit,
+    SystemInformation,
     CpuModel,
     FirmwareTime,
+    FirmwareVendor,
+    FirmwareRevision,
+    UefiRevision,
     DisplayInformation,
+    DisplayResolution,
     BootCurrent,
     CpuConfiguration,
+    Architecture,
     VirtualizationCapability,
     BootOptionPriorities,
     BootNow,
@@ -38,6 +44,8 @@ pub enum Clip {
     Enabled,
     Disabled,
     Unavailable,
+    Supported,
+    NotSupported,
     Selected,
     BootOption,
     ActionSucceeded,
@@ -46,6 +54,9 @@ pub enum Clip {
     InstructionsNavigation,
     InstructionsSelect,
     InstructionsTimeout,
+    ConfirmRestart,
+    ConfirmShutdown,
+    Cancel,
 }
 
 macro_rules! asset {
@@ -55,7 +66,7 @@ macro_rules! asset {
 }
 
 pub fn real_assets() -> bool {
-    option_env!("AW_SETUP_SPEECH_REAL") == Some("1")
+    matches!(option_env!("AW_SETUP_SPEECH_REAL"), Some("1"))
 }
 
 pub fn log_mode() {
@@ -74,11 +85,17 @@ pub fn clip(value: Clip) -> &'static [u8] {
         Clip::Boot => asset!("setup_boot"),
         Clip::Security => asset!("setup_security"),
         Clip::SaveExit => asset!("setup_save_exit"),
+        Clip::SystemInformation => asset!("setup_system_information"),
         Clip::CpuModel => asset!("setup_cpu_model"),
         Clip::FirmwareTime => asset!("setup_firmware_time"),
+        Clip::FirmwareVendor => asset!("setup_firmware_vendor"),
+        Clip::FirmwareRevision => asset!("setup_firmware_revision"),
+        Clip::UefiRevision => asset!("setup_uefi_revision"),
         Clip::DisplayInformation => asset!("setup_display_information"),
+        Clip::DisplayResolution => asset!("setup_display_resolution"),
         Clip::BootCurrent => asset!("setup_boot_current"),
         Clip::CpuConfiguration => asset!("setup_cpu_configuration"),
+        Clip::Architecture => asset!("setup_architecture"),
         Clip::VirtualizationCapability => asset!("setup_virtualization_capability"),
         Clip::BootOptionPriorities => asset!("setup_boot_option_priorities"),
         Clip::BootNow => asset!("setup_boot_now"),
@@ -93,6 +110,8 @@ pub fn clip(value: Clip) -> &'static [u8] {
         Clip::Enabled => asset!("setup_enabled"),
         Clip::Disabled => asset!("setup_disabled"),
         Clip::Unavailable => asset!("setup_unavailable"),
+        Clip::Supported => asset!("setup_supported"),
+        Clip::NotSupported => asset!("setup_not_supported"),
         Clip::Selected => asset!("setup_selected"),
         Clip::BootOption => asset!("setup_boot_option"),
         Clip::ActionSucceeded => asset!("setup_action_succeeded"),
@@ -101,6 +120,9 @@ pub fn clip(value: Clip) -> &'static [u8] {
         Clip::InstructionsNavigation => asset!("setup_instructions_navigation"),
         Clip::InstructionsSelect => asset!("setup_instructions_select"),
         Clip::InstructionsTimeout => asset!("setup_instructions_timeout"),
+        Clip::ConfirmRestart => asset!("setup_confirm_restart"),
+        Clip::ConfirmShutdown => asset!("setup_confirm_shutdown"),
+        Clip::Cancel => asset!("setup_cancel"),
     }
 }
 
