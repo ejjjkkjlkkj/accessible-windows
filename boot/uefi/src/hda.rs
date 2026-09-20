@@ -91,6 +91,37 @@ pub static CLIP_FR_CONFIRM_CANCEL: &[u8] = include_bytes!("speech/fr_confirm_can
 pub static CLIP_FR_CONFIRM_DONE: &[u8] = include_bytes!("speech/fr_confirm_done.pcm");
 pub static CLIP_FR_LANG: &[u8] = include_bytes!("speech/fr_lang.pcm");
 
+/// The command agent's spoken replies. The agent lets a user TYPE a plain instruction
+/// ("boot usb", "secure boot", "restart") instead of walking the tree, and speaks back
+/// what it understood and did. Each reply is a `(english, french)` pair; the agent picks
+/// the active language with [`agent_clip`]. Regenerate with `scripts/gen-agent-speech.ps1`.
+macro_rules! agent_pair {
+    ($konst:ident, $name:literal) => {
+        pub static $konst: (&[u8], &[u8]) = (
+            include_bytes!(concat!("speech/agent_", $name, ".pcm")),
+            include_bytes!(concat!("speech/fr_agent_", $name, ".pcm")),
+        );
+    };
+}
+agent_pair!(AGENT_PROMPT, "prompt");
+agent_pair!(AGENT_HELP, "help");
+agent_pair!(AGENT_UNKNOWN, "unknown");
+agent_pair!(AGENT_NO_USB, "no_usb");
+agent_pair!(AGENT_BOOTING_USB, "booting_usb");
+agent_pair!(AGENT_DEFAULT_USB, "default_usb");
+agent_pair!(AGENT_FIRMWARE_ONLY, "firmware_only");
+agent_pair!(AGENT_OPENING_SETUP, "opening_setup");
+agent_pair!(AGENT_SETUP_DENIED, "setup_denied");
+agent_pair!(AGENT_RESTARTING, "restarting");
+agent_pair!(AGENT_SHUTTING_DOWN, "shutting_down");
+agent_pair!(AGENT_SECURE_BOOT_IS, "secure_boot_is");
+agent_pair!(AGENT_VALUE_IS, "value_is");
+
+/// Pick the English or French half of an agent reply pair for the active language.
+pub fn agent_clip(pair: (&'static [u8], &'static [u8]), french: bool) -> &'static [u8] {
+    if french { pair.1 } else { pair.0 }
+}
+
 /// The spelling alphabet: one clip per letter and digit, so a dynamic line the setup
 /// cannot pre-record whole - a boot-device name, a machine-state value - can still be
 /// read aloud character by character (a screen reader's "read by character"), on the "S"

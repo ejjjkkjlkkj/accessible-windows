@@ -1179,11 +1179,11 @@ fn render(tree: &Tree, tab_index: usize, screen_index: usize, item_index: usize,
     uefi::println!();
     if depth == 0 {
         uefi::println!(
-            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  H: help."
+            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  C: command.  H: help."
         );
     } else {
         uefi::println!(
-            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  H: help.  W: where."
+            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  C: command.  H: help.  W: where."
         );
     }
 }
@@ -1556,6 +1556,8 @@ enum Nav {
     Spell,
     /// Read every item on the current screen top to bottom (A), interruptibly.
     SayAll,
+    /// Open the command agent (C): type a plain instruction instead of walking the tree.
+    Command,
     Ignore,
 }
 
@@ -1581,6 +1583,7 @@ fn classify(key: Key) -> Nav {
             'w' | 'W' => Nav::Where,
             's' | 'S' => Nav::Spell,
             'a' | 'A' => Nav::SayAll,
+            'c' | 'C' => Nav::Command,
             _ => Nav::Ignore,
         },
         Key::Special(_) => Nav::Ignore,
@@ -1622,6 +1625,158 @@ fn spell_current(
             play(clip, speaker, pending);
         }
     }
+}
+
+/// The command agent: type a plain instruction ("boot usb", "secure boot", "restart")
+/// and it speaks back what it understood and carries it out - one flat command surface
+/// instead of walking the whole tree, which a screen-reader user often finds faster. It
+/// does the things a loaded UEFI application is allowed to do (boot a device now, set the
+/// default boot device, open the firmware's own setup, restart, shut down). Firmware-owned
+/// settings a loaded app cannot change - Secure Boot (immutable by the UEFI spec), the
+/// virtualization straps - are read aloud and routed to the firmware's own setup instead of
+/// pretending to toggle them. Typed characters are echoed and spoken; Enter runs, Escape
+/// cancels, Backspace edits.
+fn run_agent(lang: Lang, speaker: &mut Option<audio::Speaker>, pending: &mut Option<Key>) {
+    let french = matches!(lang, Lang::Fr);
+    uefi::println!();
+    uefi::println!("Command >");
+    aw_mark!("AW_UEFI_AGENT_OPEN");
+    play(hda::agent_clip(hda::AGENT_PROMPT, french), speaker, pending);
+
+    let mut buffer = String::new();
+    loop {
+        let Some(key) = pending.take().or_else(read_key_raw) else {
+            boot::stall(POLL_INTERVAL);
+            continue;
+        };
+        match key {
+            Key::Special(ScanCode::ESCAPE) => {
+                uefi::println!();
+                aw_mark!("AW_UEFI_AGENT_CANCEL");
+                return;
+            }
+            Key::Printable(character) => match char::from(character) {
+                '\r' => break,
+                // Backspace: drop the last character and redraw the line.
+                '\u{8}' => {
+                    buffer.pop();
+                    uefi::print!("\rCommand > {buffer} \r");
+                    uefi::print!("Command > {buffer}");
+                }
+                ch => {
+                    buffer.push(ch);
+                    uefi::print!("{ch}");
+                    // Echo the typed character aloud, so a blind user hears what they enter.
+                    if let Some(clip) = hda::spell_clip(ch, french) {
+                        play(clip, speaker, pending);
+                    }
+                }
+            },
+            Key::Special(_) => {}
+        }
+    }
+    uefi::println!();
+    let command = buffer.trim().to_ascii_lowercase();
+    aw_mark!("AW_UEFI_AGENT_COMMAND \"{command}\"");
+    dispatch_agent(&command, lang, french, speaker, pending);
+}
+
+/// Match one typed command to an intent and carry it out. Keyword matching accepts both
+/// languages, so "boot usb" and "demarrer usb" both work. Ordered from most specific to
+/// least, and terminal actions (boot, restart, shut down, open firmware setup) never
+/// return because they reset the machine.
+fn dispatch_agent(
+    cmd: &str,
+    lang: Lang,
+    french: bool,
+    speaker: &mut Option<audio::Speaker>,
+    pending: &mut Option<Key>,
+) {
+    let ag = |pair| hda::agent_clip(pair, french);
+    let has = |needle: &str| cmd.contains(needle);
+
+    if cmd.is_empty() {
+        return;
+    }
+
+    // Help: speak the list of commands.
+    if has("help") || has("aide") || cmd == "?" {
+        play(ag(hda::AGENT_HELP), speaker, pending);
+        return;
+    }
+
+    // Boot from USB, or make USB the default. The real Boot#### entries are enumerated and
+    // matched by name, so this drives the machine's own firmware boot variables.
+    if has("usb") {
+        let want_default = has("default") || has("defaut") || has("par def");
+        let usb = enumerate_boot_options()
+            .into_iter()
+            .find(|opt| opt.label.to_ascii_lowercase().contains("usb"));
+        match usb {
+            None => play(ag(hda::AGENT_NO_USB), speaker, pending),
+            Some(opt) if want_default => {
+                if make_default(opt.id) {
+                    play(ag(hda::AGENT_DEFAULT_USB), speaker, pending);
+                }
+            }
+            Some(opt) => {
+                play(ag(hda::AGENT_BOOTING_USB), speaker, pending);
+                boot_now(opt.id); // sets BootNext and resets; does not return
+            }
+        }
+        return;
+    }
+
+    // Secure Boot: a loaded application cannot change it (the SecureBoot variable is
+    // immutable per the UEFI spec), so read its state aloud and route to firmware setup.
+    if has("secure") {
+        let state = one_byte_state(
+            cstr16!("SecureBoot"),
+            tx(lang, "active", "enabled"),
+            tx(lang, "desactive", "disabled"),
+            tx(lang, "inconnu", "unknown"),
+        );
+        play(ag(hda::AGENT_SECURE_BOOT_IS), speaker, pending);
+        spell_current(&state, lang, speaker, pending);
+        play(ag(hda::AGENT_FIRMWARE_ONLY), speaker, pending);
+        enter_firmware_setup(); // resets into firmware setup when supported
+        play(ag(hda::AGENT_SETUP_DENIED), speaker, pending);
+        return;
+    }
+
+    // Virtualization: also a firmware-owned strap. Speak the live CPU state and route.
+    if has("virtu") || has("vt-x") || has("vmx") || has("svm") {
+        let state = virtualization_status(lang);
+        play(ag(hda::AGENT_VALUE_IS), speaker, pending);
+        spell_current(&state, lang, speaker, pending);
+        play(ag(hda::AGENT_FIRMWARE_ONLY), speaker, pending);
+        enter_firmware_setup();
+        play(ag(hda::AGENT_SETUP_DENIED), speaker, pending);
+        return;
+    }
+
+    // Open the firmware's own setup (for everything a loaded app cannot reach).
+    if has("firmware") || has("setup") || has("bios") || has("config") {
+        play(ag(hda::AGENT_OPENING_SETUP), speaker, pending);
+        enter_firmware_setup();
+        play(ag(hda::AGENT_SETUP_DENIED), speaker, pending);
+        return;
+    }
+
+    // Restart now.
+    if has("restart") || has("reboot") || has("redemarr") || has("reset") {
+        play(ag(hda::AGENT_RESTARTING), speaker, pending);
+        runtime::reset(runtime::ResetType::COLD, Status::SUCCESS, None);
+    }
+
+    // Shut down now.
+    if has("shut") || has("eteind") || has("arret") || has("power") {
+        play(ag(hda::AGENT_SHUTTING_DOWN), speaker, pending);
+        runtime::reset(runtime::ResetType::SHUTDOWN, Status::SUCCESS, None);
+    }
+
+    // Nothing matched.
+    play(ag(hda::AGENT_UNKNOWN), speaker, pending);
 }
 
 /// One level of the descent: which screen we are in and which item is focused.
@@ -1954,6 +2109,17 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
                         }
                         announce_item(&tree.screens[frame.screen], index, speaker, &mut pending);
                     }
+                }
+                Nav::Command => {
+                    run_agent(lang, speaker, &mut pending);
+                    // Re-announce where we are, so the user is oriented after the agent.
+                    let frame = *stack.last().unwrap();
+                    announce_item(
+                        &tree.screens[frame.screen],
+                        frame.item,
+                        speaker,
+                        &mut pending,
+                    );
                 }
                 Nav::Ignore => {}
             }
