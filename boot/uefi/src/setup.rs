@@ -164,6 +164,10 @@ enum Action {
     Shutdown,
     /// Switch the setup's language (French <-> English) and rebuild.
     ToggleLang,
+    /// Change the firmware HII setting at this index in [`Tree::settings`]: cycle a one-of to its
+    /// next choice, toggle a checkbox, or step a numeric - browsable and changeable in the menu
+    /// tree, not only from the typed agent.
+    ChangeSetting(usize),
 }
 
 impl Action {
@@ -231,6 +235,9 @@ struct Tree {
     screens: Vec<Screen>,
     tabs: Vec<usize>,
     boot_tab: usize,
+    /// The firmware's own HII settings, parsed from its IFR, in the order the settings submenu
+    /// lists them - so a menu item's `ChangeSetting(index)` names the right one.
+    settings: Vec<crate::hii_ifr::Setting>,
 }
 
 // ---- Machine-state gathering (read, never change) ------------------------------
@@ -1112,7 +1119,75 @@ fn build_tree(lang: Lang, width: usize, height: usize) -> Tree {
         items: main_items,
     });
 
-    // Top tab: Advanced (one submenu today: CPU Configuration).
+    // Submenu: Firmware Settings - the firmware's own HII settings, browsable by arrows and
+    // changeable in place (Enter cycles the value), so reaching them no longer means typing an
+    // agent command. This is where "cover everything" lives: every varstore-bound question the
+    // firmware publishes, in one navigable list.
+    let all_settings = crate::hii_ifr::enumerate_settings();
+    let config = firmware_config_values();
+    let mut settings_items: Vec<Item> = Vec::new();
+    for (index, setting) in all_settings.iter().enumerate() {
+        let value = setting_current_value(setting, &config);
+        settings_items.push(Item::dynamic(
+            format!(
+                "{}, {}",
+                setting.name,
+                setting_value_text(setting, value, lang)
+            ),
+            tx(
+                lang,
+                "Appuyez sur Entrée pour changer ce réglage du firmware.",
+                "Press Enter to change this firmware setting.",
+            ),
+            None,
+            Action::ChangeSetting(index),
+        ));
+    }
+    settings_items.push(Item::action(
+        tx(lang, "Revenir", "Go back"),
+        tx(
+            lang,
+            "Revenir à l'onglet Avancé.",
+            "Return to the Advanced tab.",
+        ),
+        Some(clip(lang, hda::CLIP_FR_ACT_BACK, hda::CLIP_ACT_BACK)),
+        Action::Back,
+    ));
+    let settings_screen = screens.len();
+    screens.push(Screen {
+        title: String::from(tx(lang, "Réglages du firmware", "Firmware settings")),
+        title_clip: None,
+        items: settings_items,
+    });
+
+    // Top tab: Advanced (CPU Configuration, and the browsable Firmware Settings when the firmware
+    // publishes any).
+    let mut advanced_items = alloc::vec![Item::action(
+        tx(lang, "Configuration du processeur", "CPU Configuration"),
+        tx(
+            lang,
+            "Détails du processeur et état de la virtualisation.",
+            "Processor details and virtualization state.",
+        ),
+        Some(clip(lang, hda::CLIP_FR_SUB_CPU, hda::CLIP_SUB_CPU)),
+        Action::SubMenu(cpu_screen),
+    )];
+    if !all_settings.is_empty() {
+        advanced_items.push(Item::dynamic(
+            format!(
+                "{} ({})",
+                tx(lang, "Réglages du firmware", "Firmware settings"),
+                all_settings.len()
+            ),
+            tx(
+                lang,
+                "Parcourir et changer les réglages publiés par le firmware.",
+                "Browse and change the settings the firmware publishes.",
+            ),
+            None,
+            Action::SubMenu(settings_screen),
+        ));
+    }
     let advanced_screen = screens.len();
     screens.push(Screen {
         title: String::from(tx(lang, "Avancé", "Advanced")),
@@ -1121,16 +1196,7 @@ fn build_tree(lang: Lang, width: usize, height: usize) -> Tree {
             hda::CLIP_FR_TAB_ADVANCED,
             hda::CLIP_TAB_ADVANCED,
         )),
-        items: alloc::vec![Item::action(
-            tx(lang, "Configuration du processeur", "CPU Configuration"),
-            tx(
-                lang,
-                "Détails du processeur et état de la virtualisation.",
-                "Processor details and virtualization state.",
-            ),
-            Some(clip(lang, hda::CLIP_FR_SUB_CPU, hda::CLIP_SUB_CPU)),
-            Action::SubMenu(cpu_screen),
-        ),],
+        items: advanced_items,
     });
 
     // Top tab: Boot (Boot normally + the priorities submenu, then the boot-manager state
@@ -1302,6 +1368,7 @@ fn build_tree(lang: Lang, width: usize, height: usize) -> Tree {
             save_exit_screen,
         ],
         boot_tab: 2,
+        settings: all_settings,
     }
 }
 
@@ -1450,29 +1517,40 @@ fn announce_item(
         Action::Info => aw_mark!("AW_UEFI_SETUP_ITEM \"{text}\""),
         _ => aw_mark!("AW_UEFI_MENU_ITEM \"{text}\""),
     }
+    let lang = if CURRENT_FRENCH.load(core::sync::atomic::Ordering::Relaxed) {
+        Lang::Fr
+    } else {
+        Lang::En
+    };
     if let Some(clip) = item.clip {
         play(clip, speaker, pending);
-    }
-    // Read-only state lines (CPU, memory, display, Secure Boot, virtualization) carry their
-    // value only in text, with no whole-line clip. Speak it automatically on focus - spelled
-    // through the alphabet bank - so a blind user hears the value on arrival instead of
-    // having to ask for it with the spell key. Interruptible: moving on stops a long value.
-    if matches!(item.action, Action::Info) {
-        let lang = if CURRENT_FRENCH.load(core::sync::atomic::Ordering::Relaxed) {
-            Lang::Fr
-        } else {
-            Lang::En
-        };
+    } else {
+        // No pre-recorded clip - a read-only value line (CPU, memory, Secure Boot) or a dynamic
+        // firmware-setting row. Speak the text itself on arrival (it is already "label, value",
+        // the VoiceOver order), so the value is heard without pressing the spell key.
         speak_dynamic(&item.text, lang, speaker, pending);
     }
-    // High verbosity: read the help line automatically on focus (synthesized), so a new user
-    // hears what each item does without pressing H.
-    if verbosity == 2 && !item.help.is_empty() {
-        let lang = if CURRENT_FRENCH.load(core::sync::atomic::Ordering::Relaxed) {
-            Lang::Fr
-        } else {
-            Lang::En
+    // A VoiceOver-style hint on an actionable item: a short "what this does", spoken after the
+    // label so the interaction teaches itself. An adjustable firmware setting says "adjustable,
+    // Enter to change"; a submenu says "Enter to open". Dropped at the terse (low) verbosity.
+    if verbosity >= 1 {
+        let hint = match item.action {
+            Action::ChangeSetting(_) => Some(tx(
+                lang,
+                "réglable, Entrée pour changer",
+                "adjustable, Enter to change",
+            )),
+            Action::SubMenu(_) => Some(tx(lang, "Entrée pour ouvrir", "Enter to open")),
+            _ => None,
         };
+        if let Some(hint) = hint {
+            aw_mark!("AW_UEFI_SETUP_HINT \"{hint}\"");
+            speak_dynamic(hint, lang, speaker, pending);
+        }
+    }
+    // High verbosity: also read the full help line, so a new user hears what each item does
+    // without pressing H.
+    if verbosity == 2 && !item.help.is_empty() {
         aw_mark!("AW_UEFI_SETUP_HELP \"{}\"", item.help);
         speak_dynamic(&item.help, lang, speaker, pending);
     }
@@ -2773,6 +2851,57 @@ fn get_setting_value(setting: &crate::hii_ifr::Setting) -> Option<u64> {
     Some(u64::from_le_bytes(value))
 }
 
+/// The current value of a firmware setting - a real NVRAM variable if there is one, else the HII
+/// config export (which reaches driver-internal varstores too).
+fn setting_current_value(
+    setting: &crate::hii_ifr::Setting,
+    config: &BTreeMap<([u8; 16], u64), u64>,
+) -> Option<u64> {
+    get_setting_value(setting)
+        .or_else(|| config.get(&(setting.guid, setting.offset as u64)).copied())
+}
+
+/// Speak-and-show a firmware setting's value by meaning: a one-of's choice label, a checkbox's
+/// enabled/disabled, or the raw number.
+fn setting_value_text(setting: &crate::hii_ifr::Setting, value: Option<u64>, lang: Lang) -> String {
+    match value {
+        Some(v) => setting.label_for(v).map(String::from).unwrap_or_else(|| {
+            if setting.width == 1 && setting.options.is_empty() {
+                String::from(if v != 0 {
+                    tx(lang, "activé", "enabled")
+                } else {
+                    tx(lang, "désactivé", "disabled")
+                })
+            } else {
+                format!("{v}")
+            }
+        }),
+        None => String::from(tx(lang, "inconnu", "unknown")),
+    }
+}
+
+/// The next value to cycle a setting to: for a one-of, the next choice (wrapping); for a
+/// checkbox, the toggle; for a plain numeric, one more (wrapping within its byte width).
+fn next_setting_value(setting: &crate::hii_ifr::Setting, current: Option<u64>) -> u64 {
+    let cur = current.unwrap_or(0);
+    if !setting.options.is_empty() {
+        let position = setting.options.iter().position(|(v, _)| *v == cur);
+        let next = position
+            .map(|p| (p + 1) % setting.options.len())
+            .unwrap_or(0);
+        setting.options[next].0
+    } else if setting.width == 1 {
+        u64::from(cur == 0)
+    } else {
+        let max = if setting.width >= 8 {
+            u64::MAX
+        } else {
+            (1u64 << (setting.width as u32 * 8)) - 1
+        };
+        cur.checked_add(1).filter(|v| *v <= max).unwrap_or(0)
+    }
+}
+
 /// Change one firmware setting, trying both methods so it works on any firmware. First the
 /// `setup_var` method (read the varstore's NVRAM variable, overwrite the bytes at the offset,
 /// write it back) which real BIOSes back with a plain variable; if that varstore is not a
@@ -3356,6 +3485,62 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
                             announce_item(
                                 &tree.screens[tree.tabs[tab_index]],
                                 0,
+                                speaker,
+                                &mut pending,
+                            );
+                        }
+                        // Change a firmware HII setting in place: cycle it to its next value,
+                        // confirmed (a wrong write can soft-brick the firmware config), then
+                        // update the item's text and re-announce it in the new value.
+                        Action::ChangeSetting(idx) => {
+                            let done = if let Some(setting) = tree.settings.get(idx) {
+                                let config = firmware_config_values();
+                                let current = setting_current_value(setting, &config);
+                                let next = next_setting_value(setting, current);
+                                uefi::println!(
+                                    "  {} -> {}",
+                                    setting.name,
+                                    setting_value_text(setting, Some(next), lang)
+                                );
+                                aw_mark!(
+                                    "AW_UEFI_SETUP_SETTING name=\"{}\" next={}",
+                                    setting.name,
+                                    next
+                                );
+                                if confirm(lang, speaker, &mut pending) {
+                                    let ok = set_setting_value(setting, next);
+                                    let value = if ok { Some(next) } else { current };
+                                    Some((
+                                        setting.name.clone(),
+                                        setting_value_text(setting, value, lang),
+                                        ok,
+                                    ))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+                            if let Some((name, vtext, ok)) = done {
+                                if ok {
+                                    sound::cue(CUE_APPLIED_HZ, Duration::from_millis(120));
+                                }
+                                let frame = *stack.last().unwrap();
+                                if let Some(item) =
+                                    tree.screens[frame.screen].items.get_mut(frame.item)
+                                {
+                                    item.text = format!("{name}, {vtext}");
+                                }
+                                play(
+                                    clip(lang, hda::CLIP_FR_CONFIRM_DONE, hda::CLIP_CONFIRM_DONE),
+                                    speaker,
+                                    &mut pending,
+                                );
+                            }
+                            let frame = *stack.last().unwrap();
+                            announce_item(
+                                &tree.screens[frame.screen],
+                                frame.item,
                                 speaker,
                                 &mut pending,
                             );

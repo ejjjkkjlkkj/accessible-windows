@@ -45,7 +45,8 @@ $frWords = @(
     'interdite','certificats','empreintes','provisionné','présent','banques','actives','aucune',
     'interface','module','démarrer','normalement','priorités','périphérique','sécurité','avancé',
     'principal','enregistrer','quitter','revenir','définir','défaut','monter','descendre','ordre',
-    'redémarrer','éteindre','entrer','dans','la','du','le','les'
+    'redémarrer','éteindre','entrer','dans','la','du','le','les',
+    'réglable','entrée','changer','ouvrir','appuyez','inconnu','processus'
 )
 
 # English: number atoms, then common firmware words and the words in real device names.
@@ -59,7 +60,8 @@ $enWords = @(
     'secure','boot','setup','mode','current','timeout','seconds','platform','key','database',
     'certificates','hashes','provisioned','present','banks','active','none','interface','module',
     'device','manager','disk','hard','drive','internal','shell','standard','windows','normally',
-    'priorities','make','default','move','up','down','reset','shut','enter','the','of','not'
+    'priorities','make','default','move','up','down','reset','shut','enter','the','of','not',
+    'adjustable','open','change','press','unknown'
 )
 
 # ---- Synthesis ---------------------------------------------------------------------------
