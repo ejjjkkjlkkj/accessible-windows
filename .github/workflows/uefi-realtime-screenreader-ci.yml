@@ -40,6 +40,7 @@ jobs:
           grep -F 'source-sample-rate=16000' "$root/realtime-units.txt"
           grep -F 'voice-profile=hi-intelligibility-16khz-v4' "$root/realtime-units.txt"
           grep -F 'digit-map=0-9-french-digit-names' "$root/realtime-units.txt"
+          grep -F 'max-input-graphemes=64' "$root/realtime-units.txt"
           grep -F 'inter-letter-silence-ms=12-runtime-gap' "$root/realtime-units.txt"
           flags='--target=x86_64-pc-windows-msvc -DQEV_INTERACTIVE_NAV=1 -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
           clang $flags -c "$root/hii_graph_prompt_speech_uefi.c" -o "$root/realtime-main.obj"
@@ -52,6 +53,7 @@ jobs:
           grep -aF 'SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3' "$root/REALTIME.EFI"
           grep -aF 'VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_DIGIT_SPEECH=PASS' "$root/REALTIME.EFI"
+          grep -aF 'HII_PROMPT_MAX_CHARS=64' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_SEMANTIC_SPEECH=ROLE_PLUS_LABEL' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_ROLE=' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_SPEECH_TEXT=' "$root/REALTIME.EFI"
