@@ -41,12 +41,34 @@ jobs:
       - name: Resolve OVMF
         run: |
           set -euo pipefail
-          code=/usr/share/OVMF/OVMF_CODE.fd
-          vars=/usr/share/OVMF/OVMF_VARS.fd
-          test -f "$code"
-          test -f "$vars"
+          code=''
+          vars=''
+          for pair in             '/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd'             '/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd'             '/usr/share/qemu/OVMF_CODE.fd|/usr/share/qemu/OVMF_VARS.fd'
+          do
+            c="${pair%%|*}"
+            v="${pair#*|}"
+            if [ -f "$c" ] && [ -f "$v" ]; then
+              code="$c"
+              vars="$v"
+              break
+            fi
+          done
+          if [ -z "$code" ]; then
+            echo 'Installed OVMF files:'
+            find /usr/share/OVMF /usr/share/qemu -maxdepth 2 -type f -name '*OVMF*.fd' -print 2>/dev/null || true
+            exit 1
+          fi
+          code_size=$(stat -c %s "$code")
+          vars_size=$(stat -c %s "$vars")
+          if [ "$code_size" -ne "$vars_size" ]; then
+            echo "OVMF size mismatch: code=$code_size vars=$vars_size"
+            exit 1
+          fi
           echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
           echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
+          echo "OVMF_CODE_PATH=$code"
+          echo "OVMF_VARS_PATH=$vars"
+          echo "OVMF_PAIR_BYTES=$code_size"
           echo USB_AUDIO_BASELINE_OVMF=PASS
 
       - name: Boot QEMU xHCI with USB Audio
