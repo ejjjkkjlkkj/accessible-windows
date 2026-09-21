@@ -1,0 +1,202 @@
+name: UEFI Accessibility Platform v2 VMware VoiceCore
+
+on:
+  push:
+    branches:
+      - uefi-realtime-screenreader-20260919
+    paths:
+      - 'boot/uefi-native-speech-v4/**'
+      - 'boot/uefi-accessibility-platform-v2/**'
+      - 'boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
+      - '.github/workflows/uefi-accessibility-platform-v2-vmware.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-vmware-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install EFI toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld
+
+      - name: Build VoiceCore v4 VMware EFI and deterministic FAT16 disk
+        run: |
+          set -euo pipefail
+          out=boot/uefi-accessibility-platform-v2
+          src=boot/uefi-hii-graph-prompt-speech-v1
+          python3 boot/uefi-native-speech-v4/test_voicecore_v4.py
+          python3 "$out/generate_hii_voicecore_v4.py" "$out/speech_units.c" "$out/voicecore-v4-hii-metadata.txt"
+          flags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+          clang $flags -DQEV_VOICECORE_V4=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/vmware-main.obj"
+          clang $flags -c "$out/speech_units.c" -o "$out/vmware-units.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$out/VMWARE-VOICECORE-V4.EFI" "$out/vmware-main.obj" "$out/vmware-units.obj"
+          test -s "$out/VMWARE-VOICECORE-V4.EFI"
+          grep -aF 'VOICECORE_V4_RUNTIME_BINDING=PASS' "$out/VMWARE-VOICECORE-V4.EFI"
+          python3 "$out/make_fat16.py" "$out/VMWARE-VOICECORE-V4.EFI" "$out/vmware-voicecore-v4.raw"
+          sha256sum "$out/VMWARE-VOICECORE-V4.EFI" "$out/vmware-voicecore-v4.raw"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vmware-voicecore-v4-boot
+          path: |
+            boot/uefi-accessibility-platform-v2/VMWARE-VOICECORE-V4.EFI
+            boot/uefi-accessibility-platform-v2/vmware-voicecore-v4.raw
+            boot/uefi-accessibility-platform-v2/voicecore-v4-hii-metadata.txt
+
+  vmware-workstation:
+    needs: build-vmware-image
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vmware-voicecore-v4-boot
+          path: voicecore-vmware
+
+      - name: Discover VMware Workstation and QEMU image converter
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          function FirstExisting([string[]]$items){
+            foreach($item in $items){
+              if($item -and (Test-Path $item)){ return (Resolve-Path $item).Path }
+            }
+            return $null
+          }
+          $vmrun=FirstExisting @(
+            'C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe',
+            'C:\Program Files\VMware\VMware Workstation\vmrun.exe',
+            ((Get-Command vmrun.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
+          )
+          $qemuImg=FirstExisting @(
+            'C:\Program Files\qemu\qemu-img.exe',
+            ((Get-Command qemu-img.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
+          )
+          if(-not $vmrun){ throw 'VMware Workstation vmrun.exe not found' }
+          if(-not $qemuImg){ throw 'qemu-img.exe not found' }
+          "VMRUN_EXE=$vmrun" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "QEMU_IMG_EXE=$qemuImg" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          & $vmrun | Select-Object -First 2
+          'VMWARE_VOICECORE_TOOLCHAIN=PASS'
+
+      - name: Execute VoiceCore v4 live HII to VMware HDA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path 'voicecore-vmware').Path
+          $raw=Join-Path $root 'vmware-voicecore-v4.raw'
+          $efi=Join-Path $root 'VMWARE-VOICECORE-V4.EFI'
+          $vmdk=Join-Path $root 'voicecore-v4.vmdk'
+          $serial=Join-Path $root 'voicecore-v4.serial'
+          $vmx=Join-Path $root 'voicecore-v4.vmx'
+          $captured=Join-Path $root 'vmware-voicecore-v4-captured.txt'
+          $result=Join-Path $root 'vmware-voicecore-v4-result.txt'
+
+          if(-not (Test-Path $raw)){ throw 'VoiceCore raw boot disk missing' }
+          if(-not (Test-Path $efi)){ throw 'VoiceCore EFI missing' }
+
+          & $env:QEMU_IMG_EXE convert -f raw -O vmdk $raw $vmdk
+          if($LASTEXITCODE -ne 0){ throw 'raw to VMDK conversion failed' }
+
+          @"
+          .encoding = "UTF-8"
+          config.version = "8"
+          virtualHW.version = "20"
+          displayName = "VoiceCore v4 UEFI Accessibility"
+          guestOS = "other-64"
+          firmware = "efi"
+          uefi.secureBoot.enabled = "FALSE"
+          memsize = "256"
+          numvcpus = "1"
+          ide0:0.present = "TRUE"
+          ide0:0.fileName = "$($vmdk.Replace('\','/'))"
+          ide0:0.deviceType = "disk"
+          sound.present = "TRUE"
+          sound.virtualDev = "hdaudio"
+          serial0.present = "TRUE"
+          serial0.fileType = "file"
+          serial0.fileName = "$($serial.Replace('\','/'))"
+          floppy0.present = "FALSE"
+          ethernet0.present = "FALSE"
+          "@ | Set-Content $vmx -Encoding ascii
+
+          Remove-Item $serial -Force -ErrorAction SilentlyContinue
+          & $env:VMRUN_EXE -T ws start $vmx nogui
+          if($LASTEXITCODE -ne 0){ throw 'vmrun VoiceCore start failed' }
+
+          $text=''
+          try {
+            for($i=0;$i -lt 180;$i++){
+              Start-Sleep -Milliseconds 250
+              if(Test-Path $serial){
+                try { $text=[IO.File]::ReadAllText($serial) } catch { continue }
+                if($text -match 'STATUS=BLOCKED' -or $text -match 'STATUS=PASS'){ break }
+              }
+            }
+          } finally {
+            & $env:VMRUN_EXE -T ws stop $vmx hard 2>$null | Out-Null
+            Start-Sleep -Milliseconds 500
+          }
+
+          if(-not $text -and (Test-Path $serial)){
+            $text=[IO.File]::ReadAllText($serial)
+          }
+          $text | Set-Content $captured -Encoding ascii
+          if($text -match 'STATUS=BLOCKED'){ throw "VMware VoiceCore runtime blocked: $text" }
+
+          $required=@(
+            'STATE=START',
+            'HII_DATABASE_PROTOCOL=PASS',
+            'HII_STRING_PROTOCOL=PASS',
+            'IFR_PROMPT_STRING_ID=PASS',
+            'HII_PROMPT_SOURCE=PASS',
+            'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403',
+            'HDA_CODEC_SELECTION=GENERIC_RUNTIME',
+            'HDA_GRAPH_SEARCH_LIVE=PASS',
+            'HDA_SELECTOR_APPLY_LIVE=PASS',
+            'HDA_OUTPUT_PATH_CONFIGURATION=PASS',
+            'VOICECORE_V4_RUNTIME_BINDING=PASS',
+            'HII_GRAPH_SPEECH_DMA=PASS',
+            'HII_PROMPT_SPEECH_HDA=PASS',
+            'LPIB_PROGRESS=PASS',
+            'STATUS=PASS'
+          )
+          foreach($marker in $required){
+            if($text -notmatch [regex]::Escape($marker)){
+              throw "VMware VoiceCore evidence missing $marker : $text"
+            }
+          }
+          if($text -notmatch 'HDA_CODEC_VENDOR_DEVICE=0x[0-9A-Fa-f]{8}'){
+            throw "VMware VoiceCore codec identity missing: $text"
+          }
+          if($text -notmatch 'HDA_ROUTE_DEPTH=0x[0-9A-Fa-f]{2}'){
+            throw "VMware VoiceCore route depth missing: $text"
+          }
+
+          @(
+            'VMWARE_VOICECORE_V4=PASS'
+            'VMWARE_UEFI_LOADER=PASS'
+            'VMWARE_LIVE_HII=PASS'
+            'VMWARE_HDA_ROUTE=PASS'
+            'VMWARE_HDA_DMA_PROGRESS=PASS'
+            'VMWARE_VOICECORE_V4_RUNTIME_BINDING=PASS'
+            'VMWARE_HII_TO_VOICECORE_V4_TO_HDA=PASS'
+            'VMWARE_STATUS=PASS'
+            ($text -split "[\r\n]+" | Where-Object { $_ -match '^(HII_PROMPT_TEXT|HDA_CODEC_VENDOR_DEVICE|HDA_PIN_NID|HDA_DAC_NID|HDA_ROUTE_DEPTH|VOICECORE_)=' })
+          ) | Set-Content $result -Encoding ascii
+          Get-Content $result
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vmware-voicecore-v4-evidence
+          path: |
+            voicecore-vmware/vmware-voicecore-v4-result.txt
+            voicecore-vmware/vmware-voicecore-v4-captured.txt
+            voicecore-vmware/VMWARE-VOICECORE-V4.EFI
+            voicecore-vmware/voicecore-v4.vmx
