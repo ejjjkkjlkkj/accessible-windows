@@ -147,7 +147,7 @@ def main():
         f'bank-sha256={hashlib.sha256(bank).hexdigest()}\n'
         'letter-map=a-z-french-letter-names\n'
         'digit-map=0-9-french-digit-names\n'
-        'max-input-graphemes=32\n'
+        'max-input-graphemes=64\n'
         'max-units-per-letter=8\n'
         'inter-letter-silence-ms=12-runtime-gap\n'
         'word-silence-ms=65\n'
