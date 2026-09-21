@@ -154,7 +154,7 @@ jobs:
             -drive if=pflash,format=raw,file="$root/vars.fd" \
             -drive format=raw,file=fat:rw:"$root/esp" \
             -device sb16,audiodev=aud \
-            -audiodev wav,id=aud,path="$root/native-speech.wav",out.frequency=8000,out.channels=1,out.format=u8 \
+            -audiodev wav,id=aud,path="$root/native-speech.wav",out.frequency=16000,out.channels=1,out.format=u8 \
             -display none \
             -monitor unix:"$root/native-speech.mon",server=on,wait=off \
             -serial file:"$root/native-speech.serial" \
@@ -208,6 +208,7 @@ jobs:
 
           wait_token(b'EVENT=BOOT\r\n')
           wait_token(b'SYNTH=ALLOPHONE_CONCATENATIVE_V1\r\n')
+          wait_token(b'VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4\r\n')
 
           send_key('2')
           wait_token(b'ID=ACCESSIBILITY\r\n')
@@ -249,7 +250,7 @@ jobs:
               raw=w.readframes(frames)
 
           assert channels == 1, channels
-          assert rate == 8000, rate
+          assert rate == 16000, rate
           assert width == 1, width
           duration=frames/rate
           assert duration >= 5.0, duration
