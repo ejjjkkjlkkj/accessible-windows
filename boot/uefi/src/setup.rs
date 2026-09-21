@@ -2997,6 +2997,12 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
         display.show("Accessible Windows firmware setup");
     }
 
+    // Close the last audio gap: if a USB Audio Class device is present, drive it directly through
+    // a from-scratch XHCI isochronous driver (the firmware's own UsbIo cannot carry isochronous
+    // transfers). Gated on a USB Audio device being present, so a keyboard-only controller is
+    // never touched. Best effort, fully instrumented, and it always returns to continue the boot.
+    crate::usb_audio::self_test();
+
     // Prove the runtime formant synthesizer runs on this firmware: synthesize a fixed phrase
     // (in soft-float, before any OS) and report the PCM it produced. A non-zero byte count is
     // headless evidence that arbitrary dynamic text - device names, values - can now be spoken

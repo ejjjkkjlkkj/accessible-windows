@@ -28,6 +28,7 @@ mod setup;
 mod sound;
 mod synth;
 mod usb;
+mod usb_audio;
 mod virtio_snd;
 
 /// Emit an accessibility marker to both the 0xE9 debug console (via the `uefi`

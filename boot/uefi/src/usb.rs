@@ -23,9 +23,9 @@
 //! Honest scope: end-to-end braille output is exercised on a real display (QEMU emulates only a
 //! Baum serial display, a different transport); the enumeration, HID-braille detection and cell
 //! rendering are all proven here, and the HID output-report send follows the HID braille class.
-//! USB Audio Class output is *not* built on this: audio streaming is isochronous, which the
-//! firmware's `UsbIo` does not reliably carry, so it needs a dedicated host-controller driver -
-//! see the roadmap.
+//! USB Audio Class output is *not* built on this `UsbIo` path: audio streaming is isochronous,
+//! which EDK II's `UsbIo` returns `EFI_UNSUPPORTED` for, so it needs a dedicated host-controller
+//! driver - that is [`crate::usb_audio`], a from-scratch xHCI driver.
 
 extern crate alloc;
 
