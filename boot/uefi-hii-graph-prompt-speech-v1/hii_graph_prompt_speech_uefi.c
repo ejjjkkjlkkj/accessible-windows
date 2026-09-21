@@ -792,7 +792,7 @@ static void speech_dma_stop(void) {
 static int speech_dma_begin(const char *text, u32 text_count) {
     if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 32u) return 0;
     const u32 pcm_off = 0x1000u;
-    const u32 dma_pages = 1536u;
+    const u32 dma_pages = 2048u;
     const u32 dma_bytes = dma_pages * 4096u;
     if (!qev_unit_bank_len || pcm_off >= dma_bytes) return 0;
 
@@ -804,8 +804,9 @@ static int speech_dma_begin(const char *text, u32 text_count) {
      * alignment failures seen with longer HII labels.
      *
      * Worst-case 32-character French letter-name spelling is about 4.36 MiB
-     * (all 'w'). Reserve 6 MiB and up to 128 BDL entries so every accepted
-     * 32-character label remains representable. Playback stays interruptible,
+     * (all 'w'). Reserve 8 MiB and up to 128 BDL entries so VoiceCore v4
+     * full-letter clips also fit for every accepted 32-character label.
+     * Playback stays interruptible,
      * so the larger worst-case timeout never blocks keyboard focus changes.
      */
     u64 base = g_speech_dma_base;
