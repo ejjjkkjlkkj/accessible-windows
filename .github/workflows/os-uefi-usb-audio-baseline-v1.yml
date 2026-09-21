@@ -60,15 +60,18 @@ jobs:
           fi
           code_size=$(stat -c %s "$code")
           vars_size=$(stat -c %s "$vars")
-          if [ "$code_size" -ne "$vars_size" ]; then
-            echo "OVMF size mismatch: code=$code_size vars=$vars_size"
+          total_size=$((code_size + vars_size))
+          if [ "$code" = '/usr/share/OVMF/OVMF_CODE_4M.fd' ] && [ "$total_size" -ne 4194304 ]; then
+            echo "Unexpected OVMF 4M split layout: code=$code_size vars=$vars_size total=$total_size"
             exit 1
           fi
           echo "OVMF_CODE=$code" >> "$GITHUB_ENV"
           echo "OVMF_VARS=$vars" >> "$GITHUB_ENV"
           echo "OVMF_CODE_PATH=$code"
           echo "OVMF_VARS_PATH=$vars"
-          echo "OVMF_PAIR_BYTES=$code_size"
+          echo "OVMF_CODE_BYTES=$code_size"
+          echo "OVMF_VARS_BYTES=$vars_size"
+          echo "OVMF_LAYOUT_TOTAL_BYTES=$total_size"
           echo USB_AUDIO_BASELINE_OVMF=PASS
 
       - name: Boot QEMU xHCI with USB Audio
