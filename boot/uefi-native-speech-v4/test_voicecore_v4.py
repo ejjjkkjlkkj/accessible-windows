@@ -24,11 +24,11 @@ def digest(samples: list[int]) -> str:
 
 def main() -> None:
     assert ENGINE_NAME == "VoiceCore v4"
-    assert ENGINE_ABI == 1
+    assert ENGINE_ABI == 2
     assert SAMPLE_RATE == 48000
     assert DEFAULT_CHUNK_FRAMES == 960
     assert len(PHONES) >= 38
-    assert {"screen","clair","velours","grave","rapide","compact"} <= set(VOICES)
+    assert {"screen","clair","velours","grave","rapide","compact","femme","jeune_femme"} <= set(VOICES)\n    assert VOICES["femme"].base_f0 > VOICES["clair"].base_f0\n    assert VOICES["jeune_femme"].base_f0 > VOICES["femme"].base_f0
 
     assert integer_to_words(0) == "zéro"
     assert integer_to_words(21) == "vingt et un"
