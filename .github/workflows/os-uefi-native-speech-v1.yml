@@ -253,7 +253,10 @@ jobs:
           assert rate == 16000, rate
           assert width == 1, width
           duration=frames/rate
-          assert duration >= 5.0, duration
+          # QEMU's SB16 WAV backend records active DMA spans rather than the
+          # firmware's full wall-clock Stall cadence. Gate captured speech
+          # content here; the release HDA path has its own 48 kHz timing gate.
+          assert duration >= 1.5, duration
           active=sum(abs(x-128) >= 4 for x in raw)
           ratio=active/max(1,len(raw))
           assert ratio >= 0.02, ratio
