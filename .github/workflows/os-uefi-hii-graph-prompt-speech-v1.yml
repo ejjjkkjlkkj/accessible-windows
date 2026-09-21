@@ -2,7 +2,7 @@ name: os-uefi-hii-graph-prompt-speech-v1
 
 on:
   push:
-    branches: [os]
+    branches: [os, uefi-native-voice-v4-20260921]
     paths:
       - 'boot/uefi-hii-graph-prompt-speech-v1/**'
       - 'boot/uefi-native-speech-v1/build_uefi_native_speech.py'
