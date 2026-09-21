@@ -28,6 +28,9 @@ jobs:
           python "$root/generate_units.py" "$root/speech_units.c" "$root/speech-unit-metadata.txt" | tee "$root/generator.log"
           grep -F 'letter-map=a-z' "$root/speech-unit-metadata.txt"
           grep -F 'full-utterance-asset=false' "$root/speech-unit-metadata.txt"
+          grep -F 'source-sample-rate=16000' "$root/speech-unit-metadata.txt"
+          grep -F 'voice-profile=hi-intelligibility-16khz-v4' "$root/speech-unit-metadata.txt"
+          grep -F 'VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4' "$root/generator.log"
 
       - name: Build deterministic HII graph speech EFI
         run: |
@@ -74,6 +77,7 @@ jobs:
               assert not ((ch&0x80000000) and (ch&0x20000000)),hex(ch)
           for token in [
               b'HII_PROMPT_SOURCE=PASS',
+              b'VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4',
               b'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3',
               b'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403',
               b'HDA_CODEC_SELECTION=REALTEK_10EC_0256',
@@ -137,6 +141,7 @@ jobs:
             b'IFR_PROMPT_STRING_ID=PASS\r\n',
             b'HII_PROMPT_TEXT=',
             b'HII_PROMPT_SOURCE=PASS\r\n',
+            b'VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4\r\n',
             b'HDA_CONTROLLER_SELECTION=GENERIC_CLASS_0403\r\n',
             b'HDA_CODEC_SELECTION=GENERIC_RUNTIME\r\n',
             b'HDA_GRAPH_SEARCH_LIVE=PASS\r\n',
@@ -191,6 +196,7 @@ jobs:
           grep -F 'HII_GRAPH_SPEECH_DMA=PASS' "$proof"
           grep -F 'LPIB_PROGRESS=PASS' "$proof"
           grep -F 'AUDIBLE_PHYSICAL_SPEAKER=REQUIRES_HUMAN_CONFIRMATION' "$proof"
+          grep -F 'HII_GRAPH_VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4' "$proof"
           echo HII_GRAPH_BOOT_MEDIA_PERSISTENT_PROOF=PASS
 
       # Interactive repeat is validated separately by os-uefi-hii-graph-repeat-v1
