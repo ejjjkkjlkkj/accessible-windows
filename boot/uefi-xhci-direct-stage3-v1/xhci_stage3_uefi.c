@@ -170,7 +170,7 @@ static void ctx64(u8*base,u32 off,u64 value){
 }
 
 __attribute__((ms_abi)) u64 efi_main(void*image_handle,void*system_table){
-    (void)image_handle;
+    (void)image_handle;(void)system_table;
     serial_init();
     line("QEVARYNOX-UEFI-XHCI-DIRECT-STAGE3-V1");
     line("MODE=DESTRUCTIVE_QEMU_XHCI_ADDRESS_DEVICE");
