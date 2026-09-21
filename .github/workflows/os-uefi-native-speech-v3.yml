@@ -1,0 +1,59 @@
+name: UEFI Native Speech v3
+
+on:
+  push:
+    branches:
+      - uefi-realtime-screenreader-20260919
+    paths:
+      - 'boot/uefi-native-speech-v3/**'
+      - '.github/workflows/os-uefi-native-speech-v3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  speech-v3-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate VoiceCore v3
+        working-directory: boot/uefi-native-speech-v3
+        run: python3 test_native_speech_v3.py
+      - name: Build four reference voices and proof
+        working-directory: boot/uefi-native-speech-v3
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          from native_speech_v3 import VOICES, render_demo_set, synthesize, quality_metrics
+
+          out = Path("evidence")
+          hashes = render_demo_set(out)
+          lines = [
+              "VOICECORE-V3",
+              "status = PASS",
+              "engine = first-party deterministic French source-filter TTS",
+              "external-tts-dependency = 0",
+              "sample-rate = 48000",
+              "sample-format = signed-16-bit",
+              f"voices = {','.join(VOICES)}",
+          ]
+          phrase = "Bonjour. Lecteur d'écran audio. UEFI, menu, continuer, récupération, erreur, non."
+          for voice in VOICES:
+              m = quality_metrics(synthesize(phrase, voice))
+              lines += [
+                  f"{voice}.duration_s = {m['duration_s']:.6f}",
+                  f"{voice}.rms = {m['rms']:.6f}",
+                  f"{voice}.peak = {m['peak']:.6f}",
+                  f"{voice}.dc = {m['dc']:.6f}",
+                  f"{voice}.wav_sha256 = {hashes[voice]}",
+              ]
+          proof = "\n".join(lines) + "\n"
+          (out / "voicecore-v3.labproof").write_text(proof, encoding="utf-8")
+          print(proof)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voicecore-v3-evidence
+          path: boot/uefi-native-speech-v3/evidence/**
