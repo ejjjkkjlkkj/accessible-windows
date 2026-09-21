@@ -48,7 +48,7 @@ struct.pack_into("<HBHBHHBHHHII", img, bs+11, bps, spc, reserved, nfats, roots, 
 img[bs+36] = 0x80
 img[bs+38] = 0x29
 struct.pack_into("<I", img, bs+39, 0x56433431)
-img[bs+43:bs+54] = b"VOICECORE4  "
+img[bs+43:bs+54] = b"VOICECORE4 "
 img[bs+54:bs+62] = b"FAT16   "
 img[bs+510:bs+512] = b"\x55\xaa"
 
