@@ -1342,11 +1342,11 @@ fn render(tree: &Tree, tab_index: usize, screen_index: usize, item_index: usize,
     uefi::println!();
     if depth == 0 {
         uefi::println!(
-            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  Brackets: rate.  Comma/dot: pitch.  V: verbosity.  X: punctuation.  O: word.  M: mute.  P: phonetic.  H: help."
+            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  Brackets: rate.  Comma/dot: pitch.  V: verbosity.  X: punctuation.  O: word.  N/B: review.  G: go to review.  M: mute.  P: phonetic.  H: help."
         );
     } else {
         uefi::println!(
-            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  Brackets: rate.  Comma/dot: pitch.  V: verbosity.  X: punctuation.  O: word.  M: mute.  P: phonetic.  H: help.  W: where."
+            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  Brackets: rate.  Comma/dot: pitch.  V: verbosity.  X: punctuation.  O: word.  N/B: review.  G: go to review.  M: mute.  P: phonetic.  H: help.  W: where."
         );
     }
 }
@@ -1771,6 +1771,12 @@ enum Nav {
     Punctuation,
     /// Read the focused line word by word (O), synthesized.
     ReadByWord,
+    /// Move an independent review cursor to the next (N) or previous (B) line and read it,
+    /// without changing which item is selected - the classic screen-reader review cursor.
+    ReviewNext,
+    ReviewPrev,
+    /// Move the real selection to the review cursor's line (G).
+    FocusToReview,
     Ignore,
 }
 
@@ -1808,6 +1814,9 @@ fn classify(key: Key) -> Nav {
             'v' | 'V' => Nav::Verbosity,
             'x' | 'X' => Nav::Punctuation,
             'o' | 'O' => Nav::ReadByWord,
+            'n' | 'N' => Nav::ReviewNext,
+            'b' | 'B' => Nav::ReviewPrev,
+            'g' | 'G' => Nav::FocusToReview,
             _ => Nav::Ignore,
         },
         Key::Special(_) => Nav::Ignore,
@@ -3055,6 +3064,12 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
     let mut interacted = false;
     let mut waited = Duration::ZERO;
 
+    // The independent review cursor: a line index within the current screen, and the focus it
+    // was last based on. When focus moves, the next review step re-bases to the new focus, so
+    // the review cursor follows the selection until the user drives it away from there.
+    let mut review = 0usize;
+    let mut review_focus = (usize::MAX, usize::MAX);
+
     loop {
         let next_key = pending.take().or_else(read_key_raw);
         if let Some(key) = next_key {
@@ -3430,6 +3445,42 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
                         }
                         speak_dynamic(word, lang, speaker, &mut pending);
                     }
+                }
+                Nav::ReviewNext | Nav::ReviewPrev => {
+                    let frame = *stack.last().unwrap();
+                    let count = tree.screens[frame.screen].items.len();
+                    // Re-base to the current focus if the selection has moved since last review.
+                    if review_focus != (frame.screen, frame.item) {
+                        review = frame.item;
+                        review_focus = (frame.screen, frame.item);
+                    }
+                    if matches!(classify(key), Nav::ReviewNext) {
+                        if review + 1 < count {
+                            review += 1;
+                        }
+                    } else {
+                        review = review.saturating_sub(1);
+                    }
+                    let text = tree.screens[frame.screen].items[review].text.clone();
+                    aw_mark!("AW_UEFI_REVIEW line={} \"{text}\"", review + 1);
+                    sound::cue(CUE_MOVE_HZ, Duration::from_millis(30));
+                    speak_dynamic(
+                        &format!("{}, {text}", review + 1),
+                        lang,
+                        speaker,
+                        &mut pending,
+                    );
+                }
+                Nav::FocusToReview => {
+                    let frame = stack.last_mut().unwrap();
+                    let count = tree.screens[frame.screen].items.len().max(1);
+                    frame.item = review.min(count - 1);
+                    let (screen, item) = (frame.screen, frame.item);
+                    review_focus = (screen, item);
+                    aw_mark!("AW_UEFI_REVIEW_FOCUS line={}", item + 1);
+                    sound::cue(CUE_TAB_HZ, Duration::from_millis(40));
+                    render(&tree, tab_index, screen, item, stack.len() - 1);
+                    announce_item(&tree.screens[screen], item, speaker, &mut pending);
                 }
                 Nav::Ignore => {}
             }
