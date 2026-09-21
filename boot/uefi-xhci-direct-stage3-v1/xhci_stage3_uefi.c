@@ -192,7 +192,11 @@ __attribute__((ms_abi)) u64 efi_main(void*image_handle,void*system_table){
     u8 max_ports=(u8)(hcs1>>24);
     kv32("XHCI_CAP_DWORD0",mr32(0));
     kv32("XHCI_HCSPARAMS1",hcs1);
+    kv32("XHCI_HCSPARAMS2",hcs2);
     kv32("XHCI_HCCPARAMS1",hcc1);
+    u32 scratch=((hcs2>>27)&0x1fu)|(((hcs2>>21)&0x1fu)<<5);
+    kv32("XHCI_SCRATCHPAD_COUNT",scratch);
+    if(scratch!=0u){line("STATUS=BLOCKED");line("REASON=SCRATCHPAD_SUPPORT_STAGE3_PENDING");return 1;}
     if(!caplen||!max_ports||!dboff||!rtsoff){line("STATUS=BLOCKED");line("REASON=XHCI_CAPS");return 1;}
     line("XHCI_DISCOVERY=PASS");
 
