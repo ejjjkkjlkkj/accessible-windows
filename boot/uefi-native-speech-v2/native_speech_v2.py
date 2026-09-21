@@ -45,6 +45,7 @@ UNIT_SPECS: dict[str, UnitSpec] = {
     "g": UnitSpec("p", 92, 108.0, (600, 1400, 2400), (0.50, 0.31, 0.19)),
     "p": UnitSpec("p", 88, 0.0, (900, 2400, 4500), (0.27, 0.34, 0.39)),
     "b": UnitSpec("p", 88, 108.0, (500, 1300, 2300), (0.52, 0.30, 0.18)),
+    "sil": UnitSpec("s", 48, 0.0, (0, 0, 0), (0.0, 0.0, 0.0)),
 }
 
 WORDS: dict[str, tuple[str, ...]] = {
@@ -82,6 +83,8 @@ def make_unit(name: str) -> list[int]:
     if any(freq < 0 or freq > nyquist_guard for freq in spec.formants):
         raise ValueError(f"{name}: formant exceeds spectral guard")
     count = max(1, SAMPLE_RATE * spec.duration_ms // 1000)
+    if spec.kind == "s":
+        return [0] * count
     seed = 0x51564532 ^ sum((i + 1) * ord(ch) for i, ch in enumerate(name))
     out: list[int] = []
     dc = 0.0
