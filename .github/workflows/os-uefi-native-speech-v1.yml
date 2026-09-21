@@ -45,6 +45,8 @@ jobs:
               'def make_unit(',
               'def make_units(',
               'SYNTH=ALLOPHONE_CONCATENATIVE_V1',
+              'SAMPLE_RATE = 16000',
+              'VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4',
               'for unit_name in PHRASES[name]:',
           ):
               assert token in src, token
@@ -67,6 +69,7 @@ jobs:
           python "$root/build_uefi_native_speech.py" "$root/BOOTX64-2.EFI" > "$root/build2.log"
           cmp "$root/BOOTX64.EFI" "$root/BOOTX64-2.EFI"
           grep -F 'OS_UEFI_NATIVE_SPEECH_BUILD=PASS' "$root/build.log"
+          grep -F 'sample-rate=16000' "$root/build.log"
           grep -F 'full-utterance-pcm-assets=0' "$root/build.log"
           grep -F 'external-tts-dependency=0' "$root/build.log"
           sha256sum "$root/BOOTX64.EFI"
@@ -97,6 +100,7 @@ jobs:
 
           required=(
               b'SYNTH=ALLOPHONE_CONCATENATIVE_V1',
+              b'VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4',
               b'EVENT=BOOT\r\n',
               b'FOCUS=ACCESSIBILITY\r\n',
               b'FOCUS=RECOVERY\r\n',
