@@ -1342,11 +1342,11 @@ fn render(tree: &Tree, tab_index: usize, screen_index: usize, item_index: usize,
     uefi::println!();
     if depth == 0 {
         uefi::println!(
-            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  Brackets: rate.  Comma/dot: pitch.  M: mute.  P: phonetic.  H: help."
+            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  Brackets: rate.  Comma/dot: pitch.  V: verbosity.  X: punctuation.  O: word.  M: mute.  P: phonetic.  H: help."
         );
     } else {
         uefi::println!(
-            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  Brackets: rate.  Comma/dot: pitch.  M: mute.  P: phonetic.  H: help.  W: where."
+            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  Brackets: rate.  Comma/dot: pitch.  V: verbosity.  X: punctuation.  O: word.  M: mute.  P: phonetic.  H: help.  W: where."
         );
     }
 }
@@ -1437,7 +1437,14 @@ fn announce_item(
         return false;
     }
     let mut buffer = [0u8; 192];
-    let context = FocusContext::in_set(item_index as u32 + 1, screen.items.len() as u32);
+    // Verbosity: at the "low" level the "n of N" position is dropped for a terser announcement;
+    // "medium" and "high" keep it.
+    let verbosity = VERBOSITY.load(core::sync::atomic::Ordering::Relaxed);
+    let context = if verbosity == 0 {
+        FocusContext::NONE
+    } else {
+        FocusContext::in_set(item_index as u32 + 1, screen.items.len() as u32)
+    };
     let text = announce_focus(&node, context, &mut buffer);
     match item.action {
         Action::Info => aw_mark!("AW_UEFI_SETUP_ITEM \"{text}\""),
@@ -1457,6 +1464,17 @@ fn announce_item(
             Lang::En
         };
         speak_dynamic(&item.text, lang, speaker, pending);
+    }
+    // High verbosity: read the help line automatically on focus (synthesized), so a new user
+    // hears what each item does without pressing H.
+    if verbosity == 2 && !item.help.is_empty() {
+        let lang = if CURRENT_FRENCH.load(core::sync::atomic::Ordering::Relaxed) {
+            Lang::Fr
+        } else {
+            Lang::En
+        };
+        aw_mark!("AW_UEFI_SETUP_HELP \"{}\"", item.help);
+        speak_dynamic(&item.help, lang, speaker, pending);
     }
     true
 }
@@ -1747,6 +1765,12 @@ enum Nav {
     /// Raise (`.`) or lower (`,`) the synthesized voice pitch.
     PitchUp,
     PitchDown,
+    /// Cycle the verbosity level (V).
+    Verbosity,
+    /// Cycle the punctuation level (X).
+    Punctuation,
+    /// Read the focused line word by word (O), synthesized.
+    ReadByWord,
     Ignore,
 }
 
@@ -1781,6 +1805,9 @@ fn classify(key: Key) -> Nav {
             '[' => Nav::RateDown,
             '.' | '>' => Nav::PitchUp,
             ',' | '<' => Nav::PitchDown,
+            'v' | 'V' => Nav::Verbosity,
+            'x' | 'X' => Nav::Punctuation,
+            'o' | 'O' => Nav::ReadByWord,
             _ => Nav::Ignore,
         },
         Key::Special(_) => Nav::Ignore,
@@ -1865,6 +1892,10 @@ fn spell_chars(
         if pending.is_some() {
             break;
         }
+        // Honour the punctuation level: at "none" or "some" the quieter symbols are skipped.
+        if !punctuation_spoken(character) {
+            continue;
+        }
         if let Some(clip) = hda::spell_clip(character, french) {
             play(clip, speaker, pending);
         }
@@ -1882,6 +1913,51 @@ fn set_current_lang(lang: Lang) {
         matches!(lang, Lang::Fr),
         core::sync::atomic::Ordering::Relaxed,
     );
+}
+
+/// How much context is spoken around a focused item - the screen-reader "verbosity" a user
+/// tunes to taste. `Low` says the label alone; `Medium` (default) adds the "n of N" position;
+/// `High` also reads the help line automatically on focus.
+static VERBOSITY: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(1);
+/// How much punctuation is spoken when spelling a value - the screen-reader "punctuation level".
+/// 0 = none (letters and digits only), 1 = some (the meaningful separators: dot, dash, colon,
+/// slash, percent), 2 = all (every symbol named). Default 1.
+static PUNCTUATION: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(1);
+
+/// Cycle the verbosity level (Low -> Medium -> High -> Low) and return the new level as a word.
+fn cycle_verbosity(lang: Lang) -> &'static str {
+    let next = (VERBOSITY.load(core::sync::atomic::Ordering::Relaxed) + 1) % 3;
+    VERBOSITY.store(next, core::sync::atomic::Ordering::Relaxed);
+    match next {
+        0 => tx(lang, "concis", "low"),
+        2 => tx(lang, "détaillé", "high"),
+        _ => tx(lang, "moyen", "medium"),
+    }
+}
+
+/// Cycle the punctuation level (none -> some -> all -> none) and return the new level as a word.
+fn cycle_punctuation(lang: Lang) -> &'static str {
+    let next = (PUNCTUATION.load(core::sync::atomic::Ordering::Relaxed) + 1) % 3;
+    PUNCTUATION.store(next, core::sync::atomic::Ordering::Relaxed);
+    match next {
+        0 => tx(lang, "aucune", "none"),
+        2 => tx(lang, "toute", "all"),
+        _ => tx(lang, "partielle", "some"),
+    }
+}
+
+/// Whether the character `c` should be spoken when spelling, at the current punctuation level.
+/// Letters, digits and space are always spoken; punctuation depends on the level.
+fn punctuation_spoken(c: char) -> bool {
+    if c.is_ascii_alphanumeric() || c == ' ' {
+        return true;
+    }
+    match PUNCTUATION.load(core::sync::atomic::Ordering::Relaxed) {
+        0 => false,
+        2 => true,
+        // "some": only the separators that carry meaning in firmware values.
+        _ => matches!(c, '.' | '-' | ':' | '/' | '%'),
+    }
 }
 
 /// The command agent: type a plain instruction ("boot usb", "secure boot", "restart")
@@ -3302,6 +3378,31 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
                     aw_mark!("AW_UEFI_SYNTH_PITCH hz={hz}");
                     sound::cue(CUE_MOVE_HZ, Duration::from_millis(40));
                     speak_dynamic(&format!("{hz}"), lang, speaker, &mut pending);
+                }
+                Nav::Verbosity => {
+                    let level = cycle_verbosity(lang);
+                    aw_mark!("AW_UEFI_VERBOSITY level=\"{level}\"");
+                    sound::cue(CUE_MOVE_HZ, Duration::from_millis(40));
+                    speak_dynamic(level, lang, speaker, &mut pending);
+                }
+                Nav::Punctuation => {
+                    let level = cycle_punctuation(lang);
+                    aw_mark!("AW_UEFI_PUNCTUATION level=\"{level}\"");
+                    sound::cue(CUE_MOVE_HZ, Duration::from_millis(40));
+                    speak_dynamic(level, lang, speaker, &mut pending);
+                }
+                Nav::ReadByWord => {
+                    let frame = *stack.last().unwrap();
+                    let text = tree.screens[frame.screen].items[frame.item].text.clone();
+                    aw_mark!("AW_UEFI_SETUP_READWORD \"{text}\"");
+                    // Read the focused line one word at a time, each synthesized, so a user can
+                    // step a long value or device name word by word. Interruptible (barge-in).
+                    for word in text.split_whitespace() {
+                        if pending.is_some() {
+                            break;
+                        }
+                        speak_dynamic(word, lang, speaker, &mut pending);
+                    }
                 }
                 Nav::Ignore => {}
             }

@@ -58,9 +58,10 @@ exist).
 - **Pre-boot braille** via a USB HID Braille display
   ([HUTRR78](https://usb.org/sites/default/files/hutrr78_-_creation_of_a_braille_display_usage_page_0.pdf));
   `aw-braille` already renders cells at the kernel stage. BRLTTY is post-kernel only.
-- **More screen-reader depth**: read-by-word/line and an independent review cursor, verbosity
-  and punctuation levels, key/character echo. (Adjustable rate/volume/pitch and phonetic
-  Alpha/Bravo spelling are done.)
+- **More screen-reader depth**: an independent review cursor and read-by-line across the whole
+  screen still to come. (Done: adjustable rate/volume/pitch, phonetic Alpha/Bravo spelling,
+  cycled verbosity levels (`V`), punctuation levels (`X`), and read-by-word of the focused line
+  (`O`) - all proven driven from the keyboard under QEMU.)
 - **More real UEFI settings**: *done* — setting the RTC clock (raw `SetTime` from the agent,
   "set time 14:30" / "set date 2026-09-21"), the `Driver####`/`SysPrep####` load lists (read
   and spoken, `AW_UEFI_LOADOPTS`), and richer Secure Boot key/certificate state (PK/KEK/db/dbx)
