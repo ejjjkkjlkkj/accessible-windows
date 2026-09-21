@@ -1,0 +1,71 @@
+name: UEFI Accessibility Platform v2 VoiceCore
+
+on:
+  push:
+    branches:
+      - uefi-realtime-screenreader-20260919
+    paths:
+      - 'boot/uefi-native-speech-v4/**'
+      - 'boot/uefi-accessibility-platform-v2/**'
+      - 'boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
+      - '.github/workflows/uefi-accessibility-platform-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrate-voicecore-v4:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install EFI toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld
+
+      - name: Require VoiceCore v4 quality gates
+        working-directory: boot/uefi-native-speech-v4
+        run: python3 test_voicecore_v4.py
+
+      - name: Generate full VoiceCore v4 HII letter bank
+        run: |
+          out=boot/uefi-accessibility-platform-v2
+          python3 "$out/generate_hii_voicecore_v4.py" "$out/speech_units.c" "$out/voicecore-v4-hii-metadata.txt"
+          grep -Fx 'dma-capacity-check = PASS' "$out/voicecore-v4-hii-metadata.txt"
+          grep -Fx 'speech-engine = VoiceCore v4' "$out/voicecore-v4-hii-metadata.txt"
+
+      - name: Build integrated live-HII VoiceCore EFI twice
+        run: |
+          set -euo pipefail
+          src=boot/uefi-hii-graph-prompt-speech-v1
+          out=boot/uefi-accessibility-platform-v2
+          flags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+
+          clang $flags -DQEV_INTERACTIVE_NAV=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main.obj"
+          clang $flags -c "$out/speech_units.c" -o "$out/units.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$out/ACCESSIBLE-UEFI-VOICECORE-V4.EFI" "$out/main.obj" "$out/units.obj"
+
+          test -s "$out/ACCESSIBLE-UEFI-VOICECORE-V4.EFI"
+          for marker in             'HII_GRAPH_NAV_READY=PASS'             'HII_GRAPH_NAV_KEY=UP'             'HII_GRAPH_NAV_KEY=DOWN'             'HII_GRAPH_NAV_KEY=HOME'             'HII_GRAPH_NAV_KEY=END'             'HII_GRAPH_NAV_KEY=PAGE_UP'             'HII_GRAPH_NAV_KEY=PAGE_DOWN'             'HII_GRAPH_NAV_KEY=R'             'HII_GRAPH_NAV_KEY=ESC'             'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS'             'HII_GRAPH_NAV_SPEECH_DMA=PASS'             'HII_GRAPH_SPEECH_DMA_REUSE=PASS'             'HII_GRAPH_SPEECH_LONG_LABEL_CAPACITY=PASS'             'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS'
+          do
+            grep -aF "$marker" "$out/ACCESSIBLE-UEFI-VOICECORE-V4.EFI"
+          done
+
+          clang $flags -DQEV_INTERACTIVE_NAV=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main-2.obj"
+          clang $flags -c "$out/speech_units.c" -o "$out/units-2.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$out/ACCESSIBLE-UEFI-VOICECORE-V4-2.EFI" "$out/main-2.obj" "$out/units-2.obj"
+          cmp "$out/ACCESSIBLE-UEFI-VOICECORE-V4.EFI" "$out/ACCESSIBLE-UEFI-VOICECORE-V4-2.EFI"
+          sha256sum "$out/ACCESSIBLE-UEFI-VOICECORE-V4.EFI"
+
+          echo UEFI_ACCESSIBILITY_PLATFORM_V2_BUILD=PASS
+          echo LIVE_HII_TO_VOICECORE_V4_TO_HDA=PASS
+          echo UEFI_ACCESSIBILITY_PLATFORM_V2_DETERMINISM=PASS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefi-accessibility-platform-v2-voicecore-v4
+          path: |
+            boot/uefi-accessibility-platform-v2/ACCESSIBLE-UEFI-VOICECORE-V4.EFI
+            boot/uefi-accessibility-platform-v2/voicecore-v4-hii-metadata.txt
