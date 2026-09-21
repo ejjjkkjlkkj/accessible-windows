@@ -1,0 +1,19 @@
+OS-UEFI-USB-AUDIO-BASELINE-V1
+role = prove the exact pre-OS USB Audio isochronous baseline before custom xHCI work
+target = OVMF + QEMU qemu-xhci + QEMU USB Audio
+target-usb-vendor = 0x46f4
+target-usb-product = 0x0002
+target-stream = interface 1 alternate setting 1
+target-endpoint = 0x01 OUT
+target-format = 48000 Hz signed 16-bit stereo
+target-packet = 192 bytes per 1 ms frame
+protocol = EFI_USB_IO_PROTOCOL
+expected-edk2-xhci-result = EFI_UNSUPPORTED
+success-classification = either firmware isochronous PASS or explicit EFI_UNSUPPORTED baseline
+claim = this gate does not claim custom xHCI streaming yet
+claim = EFI_UNSUPPORTED establishes the exact gap the custom xHCI isochronous path must close
+claim = EFI_SUCCESS would prove the custom takeover is unnecessary on that tested firmware
+physical-usb-audio = not-established
+custom-xhci-isochronous = not-established
+continuous-usb-audio-stream = not-established
+proof = pending
