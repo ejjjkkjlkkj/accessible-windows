@@ -52,15 +52,26 @@ exist).
   control and TX split virtqueues, and streams PCM through the virtio-snd handshake; proven on
   QEMU (`-device virtio-sound-pci`), where `AW_UEFI_AUDIO_BACKEND channel=virtio` and the boot
   clips play as `AW_UEFI_VIRTIO_SND_PLAY`, captured to WAV. USB Audio Class remains (thin
-  laptops / dongles), which needs a USB host stack. Tracks the still-unstandardized UEFI audio
+  laptops / dongles): unlike braille (control transfers, which the firmware's `UsbIo` carries),
+  audio streaming is *isochronous*, which `UsbIo` does not reliably expose, so a UAC backend
+  needs a dedicated XHCI host-controller driver with isochronous support - the one genuinely
+  large piece still outstanding. `usb.rs` already detects and reports a UAC device
+  (`AW_UEFI_USB_SUMMARY audio=...`). Tracks the still-unstandardized UEFI audio
   work (no audio output protocol in the UEFI spec as of 2.11, Dec 2024; see the GSoC effort and
   [tait.tech/blog/uefi-audio](https://tait.tech/blog/uefi-audio/)).
 - **HII integration** — voice the firmware's *own* setup forms via the Human Interface
   Infrastructure ([UEFI 2.11 ch. 33](https://uefi.org/specs/UEFI/2.11/33_Human_Interface_Infrastructure.html)),
   so settings only the firmware owns (SATA mode, XMP, CSM, passwords, TPM) become spoken.
 - **Pre-boot braille** via a USB HID Braille display
-  ([HUTRR78](https://usb.org/sites/default/files/hutrr78_-_creation_of_a_braille_display_usage_page_0.pdf));
-  `aw-braille` already renders cells at the kernel stage. BRLTTY is post-kernel only.
+  ([HUTRR78](https://usb.org/sites/default/files/hutrr78_-_creation_of_a_braille_display_usage_page_0.pdf))
+  — *built* (`boot/uefi/src/usb.rs`). Rather than write an XHCI driver, it uses the firmware's
+  own USB stack through `EFI_USB_IO_PROTOCOL` (alive during boot services), enumerates every USB
+  device, detects a braille display by the Braille usage page in its HID report descriptor, and
+  sends `aw-braille` cells as a HID output report. The enumeration and discriminating detection
+  are proven on QEMU (`AW_UEFI_USB_DEVICE`/`AW_UEFI_USB_SUMMARY`: a USB keyboard and mouse are
+  enumerated and correctly classified `braille=false`); the cell send is exercised on a real
+  display (QEMU emulates only a Baum *serial* display, a different transport). BRLTTY is
+  post-kernel only.
 - **More screen-reader depth**: an independent review cursor and read-by-line across the whole
   screen still to come. (Done: adjustable rate/volume/pitch, phonetic Alpha/Bravo spelling,
   cycled verbosity levels (`V`), punctuation levels (`X`), and read-by-word of the focused line

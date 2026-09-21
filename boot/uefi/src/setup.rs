@@ -2205,6 +2205,23 @@ fn dispatch_agent(
         return;
     }
 
+    // Show text on a connected HID braille display: "braille <text>" (or the machine summary
+    // when no text is given). For a deaf-blind user, the one output that reaches them.
+    if has("braille") {
+        let text = cmd
+            .split_once("braille")
+            .map(|(_, rest)| rest.trim())
+            .filter(|rest| !rest.is_empty())
+            .map(String::from)
+            .unwrap_or_else(|| format!("{} MiB", installed_memory_mib()));
+        match crate::usb::find_braille() {
+            Some(display) if display.show(&text) => play(ag(hda::AGENT_DONE), speaker, pending),
+            Some(_) => play(ag(hda::AGENT_FAILED), speaker, pending),
+            None => play(ag(hda::AGENT_NO_MATCH), speaker, pending),
+        }
+        return;
+    }
+
     // The firmware clock: time and date. ("timeout" was already handled above.)
     if has("time") || has("heure") || has("date") || has("clock") || has("horloge") {
         if let Ok(t) = runtime::get_time() {
@@ -2960,6 +2977,16 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
         enumerate_load_options(cstr16!("DriverOrder"), 'D').len(),
         enumerate_load_options(cstr16!("SysPrepOrder"), 'S').len(),
     );
+
+    // Enumerate USB devices through the firmware's own host stack and report what is present -
+    // proving USB accessibility hardware is reachable pre-OS. If a HID braille display is found,
+    // mirror the setup's opening line to it, so a deaf-blind user feels that the firmware is up.
+    let braille = crate::usb::find_braille();
+    if crate::usb::report_devices()
+        && let Some(display) = &braille
+    {
+        display.show("Accessible Windows firmware setup");
+    }
 
     // Prove the runtime formant synthesizer runs on this firmware: synthesize a fixed phrase
     // (in soft-float, before any OS) and report the PCM it produced. A non-zero byte count is
