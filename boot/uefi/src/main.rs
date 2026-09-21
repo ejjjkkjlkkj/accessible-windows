@@ -30,6 +30,7 @@ mod synth;
 mod usb;
 mod usb_audio;
 mod virtio_snd;
+mod word_bank;
 
 /// Emit an accessibility marker to both the 0xE9 debug console (via the `uefi`
 /// logger, which the QEMU proof suite asserts on) and the real COM1 line (which

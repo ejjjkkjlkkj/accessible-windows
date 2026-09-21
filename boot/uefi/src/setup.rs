@@ -1864,28 +1864,88 @@ fn speak_dynamic(
     pending: &mut Option<Key>,
 ) {
     let french = matches!(lang, Lang::Fr);
-    if speaker.is_some()
-        && pending.is_none()
-        && let Some(sp) = speaker.as_mut()
-    {
-        let pcm = crate::synth::say(text, french);
-        if !pcm.is_empty() {
-            aw_mark!("AW_UEFI_SYNTH_SPEAK bytes={} \"{text}\"", pcm.len());
-            let mut hit: Option<Key> = None;
-            sp.speak_until(&pcm, || {
-                if hit.is_none() {
-                    hit = read_key_raw();
-                }
-                hit.is_some()
-            });
-            if hit.is_some() {
-                *pending = hit;
+    // No codec or a queued key: spell it (the always-available fallback).
+    if speaker.is_none() || pending.is_some() {
+        spell_chars(text, french, speaker, pending);
+        return;
+    }
+    aw_mark!("AW_UEFI_SPEAK \"{text}\"");
+    // Word by word: a premium real-voice clip from the word bank where the word is known, the
+    // formant synthesizer only where it is not. This is what makes dynamic values sound native.
+    for token in text.split_whitespace() {
+        if pending.is_some() {
+            break;
+        }
+        speak_token(token, french, speaker, pending);
+    }
+}
+
+/// Play a raw PCM buffer (a bank clip or a synthesized word) with barge-in: a key pressed while
+/// it plays is stashed in `pending` so the caller acts on it instead of talking over it.
+fn play_bytes(pcm: &[u8], speaker: &mut Option<audio::Speaker>, pending: &mut Option<Key>) {
+    if pending.is_some() || pcm.is_empty() {
+        return;
+    }
+    if let Some(sp) = speaker.as_mut() {
+        let mut hit: Option<Key> = None;
+        sp.speak_until(pcm, || {
+            if hit.is_none() {
+                hit = read_key_raw();
             }
-            return;
+            hit.is_some()
+        });
+        if hit.is_some() {
+            *pending = hit;
         }
     }
-    // No codec, a queued key, or nothing to synthesize: spell it instead.
-    spell_chars(text, french, speaker, pending);
+}
+
+/// Speak one whitespace-delimited token: a number as its word atoms (each a bank clip), or a word
+/// as its bank clip, falling back to the formant synthesizer and then to spelling.
+fn speak_token(
+    token: &str,
+    french: bool,
+    speaker: &mut Option<audio::Speaker>,
+    pending: &mut Option<Key>,
+) {
+    let core = token.trim_matches(|c: char| !c.is_alphanumeric());
+    if !core.is_empty() && core.chars().all(|c| c.is_ascii_digit()) {
+        for word in crate::word_bank::number_atoms(core, french) {
+            if pending.is_some() {
+                break;
+            }
+            speak_word(word, french, speaker, pending);
+        }
+        return;
+    }
+    let key = core.to_lowercase();
+    if let Some(clip) = crate::word_bank::clip_for(&key, french) {
+        play_bytes(clip, speaker, pending);
+    } else {
+        // Not in the bank: synthesize the original token (it keeps any internal punctuation),
+        // and spell it only if synthesis yields nothing.
+        let pcm = crate::synth::say(token, french);
+        if pcm.is_empty() {
+            spell_chars(token, french, speaker, pending);
+        } else {
+            play_bytes(&pcm, speaker, pending);
+        }
+    }
+}
+
+/// Speak one already-clean word (a number atom): its bank clip, or the synthesizer if absent.
+fn speak_word(
+    word: &str,
+    french: bool,
+    speaker: &mut Option<audio::Speaker>,
+    pending: &mut Option<Key>,
+) {
+    if let Some(clip) = crate::word_bank::clip_for(word, french) {
+        play_bytes(clip, speaker, pending);
+    } else {
+        let pcm = crate::synth::say(word, french);
+        play_bytes(&pcm, speaker, pending);
+    }
 }
 
 /// Play one clip per character of `text`, honouring phonetic mode and language, and
