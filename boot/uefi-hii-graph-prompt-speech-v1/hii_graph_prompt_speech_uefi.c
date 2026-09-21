@@ -150,18 +150,19 @@ static const efi_guid g_simple_fs_guid =
 
 static u8 g_hii_package[1024u * 1024u];
 static void *g_hii_handles[256];
-static char g_prompt_text[33];
+#define MAX_HII_PROMPT_CHARS 64u
+static char g_prompt_text[MAX_HII_PROMPT_CHARS + 1u];
 static u32 g_prompt_count;
 
 #ifdef QEV_INTERACTIVE_NAV
 #define MAX_HII_NAV_PROMPTS 32
-static char g_nav_prompts[MAX_HII_NAV_PROMPTS][33];
+static char g_nav_prompts[MAX_HII_NAV_PROMPTS][MAX_HII_PROMPT_CHARS + 1u];
 static u8 g_nav_prompt_lengths[MAX_HII_NAV_PROMPTS];
 static u8 g_nav_prompt_opcodes[MAX_HII_NAV_PROMPTS];
 static u8 g_nav_prompt_total;
 static u8 g_nav_prompt_index;
 static u8 g_nav_prompt_opcode;
-static char g_nav_speech_text[33];
+static char g_nav_speech_text[MAX_HII_PROMPT_CHARS + 1u];
 static u8 g_nav_speech_length;
 static u8 g_nav_event_mask;
 static u8 g_nav_speech_events;
@@ -794,7 +795,7 @@ static void speech_dma_stop(void) {
 }
 
 static int speech_dma_begin(const char *text, u32 text_count) {
-    if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 32u) return 0;
+    if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > MAX_HII_PROMPT_CHARS) return 0;
     const u32 pcm_off = 0x1000u;
     const u32 dma_pages = 1536u;
     const u32 dma_bytes = dma_pages * 4096u;
@@ -1054,12 +1055,12 @@ static u16 fold_prompt_char(u16 ch) {
 static int normalize_prompt(const u16 *text, char *out, u32 *count_out) {
     u32 n = 0;
     u8 pending_space = 0;
-    for (u32 i = 0; i < 127u && text[i] && n < 32u; ++i) {
+    for (u32 i = 0; i < 127u && text[i] && n < MAX_HII_PROMPT_CHARS; ++i) {
         u16 ch = fold_prompt_char(text[i]);
         if ((ch >= (u16)'a' && ch <= (u16)'z') ||
             (ch >= (u16)'0' && ch <= (u16)'9')) {
-            if (pending_space && n && n < 32u) out[n++] = ' ';
-            if (n < 32u) out[n++] = (char)ch;
+            if (pending_space && n && n < MAX_HII_PROMPT_CHARS) out[n++] = ' ';
+            if (n < MAX_HII_PROMPT_CHARS) out[n++] = (char)ch;
             pending_space = 0;
         } else if (n) {
             pending_space = 1;
@@ -1090,7 +1091,7 @@ static int get_hii_string(hii_string_protocol *str, void *handle, u16 token, cha
 
 #ifdef QEV_INTERACTIVE_NAV
 static int nav_prompt_add(u8 opcode, const char *text, u32 count) {
-    if (!text || !count || count > 32u) return 0;
+    if (!text || !count || count > MAX_HII_PROMPT_CHARS) return 0;
     for (u8 i = 0; i < g_nav_prompt_total; ++i) {
         if (g_nav_prompt_lengths[i] != (u8)count ||
             g_nav_prompt_opcodes[i] != opcode) continue;
@@ -1121,9 +1122,9 @@ static void nav_prompt_load(u8 index) {
        Put the IFR role first so it can never be truncated away. */
     const char *role = ifr_semantic_role(g_nav_prompt_opcode);
     u32 n = 0;
-    while (*role && n < 32u) g_nav_speech_text[n++] = *role++;
-    if (n < 32u && g_prompt_count) g_nav_speech_text[n++] = ' ';
-    for (u32 j = 0; j < g_prompt_count && n < 32u; ++j)
+    while (*role && n < MAX_HII_PROMPT_CHARS) g_nav_speech_text[n++] = *role++;
+    if (n < MAX_HII_PROMPT_CHARS && g_prompt_count) g_nav_speech_text[n++] = ' ';
+    for (u32 j = 0; j < g_prompt_count && n < MAX_HII_PROMPT_CHARS; ++j)
         g_nav_speech_text[n++] = g_prompt_text[j];
     g_nav_speech_text[n] = 0;
     g_nav_speech_length = (u8)n;
@@ -1184,7 +1185,7 @@ static int resolve_hii_prompt(void *system_table) {
                     if (prompt_opcode(op) && oplen >= 4u) {
                         u16 token = rd16(q + 2);
 #ifdef QEV_INTERACTIVE_NAV
-                        char candidate[33];
+                        char candidate[MAX_HII_PROMPT_CHARS + 1u];
                         u32 candidate_count = 0;
                         if (token && get_hii_string(str, handle, token, candidate, &candidate_count)) {
                             nav_prompt_add(op, candidate, candidate_count);
@@ -1672,7 +1673,7 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3");
     marker("VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4");
     marker("HII_GRAPH_DIGIT_SPEECH=PASS");
-    marker("HII_PROMPT_MAX_CHARS=32");
+    marker("HII_PROMPT_MAX_CHARS=64");
     marker("HII_PROMPT_WORD_BOUNDARIES=PASS");
     marker("BDL_RUNTIME_TEXT_SCHEDULE=PASS");
 
