@@ -26,9 +26,10 @@
 //! Honest scope: a compact formant synthesizer is intelligible, not natural - it sounds
 //! robotic, like early DECtalk. That is the right trade at the firmware stage, where the goal
 //! is that a blind user can *understand* a device name or value they otherwise could not hear
-//! at all. English grapheme rules drive the word path; French dynamic text (rare - values are
-//! mostly digits and Latin model strings) is spoken through the same engine with French letter
-//! and number names.
+//! at all. English grapheme rules drive the word path in English; in French, a full French
+//! grapheme-to-phoneme frontend and phoneme inventory - nasal vowels and all - ported from the
+//! Sintaise UEFI TTS drive it instead, so the setup's French labels and values are pronounced,
+//! not spelled.
 
 extern crate alloc;
 
@@ -140,6 +141,22 @@ enum Ph {
     D,
     K,
     G,
+    // French-specific phonemes, so French dynamic text is pronounced rather than spelled. The
+    // French frontend and this inventory are ported from the Sintaise UEFI TTS (a companion
+    // French formant synthesizer): the oral vowels /a e o y ø œ ə/, the four nasal vowels, and
+    // the palatal nasal. French /ɛ ɔ i u/ reuse the close English vowels above (Eh, Ao, Iy, Uw).
+    FrA,      // /a/ - central, as in "patte"
+    FrEClose, // /e/ - "été"
+    FrOClose, // /o/ - "beau"
+    FrY,      // /y/ - "tu" (front rounded)
+    Eu,       // /ø/ - "deux"
+    EuOpen,   // /œ/ - "neuf"
+    Schwa,    // /ə/ - "le"
+    Nan,      // /ɑ̃/ - "an"
+    Non,      // /ɔ̃/ - "on"
+    Nin,      // /ɛ̃/ - "in"
+    Nun,      // /œ̃/ - "un"
+    Ny,       // /ɲ/ - "gn"
     // A short pause (word/segment boundary).
     Pause,
 }
@@ -310,6 +327,20 @@ fn targets_for(ph: Ph, out: &mut Vec<Target>) {
             out.push(Target::voiced(200.0, 2000.0, 2500.0, 0.2, 45.0));
             out.push(Target::fric(2000.0, 1400.0, 0.0, 0.45, 12.0));
         }
+        // French oral vowels (classic French formant centres). Nasal vowels carry a slightly
+        // lower amplitude to hint the nasal murmur, the same cue the nasal consonants use.
+        Ph::FrA => out.push(Target::voiced(750.0, 1350.0, 2500.0, AV, 120.0)),
+        Ph::FrEClose => out.push(Target::voiced(400.0, 2100.0, 2600.0, AV, 110.0)),
+        Ph::FrOClose => out.push(Target::voiced(400.0, 800.0, 2600.0, AV, 120.0)),
+        Ph::FrY => out.push(Target::voiced(300.0, 1800.0, 2200.0, AV, 120.0)),
+        Ph::Eu => out.push(Target::voiced(400.0, 1500.0, 2300.0, AV, 120.0)),
+        Ph::EuOpen => out.push(Target::voiced(560.0, 1500.0, 2400.0, AV, 110.0)),
+        Ph::Schwa => out.push(Target::voiced(500.0, 1500.0, 2500.0, 0.9, 90.0)),
+        Ph::Nan => out.push(Target::voiced(650.0, 1000.0, 2500.0, 0.85, 130.0)),
+        Ph::Non => out.push(Target::voiced(450.0, 900.0, 2500.0, 0.85, 130.0)),
+        Ph::Nin => out.push(Target::voiced(560.0, 1600.0, 2500.0, 0.85, 130.0)),
+        Ph::Nun => out.push(Target::voiced(500.0, 1400.0, 2400.0, 0.85, 130.0)),
+        Ph::Ny => out.push(Target::voiced(300.0, 1900.0, 2600.0, 0.7, 90.0)),
         Ph::Pause => out.push(Target::silence(70.0)),
     }
 }
@@ -443,6 +474,12 @@ fn number_phones(digits: &str, french: bool, out: &mut Vec<Ph>) {
 /// Append the phonemes that name `value` (0..=9999) as words, in English or French - the form
 /// a firmware size, count or resolution is naturally spoken in.
 fn number_words(value: u64, french: bool, out: &mut Vec<Ph>) {
+    if french {
+        // French number formation is irregular enough (soixante-dix, quatre-vingts) that it has
+        // its own path, ported from the Sintaise French frontend.
+        number_words_fr(value, out);
+        return;
+    }
     let digit = |d: u8, out: &mut Vec<Ph>| {
         out.extend_from_slice(if french { digit_fr(d) } else { digit_en(d) });
     };
@@ -576,6 +613,8 @@ fn phones(text: &str, french: bool) -> Vec<Ph> {
                     out.push(Ph::Pause);
                 }
             }
+        } else if french {
+            word_phones_fr(token, &mut out);
         } else {
             word_phones(token, french, &mut out);
         }
@@ -811,6 +850,325 @@ fn word_phones(word: &str, french: bool, out: &mut Vec<Ph>) {
             i += 1;
         }
         i += 1;
+    }
+}
+
+/// Whether `c` is a French vowel letter (including the accented forms).
+fn is_vowel_fr(c: char) -> bool {
+    matches!(
+        c,
+        'a' | 'e'
+            | 'i'
+            | 'o'
+            | 'u'
+            | 'y'
+            | 'à'
+            | 'â'
+            | 'é'
+            | 'è'
+            | 'ê'
+            | 'ë'
+            | 'î'
+            | 'ï'
+            | 'ô'
+            | 'ù'
+            | 'û'
+            | 'œ'
+    )
+}
+
+/// French grapheme-to-phoneme, ported from the Sintaise UEFI TTS French frontend. It handles the
+/// French digraphs and trigraphs (eau, oi, ou, au, ai, eu, tion, sion, gn, ill, ...), nasal
+/// vowels in context, the accented letters, and a small exceptions lexicon for very frequent
+/// words, so French dynamic text is pronounced as words rather than spelled. Prosody and
+/// cross-word liaison from the original are omitted (this synth voices one token at a time).
+fn word_phones_fr(word: &str, out: &mut Vec<Ph>) {
+    use Ph::*;
+    let chars: Vec<char> = word.chars().flat_map(char::to_lowercase).collect();
+    let n = chars.len();
+    if n == 0 {
+        return;
+    }
+    let at = |i: usize| chars.get(i).copied().unwrap_or('\0');
+    // Match the ASCII pattern `s` at position `i`.
+    let m = |i: usize, s: &str| s.bytes().enumerate().all(|(k, b)| at(i + k) == b as char);
+    let ends = |i: usize, s: &str| m(i, s) && i + s.len() == n;
+    // A following consonant (or end of word) makes a preceding vowel+n/m nasal; a following
+    // vowel or a doubled n/m does not.
+    let nasal = |i: usize, consumed: usize| -> bool {
+        let j = i + consumed;
+        if j >= n {
+            return true;
+        }
+        let c = chars[j];
+        c != 'n' && c != 'm' && !is_vowel_fr(c)
+    };
+
+    // A small lexicon of very frequent words the graphical rules get wrong.
+    let whole: String = chars.iter().collect();
+    match whole.as_str() {
+        "et" => {
+            out.push(FrEClose);
+            return;
+        }
+        "six" | "dix" => {
+            out.extend_from_slice(&[if whole == "six" { S } else { D }, Iy, S]);
+            return;
+        }
+        "sept" => {
+            out.extend_from_slice(&[S, Eh, T]);
+            return;
+        }
+        "huit" => {
+            out.extend_from_slice(&[FrY, Iy, T]);
+            return;
+        }
+        "neuf" => {
+            out.extend_from_slice(&[N, EuOpen, F]);
+            return;
+        }
+        "mille" | "ville" => {
+            out.extend_from_slice(&[if whole == "mille" { M } else { V }, Iy, L]);
+            return;
+        }
+        "soixante" => {
+            out.extend_from_slice(&[S, W, FrA, S, Nan, T]);
+            return;
+        }
+        "windows" => {
+            out.extend_from_slice(&[W, Nin, D, FrOClose, Z]);
+            return;
+        }
+        "firmware" => {
+            out.extend_from_slice(&[F, Iy, R, M, W, Eh, R]);
+            return;
+        }
+        _ => {}
+    }
+
+    let mut i = 0;
+    while i < n {
+        let (c, d, e) = (at(i), at(i + 1), at(i + 2));
+        if m(i, "eaux") {
+            out.push(FrOClose);
+            i += 4;
+        } else if m(i, "eau") {
+            out.push(FrOClose);
+            i += 3;
+        } else if m(i, "tion") {
+            out.extend_from_slice(&[S, Y, Non]);
+            i += 4;
+        } else if m(i, "sion") {
+            out.extend_from_slice(&[Z, Y, Non]);
+            i += 4;
+        } else if m(i, "oin") && nasal(i, 3) {
+            out.extend_from_slice(&[W, Nin]);
+            i += 3;
+        } else if m(i, "ien") && nasal(i, 3) {
+            out.extend_from_slice(&[Y, Nin]);
+            i += 3;
+        } else if (m(i, "ain") || m(i, "ein")) && nasal(i, 3) {
+            out.push(Nin);
+            i += 3;
+        } else if m(i, "sch") {
+            out.push(Sh);
+            i += 3;
+        } else if c == 'c' && d == 'h' {
+            out.push(Sh);
+            i += 2;
+        } else if c == 'p' && d == 'h' {
+            out.push(F);
+            i += 2;
+        } else if c == 't' && d == 'h' {
+            out.push(T);
+            i += 2;
+        } else if c == 'g' && d == 'n' {
+            out.push(Ny);
+            i += 2;
+        } else if c == 'n' && d == 'g' {
+            out.push(Ng);
+            i += 2;
+        } else if c == 'q' && d == 'u' {
+            out.push(K);
+            i += 2;
+        } else if c == 'g' && d == 'u' && matches!(e, 'e' | 'i' | 'y') {
+            out.push(G);
+            i += 2;
+        } else if c == 'o' && d == 'i' {
+            out.extend_from_slice(&[W, FrA]);
+            i += 2;
+        } else if c == 'o' && d == 'u' {
+            out.push(Uw);
+            i += 2;
+        } else if c == 'a' && d == 'u' {
+            out.push(FrOClose);
+            i += 2;
+        } else if matches!(c, 'a' | 'e' | 'o' | 'i' | 'y' | 'u')
+            && matches!(d, 'n' | 'm')
+            && nasal(i, 2)
+        {
+            out.push(match c {
+                'a' | 'e' => Nan,
+                'o' => Non,
+                'u' => Nun,
+                _ => Nin,
+            });
+            i += 2;
+        } else if (c == 'a' || c == 'e') && d == 'i' {
+            out.push(Eh);
+            i += 2;
+        } else if c == 'e' && d == 'u' {
+            out.push(Eu);
+            i += 2;
+        } else if c == 'œ' && d == 'u' {
+            out.push(EuOpen);
+            i += 2;
+        } else if c == 'i' && d == 'l' && e == 'l' {
+            out.push(Y);
+            i += 3;
+        } else if ends(i, "er") || ends(i, "ez") {
+            out.push(FrEClose);
+            i += 2;
+        } else if i + 1 == n && matches!(c, 'e' | 's' | 'x' | 'z' | 'd' | 't' | 'p' | 'g') {
+            // A silent final consonant (or mute e): common in French.
+            i += 1;
+        } else if c == 'h' {
+            i += 1;
+        } else {
+            match c {
+                'a' | 'à' | 'â' => out.push(FrA),
+                'é' => out.push(FrEClose),
+                'e' | 'è' | 'ê' | 'ë' => out.push(if i + 1 == n { Schwa } else { Eh }),
+                'i' | 'î' | 'ï' => out.push(Iy),
+                'o' | 'ô' => out.push(Ao),
+                'u' | 'ù' | 'û' => out.push(FrY),
+                'y' => out.push(if i > 0 && is_vowel_fr(at(i - 1)) && is_vowel_fr(d) {
+                    Y
+                } else {
+                    Iy
+                }),
+                'b' => out.push(B),
+                'd' => out.push(D),
+                'f' => out.push(F),
+                'g' => out.push(if matches!(d, 'e' | 'i' | 'y') { Zh } else { G }),
+                'j' => out.push(Zh),
+                'k' | 'q' => out.push(K),
+                'c' | 'ç' => out.push(if c == 'ç' || matches!(d, 'e' | 'i' | 'y') {
+                    S
+                } else {
+                    K
+                }),
+                'l' => out.push(L),
+                'm' => out.push(M),
+                'n' => out.push(N),
+                'p' => out.push(P),
+                'r' => out.push(R),
+                's' => out.push(if i > 0 && is_vowel_fr(at(i - 1)) && is_vowel_fr(d) {
+                    Z
+                } else {
+                    S
+                }),
+                't' => out.push(T),
+                'v' => out.push(V),
+                'w' => out.push(W),
+                'z' => out.push(Z),
+                'x' => out.extend_from_slice(&[K, S]),
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+}
+
+/// French number-to-words (0..=9999), ported from the Sintaise frontend, then voiced through the
+/// French grapheme rules so the irregular forms (soixante-dix, quatre-vingts) come out right.
+fn number_words_fr(value: u64, out: &mut Vec<Ph>) {
+    if value == 0 {
+        word_phones_fr("zéro", out);
+        return;
+    }
+    let mut v = value;
+    if v >= 1000 {
+        let thousands = v / 1000;
+        if thousands > 1 {
+            number_under_1000_fr(thousands, out);
+            out.push(Ph::Pause);
+        }
+        word_phones_fr("mille", out);
+        out.push(Ph::Pause);
+        v %= 1000;
+    }
+    if v > 0 {
+        number_under_1000_fr(v, out);
+    }
+}
+
+fn number_under_1000_fr(value: u64, out: &mut Vec<Ph>) {
+    let mut v = value;
+    if v >= 100 {
+        let hundreds = v / 100;
+        if hundreds > 1 {
+            number_under_100_fr(hundreds, out);
+            out.push(Ph::Pause);
+        }
+        word_phones_fr("cent", out);
+        out.push(Ph::Pause);
+        v %= 100;
+    }
+    if v > 0 {
+        number_under_100_fr(v, out);
+    }
+}
+
+fn number_under_100_fr(value: u64, out: &mut Vec<Ph>) {
+    const ONES: [&str; 10] = [
+        "zéro", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf",
+    ];
+    const TEENS: [&str; 7] = [
+        "dix", "onze", "douze", "treize", "quatorze", "quinze", "seize",
+    ];
+    const TENS: [&str; 7] = [
+        "",
+        "",
+        "vingt",
+        "trente",
+        "quarante",
+        "cinquante",
+        "soixante",
+    ];
+    let w = |s: &str, out: &mut Vec<Ph>| {
+        word_phones_fr(s, out);
+        out.push(Ph::Pause);
+    };
+    let v = value as usize;
+    if v < 10 {
+        word_phones_fr(ONES[v], out);
+    } else if v <= 16 {
+        word_phones_fr(TEENS[v - 10], out);
+    } else if v < 20 {
+        w("dix", out);
+        word_phones_fr(ONES[v - 10], out);
+    } else if v < 70 {
+        let unit = v % 10;
+        w(TENS[v / 10], out);
+        if unit == 1 {
+            w("et", out);
+        }
+        if unit != 0 {
+            word_phones_fr(ONES[unit], out);
+        }
+    } else if v < 80 {
+        w("soixante", out);
+        if v == 71 {
+            w("et", out);
+        }
+        number_under_100_fr((v - 60) as u64, out);
+    } else {
+        w("quatre", out);
+        w("vingt", out);
+        if v > 80 {
+            number_under_100_fr((v - 80) as u64, out);
+        }
     }
 }
 
