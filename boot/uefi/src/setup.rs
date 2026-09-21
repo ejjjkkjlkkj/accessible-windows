@@ -1921,8 +1921,12 @@ fn speak_token(
     let key = core.to_lowercase();
     if let Some(clip) = crate::word_bank::clip_for(&key, french) {
         play_bytes(clip, speaker, pending);
+    } else if is_acronym(core) {
+        // An acronym (USB, EFI, QEMU): spell it with the premium recorded letter clips rather
+        // than the formant synthesizer, so it stays in the real voice.
+        spell_chars(core, french, speaker, pending);
     } else {
-        // Not in the bank: synthesize the original token (it keeps any internal punctuation),
+        // An unknown word: synthesize the original token (it keeps any internal punctuation),
         // and spell it only if synthesis yields nothing.
         let pcm = crate::synth::say(token, french);
         if pcm.is_empty() {
@@ -1931,6 +1935,16 @@ fn speak_token(
             play_bytes(&pcm, speaker, pending);
         }
     }
+}
+
+/// Whether a token is a short all-upper-case acronym worth spelling in the real letter voice.
+fn is_acronym(token: &str) -> bool {
+    let letters = token.chars().filter(|c| c.is_ascii_alphabetic()).count();
+    (2..=6).contains(&letters)
+        && token
+            .chars()
+            .filter(|c| c.is_ascii_alphabetic())
+            .all(|c| c.is_ascii_uppercase())
 }
 
 /// Speak one already-clean word (a number atom): its bank clip, or the synthesizer if absent.
