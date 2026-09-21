@@ -61,8 +61,10 @@ exist).
 - **More screen-reader depth**: read-by-word/line and an independent review cursor, verbosity
   and punctuation levels, key/character echo. (Adjustable rate/volume/pitch and phonetic
   Alpha/Bravo spelling are done.)
-- **More real UEFI settings**: set the RTC clock, `Driver####`/`SysPrep####` lists. (Richer
-  Secure Boot key/certificate state PK/KEK/db/dbx and TPM presence are done.)
+- **More real UEFI settings**: *done* — setting the RTC clock (raw `SetTime` from the agent,
+  "set time 14:30" / "set date 2026-09-21"), the `Driver####`/`SysPrep####` load lists (read
+  and spoken, `AW_UEFI_LOADOPTS`), and richer Secure Boot key/certificate state (PK/KEK/db/dbx)
+  and TPM presence.
 
 ## Standards framing
 

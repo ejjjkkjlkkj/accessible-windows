@@ -2061,6 +2061,74 @@ fn dispatch_agent(
         return;
     }
 
+    // Set the real-time clock: "set time 14:30", "set date 2026-09-21", "regler l'heure".
+    // Checked before the read branch so a change request is not swallowed as a query, and
+    // confirmed first because it writes the hardware clock.
+    if (has("set") || has("regl") || has("mettre") || has("change") || has("chang"))
+        && (has("time") || has("heure") || has("date") || has("clock") || has("horloge"))
+    {
+        let (date, time) = parse_clock(cmd);
+        if date.is_none() && time.is_none() {
+            play(ag(hda::AGENT_UNKNOWN), speaker, pending);
+            return;
+        }
+        let (y, mo, d) = date.map_or((None, None, None), |(y, mo, d)| {
+            (Some(y), Some(mo), Some(d))
+        });
+        let (h, mi, s) = time.map_or((None, None, None), |(h, mi, s)| (Some(h), Some(mi), s));
+        aw_mark!("AW_UEFI_AGENT_SETCLOCK");
+        if confirm(lang, speaker, pending) {
+            if set_rtc(y, mo, d, h, mi, s) {
+                play(ag(hda::AGENT_DONE), speaker, pending);
+                if let Ok(t) = runtime::get_time() {
+                    speak_dynamic(
+                        &format!(
+                            "{:04}-{:02}-{:02} {:02}:{:02}",
+                            t.year(),
+                            t.month(),
+                            t.day(),
+                            t.hour(),
+                            t.minute()
+                        ),
+                        lang,
+                        speaker,
+                        pending,
+                    );
+                }
+            } else {
+                play(ag(hda::AGENT_FAILED), speaker, pending);
+            }
+        }
+        return;
+    }
+
+    // The firmware's optional driver and system-preparation load lists (Driver####/SysPrep####)
+    // - decoded like boot entries and read aloud. Read-only; a silent firmware never lists them.
+    if has("driver") || has("sysprep") || has("pilote") || has("prepar") {
+        let (order, prefix, kind) = if has("sysprep") || has("prepar") {
+            (cstr16!("SysPrepOrder"), 'S', "SysPrep")
+        } else {
+            (cstr16!("DriverOrder"), 'D', "Driver")
+        };
+        let options = enumerate_load_options(order, prefix);
+        uefi::println!("  {} {} load options", options.len(), kind);
+        aw_mark!("AW_UEFI_AGENT_LOADOPTS kind={kind} count={}", options.len());
+        play(ag(hda::AGENT_VALUE_IS), speaker, pending);
+        speak_dynamic(&format!("{}", options.len()), lang, speaker, pending);
+        for (index, opt) in options.iter().enumerate() {
+            if pending.is_some() {
+                break;
+            }
+            speak_dynamic(
+                &format!("{}. {}", index + 1, opt.label),
+                lang,
+                speaker,
+                pending,
+            );
+        }
+        return;
+    }
+
     // The firmware clock: time and date. ("timeout" was already handled above.)
     if has("time") || has("heure") || has("date") || has("clock") || has("horloge") {
         if let Ok(t) = runtime::get_time() {
@@ -2407,6 +2475,81 @@ fn set_boot_timeout(seconds: u16) -> bool {
     .is_ok()
 }
 
+/// Set the real-time clock. The `uefi` crate wraps `GetTime` but not `SetTime`, so this reaches
+/// the raw runtime-services `set_time` through the global system table. It reads the current
+/// time first and overrides only the fields the caller supplies (`None` keeps the current one),
+/// so "set time 14:30" changes the clock without disturbing the date, and preserves the RTC's
+/// own time-zone and daylight fields. Returns whether the firmware accepted the write - the one
+/// clock change a loaded application is architected to make.
+#[allow(clippy::too_many_arguments)]
+fn set_rtc(
+    year: Option<u16>,
+    month: Option<u8>,
+    day: Option<u8>,
+    hour: Option<u8>,
+    minute: Option<u8>,
+    second: Option<u8>,
+) -> bool {
+    let Ok(current) = runtime::get_time() else {
+        return false;
+    };
+    let time = uefi_raw::time::Time {
+        year: year.unwrap_or(current.year()),
+        month: month.unwrap_or(current.month()),
+        day: day.unwrap_or(current.day()),
+        hour: hour.unwrap_or(current.hour()),
+        minute: minute.unwrap_or(current.minute()),
+        second: second.unwrap_or(0),
+        pad1: 0,
+        nanosecond: 0,
+        time_zone: current
+            .time_zone()
+            .unwrap_or(uefi_raw::time::Time::UNSPECIFIED_TIMEZONE),
+        // The RTC's own time-zone and daylight fields are preserved unchanged.
+        daylight: current.daylight(),
+        pad2: 0,
+    };
+
+    let Some(system_table) = uefi::table::system_table_raw() else {
+        return false;
+    };
+    // SAFETY: `system_table` is the firmware's live system table; its `runtime_services`
+    // pointer is valid before ExitBootServices, and `set_time` takes a pointer to a `Time` we
+    // own for the duration of the call.
+    unsafe {
+        let rt = (*system_table.as_ptr()).runtime_services;
+        if rt.is_null() {
+            return false;
+        }
+        ((*rt).set_time)(&time) == uefi_raw::Status::SUCCESS
+    }
+}
+
+/// One enumerated load option list (`Driver####` or `SysPrep####`): the firmware's optional
+/// drivers to load, and its system-preparation applications - lists a real BIOS exposes and a
+/// silent one hides. Both are stored exactly like `Boot####`, so they decode the same way.
+fn enumerate_load_options(order: &CStr16, prefix: char) -> Vec<BootOption> {
+    let mut options = Vec::new();
+    let Some(order_bytes) = read_global(order) else {
+        return options;
+    };
+    for pair in order_bytes.as_chunks::<2>().0 {
+        let id = u16::from_le_bytes(*pair);
+        // The variable name is <prefix><four hex digits>, e.g. Driver0001 / SysPrep0002.
+        let name = format!("{prefix}{id:04X}");
+        let Ok(name16) = CString16::try_from(name.as_str()) else {
+            continue;
+        };
+        let Some(raw) = read_global(&name16) else {
+            continue;
+        };
+        if let Some(label) = decode_boot_option(&raw) {
+            options.push(BootOption { id, label });
+        }
+    }
+    options
+}
+
 /// Read the whole variable that backs a firmware setting's varstore, or `None`.
 fn read_varstore(store: &str, guid: [u8; 16]) -> Option<Vec<u8>> {
     let name = CString16::try_from(store).ok()?;
@@ -2616,6 +2759,44 @@ fn find_boot_target<'a>(cmd: &str, options: &'a [BootOption]) -> Option<&'a Boot
     })
 }
 
+/// Parse a date (`YYYY-MM-DD`) and/or a time (`HH:MM` or `HH:MM:SS`) out of a command, each
+/// validated against its calendar range. Either may be absent, so "set time 14:30" sets only
+/// the time and "set date 2026-09-21" only the date.
+#[allow(clippy::type_complexity)]
+fn parse_clock(cmd: &str) -> (Option<(u16, u8, u8)>, Option<(u8, u8, Option<u8>)>) {
+    let mut date = None;
+    let mut time = None;
+    for token in cmd.split_whitespace() {
+        if date.is_none() && token.contains('-') {
+            let parts: Vec<&str> = token.split('-').collect();
+            if let [y, mo, d] = parts[..]
+                && let (Ok(y), Ok(mo), Ok(d)) =
+                    (y.parse::<u16>(), mo.parse::<u8>(), d.parse::<u8>())
+                && (1900..=9999).contains(&y)
+                && (1..=12).contains(&mo)
+                && (1..=31).contains(&d)
+            {
+                date = Some((y, mo, d));
+            }
+        }
+        if time.is_none() && token.contains(':') {
+            let parts: Vec<&str> = token.split(':').collect();
+            if parts.len() >= 2
+                && let (Ok(h), Ok(mi)) = (parts[0].parse::<u8>(), parts[1].parse::<u8>())
+                && h < 24
+                && mi < 60
+            {
+                let s = parts
+                    .get(2)
+                    .and_then(|p| p.parse::<u8>().ok())
+                    .filter(|s| *s < 60);
+                time = Some((h, mi, s));
+            }
+        }
+    }
+    (date, time)
+}
+
 /// The first run of decimal digits in `s`, parsed as a 1-based position, or `None`.
 fn first_number(s: &str) -> Option<usize> {
     let digits: String = s
@@ -2694,6 +2875,15 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
             count(cstr16!("dbx"), &IMAGE_SECURITY_DATABASE),
         );
     }
+
+    // Evidence at boot for the firmware's optional driver and system-preparation load lists -
+    // read-only, so proven headless. Both are decoded like boot entries; a real BIOS may
+    // populate them, OVMF usually leaves them empty.
+    aw_mark!(
+        "AW_UEFI_LOADOPTS drivers={} sysprep={}",
+        enumerate_load_options(cstr16!("DriverOrder"), 'D').len(),
+        enumerate_load_options(cstr16!("SysPrepOrder"), 'S').len(),
+    );
 
     // Prove the runtime formant synthesizer runs on this firmware: synthesize a fixed phrase
     // (in soft-float, before any OS) and report the PCM it produced. A non-zero byte count is
