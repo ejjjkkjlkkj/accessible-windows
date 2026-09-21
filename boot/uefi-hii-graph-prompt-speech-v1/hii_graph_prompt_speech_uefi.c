@@ -312,6 +312,7 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"STATUS=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_PROMPT_SOURCE=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_CONTROLLER_SELECTION=");
     proof_puts(proof,sizeof(proof),&n,
         g_controller_preferred ? "PREFERRED_AMD_1022_15E3\r\n" : "GENERIC_CLASS_0403\r\n");
@@ -1662,6 +1663,7 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("SYNTH=ALLOPHONE_BDL_RUNTIME_TEXT_V1");
     marker("SYNTH=GRAPHEME_ALLOPHONE_RUNTIME_TEXT_V2");
     marker("SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3");
+    marker("VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4");
     marker("HII_PROMPT_MAX_CHARS=32");
     marker("HII_PROMPT_WORD_BOUNDARIES=PASS");
     marker("BDL_RUNTIME_TEXT_SCHEDULE=PASS");
