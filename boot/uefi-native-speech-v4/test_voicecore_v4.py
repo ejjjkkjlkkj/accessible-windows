@@ -28,7 +28,9 @@ def main() -> None:
     assert SAMPLE_RATE == 48000
     assert DEFAULT_CHUNK_FRAMES == 960
     assert len(PHONES) >= 38
-    assert {"screen","clair","velours","grave","rapide","compact","femme","jeune_femme"} <= set(VOICES)\n    assert VOICES["femme"].base_f0 > VOICES["clair"].base_f0\n    assert VOICES["jeune_femme"].base_f0 > VOICES["femme"].base_f0
+    assert {"screen","clair","velours","grave","rapide","compact","femme","jeune_femme"} <= set(VOICES)
+    assert VOICES["femme"].base_f0 > VOICES["clair"].base_f0
+    assert VOICES["jeune_femme"].base_f0 > VOICES["femme"].base_f0
 
     assert integer_to_words(0) == "zéro"
     assert integer_to_words(21) == "vingt et un"
@@ -72,6 +74,16 @@ def main() -> None:
         )
 
     assert len(set(hashes.values())) == len(hashes)
+
+    statement = synthesize("La navigation est prête.", "jeune_femme")
+    question = synthesize("La navigation est prête ?", "jeune_femme")
+    exclaim = synthesize("La navigation est prête !", "femme")
+    assert digest(statement) != digest(question)
+    assert digest(statement) != digest(exclaim)
+    assert digest(synthesize("Bonjour, voix féminine.", "femme")) != digest(
+        synthesize("Bonjour, voix féminine.", "jeune_femme")
+    )
+
     fp = engine_fingerprint()
     assert len(fp) == 64
     print(f"engine-fingerprint={fp}")
