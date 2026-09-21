@@ -423,6 +423,14 @@ def synthesize_stream(text: str, voice: str = "screen",
             y = x - hp_prev_in + 0.995 * hp_prev_out
             hp_prev_in = x
             hp_prev_out = y
+            # Soft-knee limiter prevents DC-blocker transients from clipping
+            # while preserving low-level articulation.
+            knee = 0.80 * MAX_I16
+            limit = 0.94 * MAX_I16
+            ay = abs(y)
+            if ay > knee:
+                sign = -1.0 if y < 0.0 else 1.0
+                y = sign * (knee + (limit - knee) * math.tanh((ay - knee) / (limit - knee)))
             value = int(round(y))
             filtered.append(max(MIN_I16, min(MAX_I16, value)))
         return filtered
