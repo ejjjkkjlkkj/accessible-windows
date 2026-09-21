@@ -1,0 +1,59 @@
+name: UEFI Native Speech v2
+
+on:
+  push:
+    branches:
+      - uefi-realtime-screenreader-20260919
+    paths:
+      - 'boot/uefi-native-speech-v2/**'
+      - '.github/workflows/os-uefi-native-speech-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  speech-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate deterministic first-party speech v2
+        working-directory: boot/uefi-native-speech-v2
+        run: |
+          python3 test_native_speech_v2.py
+      - name: Build quality evidence
+        working-directory: boot/uefi-native-speech-v2
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          from native_speech_v2 import render_phrase, stereo_s16le_48k, quality_metrics
+
+          samples = render_phrase("un", "continuer", "deux", "aide", "trois", "recuperation")
+          pcm = stereo_s16le_48k(samples)
+          Path("startup-v2-48k-s16-stereo.pcm").write_bytes(pcm)
+          m = quality_metrics(samples)
+          proof = "\n".join([
+              "OS-UEFI-NATIVE-SPEECH-V2",
+              "status = PASS",
+              "engine = first-party deterministic formant/allophone synthesizer",
+              "external-tts-dependency = 0",
+              "source-rate = 16000",
+              "hda-rate = 48000",
+              "sample-format = signed-16-bit-stereo",
+              "crossfade-ms = 8",
+              f"peak = {m['peak']:.6f}",
+              f"rms = {m['rms']:.6f}",
+              f"dc = {m['dc']:.6f}",
+              f"pcm-sha256 = {hashlib.sha256(pcm).hexdigest()}",
+              "",
+          ])
+          Path("os-uefi-native-speech-v2.labproof").write_text(proof, encoding="utf-8")
+          print(proof)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefi-native-speech-v2-evidence
+          path: |
+            boot/uefi-native-speech-v2/startup-v2-48k-s16-stereo.pcm
+            boot/uefi-native-speech-v2/os-uefi-native-speech-v2.labproof
