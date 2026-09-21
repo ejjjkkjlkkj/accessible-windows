@@ -1,0 +1,84 @@
+name: UEFI Accessibility Platform v1
+
+on:
+  push:
+    branches:
+      - uefi-realtime-screenreader-20260919
+    paths:
+      - 'boot/uefi-native-speech-v2/**'
+      - 'boot/uefi-accessibility-platform-v1/**'
+      - 'boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
+      - 'boot/uefi-amd5800h-real-final-v1/os-uefi-amd5800h-real-final-v1.labproof'
+      - '.github/workflows/uefi-accessibility-platform-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrated-platform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deterministic EFI toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld
+
+      - name: Validate first-party speech v2
+        run: |
+          python3 boot/uefi-native-speech-v2/test_native_speech_v2.py
+
+      - name: Generate speech v2 unit bank for live HII reader
+        run: |
+          root=boot/uefi-accessibility-platform-v1
+          python3 "$root/generate_hii_speech_v2.py" "$root/speech_units.c" "$root/speech-v2-metadata.txt"
+
+      - name: Build integrated HII screen reader with speech v2 and native HDA
+        run: |
+          set -euo pipefail
+          src=boot/uefi-hii-graph-prompt-speech-v1
+          out=boot/uefi-accessibility-platform-v1
+          flags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+
+          clang $flags -DQEV_INTERACTIVE_NAV=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main.obj"
+          clang $flags -c "$out/speech_units.c" -o "$out/units.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$out/ACCESSIBLE-UEFI.EFI" "$out/main.obj" "$out/units.obj"
+
+          test -s "$out/ACCESSIBLE-UEFI.EFI"
+          for marker in             'HII_GRAPH_NAV_READY=PASS'             'HII_GRAPH_NAV_KEY=UP'             'HII_GRAPH_NAV_KEY=DOWN'             'HII_GRAPH_NAV_KEY=HOME'             'HII_GRAPH_NAV_KEY=END'             'HII_GRAPH_NAV_KEY=PAGE_UP'             'HII_GRAPH_NAV_KEY=PAGE_DOWN'             'HII_GRAPH_NAV_KEY=R'             'HII_GRAPH_NAV_KEY=ESC'             'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS'             'HII_GRAPH_NAV_SPEECH_DMA=PASS'             'HII_GRAPH_SPEECH_DMA_REUSE=PASS'             'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS'
+          do
+            grep -aF "$marker" "$out/ACCESSIBLE-UEFI.EFI"
+          done
+
+          clang $flags -DQEV_INTERACTIVE_NAV=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main-2.obj"
+          clang $flags -c "$out/speech_units.c" -o "$out/units-2.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$out/ACCESSIBLE-UEFI-2.EFI" "$out/main-2.obj" "$out/units-2.obj"
+          cmp "$out/ACCESSIBLE-UEFI.EFI" "$out/ACCESSIBLE-UEFI-2.EFI"
+          sha256sum "$out/ACCESSIBLE-UEFI.EFI"
+
+          echo UEFI_ACCESSIBILITY_PLATFORM_BUILD=PASS
+          echo LIVE_HII_TO_SPEECH_V2_TO_HDA=PASS
+          echo UEFI_ACCESSIBILITY_PLATFORM_DETERMINISM=PASS
+
+      - name: Check existing virtualization closure without overstating physical proof
+        run: |
+          python3 boot/uefi-accessibility-platform-v1/verify_release_closure.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefi-accessibility-platform-v1
+          path: |
+            boot/uefi-accessibility-platform-v1/ACCESSIBLE-UEFI.EFI
+            boot/uefi-accessibility-platform-v1/speech-v2-metadata.txt
+
+  strict-release-closure:
+    if: github.event_name == 'workflow_dispatch'
+    needs: integrated-platform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refuse release until physical pre-OS accessibility is proven
+        run: |
+          python3 boot/uefi-accessibility-platform-v1/verify_release_closure.py --strict
