@@ -1,0 +1,248 @@
+name: UEFI VoiceCore v4 Physical Package
+
+on:
+  push:
+    branches:
+      - uefi-realtime-screenreader-20260919
+    paths:
+      - 'boot/uefi-native-speech-v4/**'
+      - 'boot/uefi-accessibility-platform-v2/**'
+      - 'boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
+      - '.github/workflows/uefi-voicecore-v4-physical-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-preflight-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deterministic UEFI and QEMU toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld qemu-system-x86 ovmf
+
+      - name: Validate VoiceCore v4
+        working-directory: boot/uefi-native-speech-v4
+        run: python3 test_voicecore_v4.py
+
+      - name: Build physical-target VoiceCore v4 EFI
+        run: |
+          set -euo pipefail
+          out=boot/uefi-accessibility-platform-v2/physical-package
+          src=boot/uefi-hii-graph-prompt-speech-v1
+          platform=boot/uefi-accessibility-platform-v2
+          mkdir -p "$out"
+
+          python3 "$platform/generate_hii_voicecore_v4.py"             "$out/speech_units.c"             "$out/voicecore-v4-hii-metadata.txt"
+
+          flags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+          clang $flags -DQEV_INTERACTIVE_NAV=1 -DQEV_VOICECORE_V4=1             -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main.obj"
+          clang $flags -c "$out/speech_units.c" -o "$out/units.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib             /machine:x64 /timestamp:0             /out:"$out/BOOTX64.EFI" "$out/main.obj" "$out/units.obj"
+
+          test -s "$out/BOOTX64.EFI"
+          grep -aF 'VOICECORE_V4_RUNTIME_BINDING=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'PHYSICAL_ASUS_M1603QA_INTERNAL_SPEAKER_PIN=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_NAV_READY=PASS' "$out/BOOTX64.EFI"
+          grep -aF 'HII_GRAPH_SPEECH_LONG_LABEL_CAPACITY=PASS' "$out/BOOTX64.EFI"
+
+          echo PHYSICAL_PACKAGE_EFI_BUILD=PASS
+
+      - name: Build exact 256 MiB FAT16 UEFI image
+        run: |
+          set -euo pipefail
+          out=boot/uefi-accessibility-platform-v2/physical-package
+          python3 boot/uefi-accessibility-platform-v2/make_fat16.py             "$out/BOOTX64.EFI"             "$out/VOICECORE-V4-UEFI-256M.img"             256
+
+          test "$(stat -c %s "$out/VOICECORE-V4-UEFI-256M.img")" = "268435456"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+
+          p=Path('boot/uefi-accessibility-platform-v2/physical-package/VOICECORE-V4-UEFI-256M.img')
+          b=p.read_bytes()
+          assert len(b)==268435456
+          assert b[510:512]==b'\x55\xaa'
+          assert b[0x1be+4]==0x06
+          start,sectors=struct.unpack_from('<II',b,0x1be+8)
+          assert start==2048
+          assert sectors>0
+          bs=start*512
+          assert b[bs+510:bs+512]==b'\x55\xaa'
+          assert b[bs+54:bs+62]==b'FAT16   '
+          print('PHYSICAL_IMAGE_MBR=PASS')
+          print('PHYSICAL_IMAGE_FAT16=PASS')
+          print('PHYSICAL_IMAGE_SIZE_256M=PASS')
+          PY
+
+      - name: Resolve OVMF
+        run: |
+          set -euo pipefail
+          CODE=''; VARS=''
+          for pair in             '/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd'             '/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd'             '/usr/share/edk2/ovmf/OVMF_CODE.fd|/usr/share/edk2/ovmf/OVMF_VARS.fd'
+          do
+            IFS='|' read -r code vars <<< "$pair"
+            if test -f "$code" -a -f "$vars"; then CODE="$code"; VARS="$vars"; break; fi
+          done
+          test -n "$CODE" -a -n "$VARS"
+          printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-accessibility-platform-v2/physical-package/ovmf.env
+
+      - name: Boot the exact physical image under OVMF and exercise speech
+        run: |
+          set -euo pipefail
+          out=boot/uefi-accessibility-platform-v2/physical-package
+          source "$out/ovmf.env"
+          cp "$VARS" "$out/vars.fd"
+          rm -f "$out/preflight.serial" "$out/preflight.wav" "$out/preflight-qmp.sock"
+
+          qemu-system-x86_64             -machine q35,accel=tcg -m 256M             -drive if=pflash,format=raw,readonly=on,file="$CODE"             -drive if=pflash,format=raw,file="$out/vars.fd"             -drive format=raw,file="$out/VOICECORE-V4-UEFI-256M.img"             -audiodev wav,id=aud,path="$out/preflight.wav",out.frequency=48000,out.channels=2             -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0             -device hda-duplex,bus=hda0.0,cad=0,audiodev=aud             -display none -monitor none             -qmp unix:"$out/preflight-qmp.sock",server=on,wait=off             -serial file:"$out/preflight.serial"             -parallel none -net none -no-reboot -no-shutdown &
+          qpid=$!
+          trap 'kill $qpid 2>/dev/null || true' EXIT
+
+          OUT="$out" python3 - <<'PY'
+          from pathlib import Path
+          import json, os, socket, time
+
+          out=Path(os.environ['OUT'])
+          serial=out/'preflight.serial'
+          qmp=out/'preflight-qmp.sock'
+
+          def raw():
+              return serial.read_bytes() if serial.exists() else b''
+
+          def wait_for(marker: bytes, count: int=1, timeout: int=90):
+              end=time.time()+timeout
+              while time.time()<end:
+                  data=raw()
+                  if b'STATUS=BLOCKED\r\n' in data:
+                      raise SystemExit('physical-image preflight blocked: '+repr(data[-24000:]))
+                  if data.count(marker)>=count:
+                      return data
+                  time.sleep(.05)
+              raise SystemExit('preflight timeout '+repr(marker)+': '+repr(raw()[-24000:]))
+
+          data=wait_for(b'HII_GRAPH_NAV_READY=PASS\r\n')
+          wait_for(b'VOICECORE_V4_RUNTIME_BINDING=PASS\r\n')
+          wait_for(b'HDA_GRAPH_SEARCH_LIVE=PASS\r\n')
+
+          end=time.time()+20
+          while time.time()<end and not qmp.exists():
+              time.sleep(.05)
+          if not qmp.exists():
+              raise SystemExit('QMP socket missing')
+
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+          s.connect(str(qmp))
+          f=s.makefile('rwb',buffering=0)
+          greeting=json.loads(f.readline())
+          assert 'QMP' in greeting
+          f.write((json.dumps({'execute':'qmp_capabilities'})+'\r\n').encode())
+          while True:
+              reply=json.loads(f.readline())
+              if 'return' in reply:
+                  break
+
+          def send(qcode: str):
+              f.write((json.dumps({
+                  'execute':'send-key',
+                  'arguments':{'keys':[{'type':'qcode','data':qcode}],'hold-time':50}
+              })+'\r\n').encode())
+              while True:
+                  reply=json.loads(f.readline())
+                  if 'return' in reply:
+                      return
+                  if 'error' in reply:
+                      raise SystemExit(repr(reply))
+
+          send('down')
+          wait_for(b'HII_GRAPH_NAV_KEY=DOWN\r\n')
+          wait_for(b'HII_GRAPH_NAV_SPEECH_DMA=PASS\r\n',1)
+          wait_for(b'HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n',1)
+          send('up')
+          wait_for(b'HII_GRAPH_NAV_KEY=UP\r\n')
+          wait_for(b'HII_GRAPH_NAV_SPEECH_DMA=PASS\r\n',2)
+          wait_for(b'HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n',2)
+          send('esc')
+          s.close()
+          wait_for(b'STATUS=PASS\r\n')
+
+          print('PHYSICAL_IMAGE_QEMU_BOOT=PASS')
+          print('PHYSICAL_IMAGE_VOICECORE_BINDING=PASS')
+          print('PHYSICAL_IMAGE_HII_NAVIGATION=PASS')
+          print('PHYSICAL_IMAGE_HDA_DMA=PASS')
+          PY
+
+          sleep 1
+          kill $qpid 2>/dev/null || true
+          wait $qpid 2>/dev/null || true
+          trap - EXIT
+
+      - name: Validate exact-image waveform and write release manifest
+        run: |
+          set -euo pipefail
+          out=boot/uefi-accessibility-platform-v2/physical-package
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, struct, wave
+
+          out=Path('boot/uefi-accessibility-platform-v2/physical-package')
+          wav=out/'preflight.wav'
+          assert wav.exists() and wav.stat().st_size>10000
+          with wave.open(str(wav),'rb') as w:
+              assert w.getnchannels()==2
+              assert w.getframerate()==48000
+              assert w.getsampwidth()==2
+              raw=w.readframes(w.getnframes())
+          vals=struct.unpack('<'+'h'*(len(raw)//2),raw)
+          peak=max(abs(v) for v in vals)
+          active=sum(abs(v)>=500 for v in vals)
+          assert peak>=5000,peak
+          assert active>=1000,active
+
+          image=out/'VOICECORE-V4-UEFI-256M.img'
+          efi=out/'BOOTX64.EFI'
+          metadata=out/'voicecore-v4-hii-metadata.txt'
+          manifest=out/'VOICECORE-V4-PHYSICAL-MANIFEST.txt'
+          lines=[
+              'VOICECORE-V4-UEFI-PHYSICAL-PACKAGE',
+              'package-build = PASS',
+              'exact-image-qemu-preflight = PASS',
+              'voicecore-v4-runtime-binding = PASS',
+              'hii-navigation-preflight = PASS',
+              'hda-dma-preflight = PASS',
+              'image-size-bytes = 268435456',
+              f'image-sha256 = {hashlib.sha256(image.read_bytes()).hexdigest()}',
+              f'efi-sha256 = {hashlib.sha256(efi.read_bytes()).hexdigest()}',
+              f'metadata-sha256 = {hashlib.sha256(metadata.read_bytes()).hexdigest()}',
+              f'preflight-waveform-peak = {peak}',
+              f'preflight-waveform-active-samples = {active}',
+              'physical-host-flash = NOT_PERFORMED',
+              'physical-host-reboot = NOT_PERFORMED',
+              'physical-asus-m1603qa-boot = PENDING_HUMAN_EXECUTION',
+              'physical-asus-m1603qa-audible-speaker = PENDING_HUMAN_CONFIRMATION',
+              ''
+          ]
+          manifest.write_text('\n'.join(lines),encoding='utf-8')
+          print(manifest.read_text())
+          PY
+
+          sha256sum             "$out/VOICECORE-V4-UEFI-256M.img"             "$out/BOOTX64.EFI"             "$out/VOICECORE-V4-PHYSICAL-MANIFEST.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voicecore-v4-uefi-physical-256m
+          compression-level: 9
+          path: |
+            boot/uefi-accessibility-platform-v2/physical-package/VOICECORE-V4-UEFI-256M.img
+            boot/uefi-accessibility-platform-v2/physical-package/BOOTX64.EFI
+            boot/uefi-accessibility-platform-v2/physical-package/VOICECORE-V4-PHYSICAL-MANIFEST.txt
+            boot/uefi-accessibility-platform-v2/physical-package/voicecore-v4-hii-metadata.txt
+            boot/uefi-accessibility-platform-v2/physical-package/preflight.serial
+            boot/uefi-accessibility-platform-v2/physical-package/preflight.wav
