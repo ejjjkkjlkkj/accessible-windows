@@ -22,7 +22,7 @@ jobs:
         working-directory: boot/uefi-native-speech-v4
         run: python3 test_voicecore_v4.py
 
-      - name: Generate six deterministic reference voices
+      - name: Generate eight deterministic reference voices
         working-directory: boot/uefi-native-speech-v4
         run: |
           python3 - <<'PY'
