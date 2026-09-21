@@ -47,10 +47,13 @@ exist).
 
 ## Roadmap (surveyed gaps, not yet implemented)
 
-- **Audio hardware coverage beyond HDA and AC'97**: USB Audio Class (thin laptops /
-  dongles, needs a USB host stack) and VirtIO-sound (VMs) are the remaining backends to
-  build into `audio.rs`. Tracks the still-unstandardized UEFI audio work (no audio output
-  protocol in the UEFI spec as of 2.11, Dec 2024; see the GSoC effort and
+- **Audio hardware coverage beyond HDA and AC'97**: **VirtIO-sound is done** — a modern
+  VirtIO 1.x PCI driver (`boot/uefi/src/virtio_snd.rs`) that negotiates the device, sets up the
+  control and TX split virtqueues, and streams PCM through the virtio-snd handshake; proven on
+  QEMU (`-device virtio-sound-pci`), where `AW_UEFI_AUDIO_BACKEND channel=virtio` and the boot
+  clips play as `AW_UEFI_VIRTIO_SND_PLAY`, captured to WAV. USB Audio Class remains (thin
+  laptops / dongles), which needs a USB host stack. Tracks the still-unstandardized UEFI audio
+  work (no audio output protocol in the UEFI spec as of 2.11, Dec 2024; see the GSoC effort and
   [tait.tech/blog/uefi-audio](https://tait.tech/blog/uefi-audio/)).
 - **HII integration** — voice the firmware's *own* setup forms via the Human Interface
   Infrastructure ([UEFI 2.11 ch. 33](https://uefi.org/specs/UEFI/2.11/33_Human_Interface_Infrastructure.html)),

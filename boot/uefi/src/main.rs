@@ -27,6 +27,7 @@ mod serial;
 mod setup;
 mod sound;
 mod synth;
+mod virtio_snd;
 
 /// Emit an accessibility marker to both the 0xE9 debug console (via the `uefi`
 /// logger, which the QEMU proof suite asserts on) and the real COM1 line (which

@@ -11,6 +11,7 @@ use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use crate::ac97;
 use crate::hda;
+use crate::virtio_snd;
 
 /// Software playback gain, shared by every backend so volume control works on any codec -
 /// the codec amplifier graphs differ from machine to machine, but scaling the PCM samples
@@ -60,6 +61,7 @@ pub fn toggle_mute() -> bool {
 pub enum Speaker {
     Hda(hda::Speaker),
     Ac97(ac97::Speaker),
+    Virtio(virtio_snd::Speaker),
 }
 
 impl Speaker {
@@ -68,6 +70,7 @@ impl Speaker {
         match self {
             Speaker::Hda(speaker) => speaker.speak_until(clip, interrupted),
             Speaker::Ac97(speaker) => speaker.speak_until(clip, interrupted),
+            Speaker::Virtio(speaker) => speaker.speak_until(clip, interrupted),
         }
     }
 
@@ -81,18 +84,24 @@ impl Speaker {
         match self {
             Speaker::Hda(_) => "hda",
             Speaker::Ac97(_) => "ac97",
+            Speaker::Virtio(_) => "virtio",
         }
     }
 }
 
-/// Try each self-built audio backend in turn - HDA, then AC'97 - returning the first that
-/// comes up. `None` means no codec was found, so the caller uses the PC speaker.
+/// Try each self-built audio backend in turn - HDA, then AC'97, then virtio-sound - returning
+/// the first that comes up. HDA and AC'97 are emulated hardware codecs and come first so a
+/// machine (or VM) that has one uses it; virtio-sound is the paravirtual device some VMs expose
+/// instead. `None` means none was found, so the caller uses the PC speaker.
 pub fn bring_up() -> Option<Speaker> {
     if let Some(speaker) = hda::bring_up() {
         return Some(Speaker::Hda(speaker));
     }
     if let Some(speaker) = ac97::bring_up() {
         return Some(Speaker::Ac97(speaker));
+    }
+    if let Some(speaker) = virtio_snd::bring_up() {
+        return Some(Speaker::Virtio(speaker));
     }
     None
 }
