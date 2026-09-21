@@ -29,11 +29,11 @@ jobs:
           from pathlib import Path
           from voicecore_v4 import (
               ENGINE_ABI, ENGINE_NAME, SAMPLE_RATE, VOICES,
-              engine_fingerprint, quality_metrics, render_reference_set, synthesize,
+              engine_fingerprint, quality_metrics, synthesize, write_wav,
           )
 
           out = Path("evidence")
-          hashes = render_reference_set(out)
+          out.mkdir(parents=True, exist_ok=True)
           phrase = (
               "Bonjour. UEFI, menu sécurité. Lecteur d'écran audio. "
               "Continuer, récupération, erreur, non. USB, PCI, HDA, TPM."
@@ -53,14 +53,17 @@ jobs:
               f"voices = {','.join(VOICES)}",
           ]
           for voice in VOICES:
-              m = quality_metrics(synthesize(phrase, voice))
+              samples = synthesize(phrase, voice)
+              wav = out / f"voicecore-v4-{voice}.wav"
+              write_wav(wav, samples)
+              m = quality_metrics(samples)
               lines += [
                   f"{voice}.duration_s = {m['duration_s']:.6f}",
                   f"{voice}.rms = {m['rms']:.6f}",
                   f"{voice}.peak = {m['peak']:.6f}",
                   f"{voice}.dc = {m['dc']:.6f}",
                   f"{voice}.zcr = {m['zcr']:.6f}",
-                  f"{voice}.wav_sha256 = {hashes[voice]}",
+                  f"{voice}.wav_sha256 = {__import__('hashlib').sha256(wav.read_bytes()).hexdigest()}",
               ]
           proof = "\n".join(lines) + "\n"
           (out / "voicecore-v4.labproof").write_text(proof, encoding="utf-8")
