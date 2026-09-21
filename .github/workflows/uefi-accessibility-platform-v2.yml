@@ -43,17 +43,18 @@ jobs:
           out=boot/uefi-accessibility-platform-v2
           flags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
 
-          clang $flags -DQEV_INTERACTIVE_NAV=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main.obj"
+          clang $flags -DQEV_INTERACTIVE_NAV=1 -DQEV_VOICECORE_V4=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main.obj"
           clang $flags -c "$out/speech_units.c" -o "$out/units.obj"
           lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$out/ACCESSIBLE-UEFI-VOICECORE-V4.EFI" "$out/main.obj" "$out/units.obj"
 
           test -s "$out/ACCESSIBLE-UEFI-VOICECORE-V4.EFI"
-          for marker in             'HII_GRAPH_NAV_READY=PASS'             'HII_GRAPH_NAV_KEY=UP'             'HII_GRAPH_NAV_KEY=DOWN'             'HII_GRAPH_NAV_KEY=HOME'             'HII_GRAPH_NAV_KEY=END'             'HII_GRAPH_NAV_KEY=PAGE_UP'             'HII_GRAPH_NAV_KEY=PAGE_DOWN'             'HII_GRAPH_NAV_KEY=R'             'HII_GRAPH_NAV_KEY=ESC'             'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS'             'HII_GRAPH_NAV_SPEECH_DMA=PASS'             'HII_GRAPH_SPEECH_DMA_REUSE=PASS'             'HII_GRAPH_SPEECH_LONG_LABEL_CAPACITY=PASS'             'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS'
+          for marker in             'HII_GRAPH_NAV_READY=PASS'             'HII_GRAPH_NAV_KEY=UP'             'HII_GRAPH_NAV_KEY=DOWN'             'HII_GRAPH_NAV_KEY=HOME'             'HII_GRAPH_NAV_KEY=END'             'HII_GRAPH_NAV_KEY=PAGE_UP'             'HII_GRAPH_NAV_KEY=PAGE_DOWN'             'HII_GRAPH_NAV_KEY=R'             'HII_GRAPH_NAV_KEY=ESC'             'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS'             'HII_GRAPH_NAV_SPEECH_DMA=PASS'             'HII_GRAPH_SPEECH_DMA_REUSE=PASS'             'HII_GRAPH_SPEECH_LONG_LABEL_CAPACITY=PASS'             'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS' \
+            'VOICECORE_V4_RUNTIME_BINDING=PASS'
           do
             grep -aF "$marker" "$out/ACCESSIBLE-UEFI-VOICECORE-V4.EFI"
           done
 
-          clang $flags -DQEV_INTERACTIVE_NAV=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main-2.obj"
+          clang $flags -DQEV_INTERACTIVE_NAV=1 -DQEV_VOICECORE_V4=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/main-2.obj"
           clang $flags -c "$out/speech_units.c" -o "$out/units-2.obj"
           lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$out/ACCESSIBLE-UEFI-VOICECORE-V4-2.EFI" "$out/main-2.obj" "$out/units-2.obj"
           cmp "$out/ACCESSIBLE-UEFI-VOICECORE-V4.EFI" "$out/ACCESSIBLE-UEFI-VOICECORE-V4-2.EFI"
