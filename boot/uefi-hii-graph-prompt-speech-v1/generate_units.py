@@ -39,6 +39,22 @@ LETTER_UNITS={
  'z':('z','e','d'),
 }
 
+# Read numeric firmware data instead of silently dropping it during HII
+# normalization. Digits are spoken individually in French; this is predictable
+# for versions, ports, memory sizes and setup values such as "TPM 2.0".
+DIGIT_UNITS={
+ '0':('z','e','r','o'),
+ '1':('eu','n'),
+ '2':('d','eu'),
+ '3':('t','r','w','a'),
+ '4':('k','a','t','r'),
+ '5':('s','i','n','k'),
+ '6':('s','i','s'),
+ '7':('s','e','p','t'),
+ '8':('w','i','t'),
+ '9':('n','eu','f'),
+}
+
 def load_source():
     spec=importlib.util.spec_from_file_location('qevarynx_native_speech_source',SOURCE)
     if spec is None or spec.loader is None:
@@ -80,7 +96,7 @@ def main():
     speech=load_source()
     if speech.SAMPLE_RATE != 16000:
         raise SystemExit(f'voice profile v4 requires 16000 Hz source, got {speech.SAMPLE_RATE}')
-    names=sorted({'sil'} | {u for seq in LETTER_UNITS.values() for u in seq})
+    names=sorted({'sil'} | {u for seq in LETTER_UNITS.values() for u in seq} | {u for seq in DIGIT_UNITS.values() for u in seq})
     source_units=speech.make_units()
     converted={n:convert(source_units[n], speech.SAMPLE_RATE) for n in names}
     offsets=[]; lengths=[]; bank=bytearray()
@@ -96,6 +112,13 @@ def main():
         counts.append(len(seq))
         row=[index[u] for u in seq] + [0]*(8-len(seq))
         flat.extend(row)
+    digit_counts=[]; digit_flat=[]
+    for ch in '0123456789':
+        seq=DIGIT_UNITS[ch]
+        if len(seq)>8: raise SystemExit('digit unit fanout too large')
+        digit_counts.append(len(seq))
+        row=[index[u] for u in seq] + [0]*(8-len(seq))
+        digit_flat.extend(row)
     lines=[
         '/* Generated deterministically from first-party native speech units. */',
         arr_u8('qev_unit_bank',list(bank)),
@@ -106,6 +129,8 @@ def main():
         f'const unsigned int qev_sil_unit_index = {index["sil"]}u;\n',
         arr_u8('qev_letter_unit_count',counts),
         arr_u8('qev_letter_units',flat),
+        arr_u8('qev_digit_unit_count',digit_counts),
+        arr_u8('qev_digit_units',digit_flat),
     ]
     out.write_text('\n'.join(lines))
     meta.write_text(
@@ -121,6 +146,7 @@ def main():
         f'bank-bytes={len(bank)}\n'
         f'bank-sha256={hashlib.sha256(bank).hexdigest()}\n'
         'letter-map=a-z-french-letter-names\n'
+        'digit-map=0-9-french-digit-names\n'
         'max-input-graphemes=32\n'
         'max-units-per-letter=8\n'
         'inter-letter-silence-ms=12-runtime-gap\n'
@@ -132,6 +158,7 @@ def main():
     print('UNIT_COUNT='+str(len(names)))
     print('BANK_BYTES='+str(len(bank)))
     print('VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4')
+    print('DIGIT_SPEECH=0_9_FRENCH_NAMES')
 
 if __name__=='__main__':
     main()
