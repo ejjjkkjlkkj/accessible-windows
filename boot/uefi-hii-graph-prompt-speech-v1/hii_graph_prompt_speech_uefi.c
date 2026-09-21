@@ -1660,9 +1660,14 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
         return 1;
     }
     marker("HDA_OUTPUT_PATH_CONFIGURATION=PASS");
+#ifdef QEV_VOICECORE_V4
+    marker("SYNTH=VOICECORE_V4_FULL_LETTER_CLIPS");
+    marker("VOICECORE_V4_RUNTIME_BINDING=PASS");
+#else
     marker("SYNTH=ALLOPHONE_BDL_RUNTIME_TEXT_V1");
     marker("SYNTH=GRAPHEME_ALLOPHONE_RUNTIME_TEXT_V2");
     marker("SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3");
+#endif
     marker("HII_PROMPT_MAX_CHARS=32");
     marker("HII_PROMPT_WORD_BOUNDARIES=PASS");
     marker("BDL_RUNTIME_TEXT_SCHEDULE=PASS");
