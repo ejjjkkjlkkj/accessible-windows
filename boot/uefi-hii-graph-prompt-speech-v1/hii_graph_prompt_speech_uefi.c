@@ -32,6 +32,8 @@ extern const u32 qev_unit_count;
 extern const u32 qev_sil_unit_index;
 extern const u8 qev_letter_unit_count[];
 extern const u8 qev_letter_units[];
+extern const u8 qev_digit_unit_count[];
+extern const u8 qev_digit_units[];
 
 #define MAX_NID 256
 #define MAX_CONN 64
@@ -313,6 +315,7 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HII_PROMPT_SOURCE=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_DIGIT_SPEECH=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_CONTROLLER_SELECTION=");
     proof_puts(proof,sizeof(proof),&n,
         g_controller_preferred ? "PREFERRED_AMD_1022_15E3\r\n" : "GENERIC_CLASS_0403\r\n");
@@ -847,7 +850,9 @@ static int speech_dma_begin(const char *text, u32 text_count) {
             continue;
         }
 
-        if (ch < (u8)'a' || ch > (u8)'z') return 0;
+        u32 is_letter = ch >= (u8)'a' && ch <= (u8)'z';
+        u32 is_digit = ch >= (u8)'0' && ch <= (u8)'9';
+        if (!is_letter && !is_digit) return 0;
 
         if (i != 0u && text[i - 1u] != ' ') {
             if (total_bytes > dma_bytes - pcm_off ||
@@ -856,11 +861,12 @@ static int speech_dma_begin(const char *text, u32 text_count) {
             total_bytes += grapheme_gap_bytes;
         }
 
-        u32 li = (u32)(ch - (u8)'a');
-        u32 n = qev_letter_unit_count[li];
+        u32 si = is_letter ? (u32)(ch - (u8)'a') : (u32)(ch - (u8)'0');
+        u32 n = is_letter ? qev_letter_unit_count[si] : qev_digit_unit_count[si];
         if (!n || n > 8u) return 0;
         for (u32 j = 0; j < n; ++j) {
-            u32 ui = qev_letter_units[li * 8u + j];
+            u32 ui = is_letter ? qev_letter_units[si * 8u + j]
+                               : qev_digit_units[si * 8u + j];
             if (ui >= qev_unit_count) return 0;
             u32 off = qev_unit_off[ui];
             u32 len = qev_unit_len[ui];
@@ -1050,7 +1056,8 @@ static int normalize_prompt(const u16 *text, char *out, u32 *count_out) {
     u8 pending_space = 0;
     for (u32 i = 0; i < 127u && text[i] && n < 32u; ++i) {
         u16 ch = fold_prompt_char(text[i]);
-        if (ch >= (u16)'a' && ch <= (u16)'z') {
+        if ((ch >= (u16)'a' && ch <= (u16)'z') ||
+            (ch >= (u16)'0' && ch <= (u16)'9')) {
             if (pending_space && n && n < 32u) out[n++] = ' ';
             if (n < 32u) out[n++] = (char)ch;
             pending_space = 0;
@@ -1664,6 +1671,7 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("SYNTH=GRAPHEME_ALLOPHONE_RUNTIME_TEXT_V2");
     marker("SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3");
     marker("VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4");
+    marker("HII_GRAPH_DIGIT_SPEECH=PASS");
     marker("HII_PROMPT_MAX_CHARS=32");
     marker("HII_PROMPT_WORD_BOUNDARIES=PASS");
     marker("BDL_RUNTIME_TEXT_SCHEDULE=PASS");
