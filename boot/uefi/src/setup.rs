@@ -48,9 +48,10 @@ use uefi::mem::memory_map::MemoryMap;
 use uefi::proto::console::text::{Key, ScanCode};
 use uefi::proto::hii::config_routing::HiiConfigRouting;
 use uefi::proto::hii::config_str::MultiConfigurationStringIter;
+use uefi::proto::tcg::v2::Tcg as Tcg2;
 use uefi::runtime::{self, VariableAttributes, VariableVendor};
 use uefi::table::cfg::ConfigTableEntry;
-use uefi::{CStr16, CString16, Guid, Status, boot, cstr16, system};
+use uefi::{CStr16, CString16, Guid, Status, boot, cstr16, guid, system};
 
 use crate::audio;
 use crate::aw_mark;
@@ -118,6 +119,14 @@ fn clip(lang: Lang, fr: &'static [u8], en: &'static [u8]) -> &'static [u8] {
         Lang::Fr => fr,
         Lang::En => en,
     }
+}
+
+/// Read a little-endian `u32` at `at` from `data`, or 0 if it would run off the end.
+fn u32le(data: &[u8], at: usize) -> u32 {
+    if at + 4 > data.len() {
+        return 0;
+    }
+    u32::from_le_bytes([data[at], data[at + 1], data[at + 2], data[at + 3]])
 }
 
 /// The variable attributes a boot-control global carries (non-volatile, visible to boot
@@ -435,6 +444,101 @@ fn one_byte_state(name: &CStr16, one: &str, zero: &str, unknown: &str) -> String
     }
 }
 
+// ---- TPM and Secure Boot key state (read, never change) ------------------------
+
+/// The vendor GUID of the UEFI image-security database, where `db` and `dbx` live (`PK`
+/// and `KEK` live under the global-variable GUID instead). `EFI_IMAGE_SECURITY_DATABASE_GUID`.
+const IMAGE_SECURITY_DATABASE: VariableVendor =
+    VariableVendor(guid!("d719b2cb-3d3a-4596-a3bc-dad00e67656f"));
+
+/// Describe the machine's TPM through the TCG2 protocol: present or not, and - when present -
+/// which spec family and how many PCR banks are active. The setting a blind user could never
+/// otherwise hear. Best effort: no TCG2 protocol means the firmware exposes no measured-boot
+/// TPM interface, which is itself the honest answer ("no TPM 2.0 interface").
+fn tpm_status(lang: Lang) -> String {
+    let Ok(handle) = boot::get_handle_for_protocol::<Tcg2>() else {
+        return String::from(tx(lang, "aucune interface TPM 2.0", "no TPM 2.0 interface"));
+    };
+    let Ok(mut tcg2) = boot::open_protocol_exclusive::<Tcg2>(handle) else {
+        return String::from(tx(lang, "TPM inaccessible", "TPM not accessible"));
+    };
+    match tcg2.get_capability() {
+        Ok(cap) if cap.tpm_present() => {
+            let banks = cap.number_of_pcr_banks;
+            format!(
+                "{}, {} {}",
+                tx(lang, "TPM 2.0 présent", "TPM 2.0 present"),
+                banks,
+                tx(lang, "banques PCR actives", "active PCR banks"),
+            )
+        }
+        Ok(_) => String::from(tx(lang, "TPM absent", "TPM not present")),
+        Err(_) => String::from(tx(lang, "état TPM inconnu", "TPM state unknown")),
+    }
+}
+
+/// Read a variable under a chosen vendor GUID into an owned buffer, or `None` if absent.
+fn read_var(name: &CStr16, vendor: &VariableVendor) -> Option<Vec<u8>> {
+    runtime::get_variable_boxed(name, vendor)
+        .ok()
+        .map(|(data, _)| data.into_vec())
+}
+
+/// Count the certificates/hashes in an `EFI_SIGNATURE_LIST` series (as `KEK`, `db` and `dbx`
+/// are stored): walk the lists, each a 28-byte header (type GUID, list size, header size,
+/// signature size) followed by fixed-size signatures, and sum how many signatures they hold.
+/// Best effort - a malformed list ends the walk rather than misreading it.
+fn signature_count(raw: &[u8]) -> usize {
+    let mut total = 0usize;
+    let mut pos = 0usize;
+    while pos + 28 <= raw.len() {
+        let list_size = u32le(raw, pos + 16) as usize;
+        let header_size = u32le(raw, pos + 20) as usize;
+        let sig_size = u32le(raw, pos + 24) as usize;
+        if sig_size == 0 || list_size < 28 + header_size || pos + list_size > raw.len() {
+            break;
+        }
+        let sig_area = list_size - 28 - header_size;
+        total += sig_area / sig_size;
+        pos += list_size;
+    }
+    total
+}
+
+/// The state of one Secure Boot key store (`PK`, `KEK`, `db`, `dbx`): the number of
+/// certificates/hashes it holds, or "not provisioned" when the variable is absent. This is the
+/// richer key state a real firmware shows and a silent one hides.
+fn key_store_state(name: &CStr16, vendor: &VariableVendor, lang: Lang) -> String {
+    match read_var(name, vendor) {
+        Some(raw) if !raw.is_empty() => {
+            let count = signature_count(&raw);
+            if count == 0 {
+                // A PK is a single certificate stored as one signature list; report it as
+                // provisioned even when the counter cannot resolve an entry.
+                format!("{} {}", raw.len(), tx(lang, "octets", "bytes"))
+            } else {
+                format!(
+                    "{count} {}",
+                    tx(lang, "certificats ou empreintes", "certificates or hashes"),
+                )
+            }
+        }
+        _ => String::from(tx(lang, "non provisionné", "not provisioned")),
+    }
+}
+
+/// A one-line summary of the whole Secure Boot key hierarchy - PK, KEK, db, dbx - for the
+/// command agent to speak in answer to "secure boot keys".
+fn secure_boot_key_summary(lang: Lang) -> String {
+    format!(
+        "PK {}, KEK {}, db {}, dbx {}",
+        key_store_state(cstr16!("PK"), &VariableVendor::GLOBAL_VARIABLE, lang),
+        key_store_state(cstr16!("KEK"), &VariableVendor::GLOBAL_VARIABLE, lang),
+        key_store_state(cstr16!("db"), &IMAGE_SECURITY_DATABASE, lang),
+        key_store_state(cstr16!("dbx"), &IMAGE_SECURITY_DATABASE, lang),
+    )
+}
+
 /// The `Boot####` id the firmware selected for the current boot (`BootCurrent`), as a
 /// label, or `None` if the variable is absent.
 fn boot_current_label() -> Option<String> {
@@ -709,6 +813,62 @@ fn build_tree(lang: Lang, width: usize, height: usize) -> Tree {
                     lang,
                     "Si les clés Secure Boot sont provisionnées (mode utilisateur) ou ouvertes (mode configuration).",
                     "Whether Secure Boot keys are provisioned (user mode) or open (setup mode).",
+                ),
+            ),
+            Item::info(
+                format!(
+                    "{}, {}",
+                    tx(lang, "Clé de plateforme (PK)", "Platform Key (PK)"),
+                    key_store_state(cstr16!("PK"), &VariableVendor::GLOBAL_VARIABLE, lang),
+                ),
+                tx(
+                    lang,
+                    "La clé de plateforme, racine de confiance de Secure Boot.",
+                    "The Platform Key, the root of trust for Secure Boot.",
+                ),
+            ),
+            Item::info(
+                format!(
+                    "{}, {}",
+                    tx(lang, "Clés d'échange (KEK)", "Key Exchange Keys (KEK)"),
+                    key_store_state(cstr16!("KEK"), &VariableVendor::GLOBAL_VARIABLE, lang),
+                ),
+                tx(
+                    lang,
+                    "Les clés autorisées à mettre à jour les bases de signatures.",
+                    "The keys allowed to update the signature databases.",
+                ),
+            ),
+            Item::info(
+                format!(
+                    "{}, {}",
+                    tx(lang, "Base autorisée (db)", "Allowed database (db)"),
+                    key_store_state(cstr16!("db"), &IMAGE_SECURITY_DATABASE, lang),
+                ),
+                tx(
+                    lang,
+                    "Les signatures autorisées à démarrer.",
+                    "The signatures allowed to boot.",
+                ),
+            ),
+            Item::info(
+                format!(
+                    "{}, {}",
+                    tx(lang, "Base interdite (dbx)", "Forbidden database (dbx)"),
+                    key_store_state(cstr16!("dbx"), &IMAGE_SECURITY_DATABASE, lang),
+                ),
+                tx(
+                    lang,
+                    "Les signatures révoquées, interdites de démarrage.",
+                    "The revoked signatures, forbidden from booting.",
+                ),
+            ),
+            Item::info(
+                format!("{}, {}", tx(lang, "Module TPM", "TPM"), tpm_status(lang)),
+                tx(
+                    lang,
+                    "L'état du module de plateforme sécurisée, d'après l'interface TCG2.",
+                    "The Trusted Platform Module state, from the TCG2 interface.",
                 ),
             ),
             Item::action(
@@ -1798,6 +1958,25 @@ fn dispatch_agent(
         return;
     }
 
+    // TPM: read the measured-boot module's presence and PCR-bank state through TCG2.
+    if has("tpm") || has("trusted platform") {
+        let state = tpm_status(lang);
+        play(ag(hda::AGENT_VALUE_IS), speaker, pending);
+        spell_current(&state, lang, speaker, pending);
+        return;
+    }
+
+    // Secure Boot key hierarchy: the PK/KEK/db/dbx provisioning a silent firmware hides.
+    // Checked before the generic "secure" branch so "secure boot keys" reports the key state.
+    if has("key") || has("cle") || has("pk") || has("kek") || has("dbx") || has("db ") {
+        let summary = secure_boot_key_summary(lang);
+        uefi::println!("  {summary}");
+        aw_mark!("AW_UEFI_AGENT_SECUREBOOT_KEYS");
+        play(ag(hda::AGENT_VALUE_IS), speaker, pending);
+        spell_current(&summary, lang, speaker, pending);
+        return;
+    }
+
     // Secure Boot: always speak its state. Only when the user asks to CHANGE it do we explain
     // a loaded app cannot (the spec makes SecureBoot immutable) and route to firmware setup -
     // so simply asking the status never reboots the machine.
@@ -2437,6 +2616,31 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
             readable,
             via_config,
             crate::hii_ifr::database_len()
+        );
+    }
+
+    // Evidence at boot for the real security state a silent firmware never speaks: whether a
+    // TPM 2.0 interface answers, and how many entries each Secure Boot key store holds. Proven
+    // headless, so the boot proofs assert it without a keypress.
+    {
+        let tpm_present = boot::get_handle_for_protocol::<Tcg2>()
+            .ok()
+            .and_then(|handle| boot::open_protocol_exclusive::<Tcg2>(handle).ok())
+            .and_then(|mut tcg2| tcg2.get_capability().ok())
+            .map(|cap| cap.tpm_present())
+            .unwrap_or(false);
+        let count = |name: &CStr16, vendor: &VariableVendor| {
+            read_var(name, vendor)
+                .map(|raw| signature_count(&raw))
+                .unwrap_or(0)
+        };
+        aw_mark!(
+            "AW_UEFI_SECURITY tpm2={} pk={} kek={} db={} dbx={}",
+            tpm_present,
+            read_var(cstr16!("PK"), &VariableVendor::GLOBAL_VARIABLE).is_some(),
+            count(cstr16!("KEK"), &VariableVendor::GLOBAL_VARIABLE),
+            count(cstr16!("db"), &IMAGE_SECURITY_DATABASE),
+            count(cstr16!("dbx"), &IMAGE_SECURITY_DATABASE),
         );
     }
 
