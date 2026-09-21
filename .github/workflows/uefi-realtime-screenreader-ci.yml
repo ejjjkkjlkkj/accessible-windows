@@ -37,6 +37,8 @@ jobs:
           python "$root/generate_units.py" "$root/realtime-units.c" "$root/realtime-units.txt"
           grep -F 'letter-map=a-z-french-letter-names' "$root/realtime-units.txt"
           grep -F 'speech-mode=clear-lettername-spelling-fr-v3' "$root/realtime-units.txt"
+          grep -F 'source-sample-rate=16000' "$root/realtime-units.txt"
+          grep -F 'voice-profile=hi-intelligibility-16khz-v4' "$root/realtime-units.txt"
           grep -F 'inter-letter-silence-ms=12-runtime-gap' "$root/realtime-units.txt"
           flags='--target=x86_64-pc-windows-msvc -DQEV_INTERACTIVE_NAV=1 -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
           clang $flags -c "$root/hii_graph_prompt_speech_uefi.c" -o "$root/realtime-main.obj"
@@ -47,6 +49,7 @@ jobs:
           grep -aF 'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_SEMANTIC_ROLE=PASS' "$root/REALTIME.EFI"
           grep -aF 'SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3' "$root/REALTIME.EFI"
+          grep -aF 'VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_SEMANTIC_SPEECH=ROLE_PLUS_LABEL' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_ROLE=' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_SPEECH_TEXT=' "$root/REALTIME.EFI"
@@ -196,6 +199,7 @@ jobs:
           tr -d '\r' < "$root/realtime-proof.txt" | grep -E '^HII_GRAPH_NAV_SPEECH_INTERRUPTS=0x0[1-9A-F]$'
           tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_SPEECH_DMA_REUSE=PASS'
           tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3'
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4'
           echo UEFI_REALTIME_NAVIGATION_PROOF=PASS
 
       - name: Validate audio waveform quality
@@ -1264,6 +1268,7 @@ jobs:
             'HII_GRAPH_NAV_SPEECH_TEXT=',
             'HII_GRAPH_SPEECH_PACING=PASS',
             'SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3',
+            'VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4',
             'PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS',
             'HDA_CONTROLLER_SELECTION=PREFERRED_AMD_1022_15E3',
             'HDA_CODEC_SELECTION=REALTEK_10EC_0256'
@@ -1282,6 +1287,7 @@ jobs:
             'HII_GRAPH_NAV_SPEECH_TEXT=',
             'HII_GRAPH_SPEECH_PACING=PASS',
             'SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3',
+            'VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4',
             'BOOT_MEDIA_PERSISTENT_PROOF=PASS',
             'STATUS=PASS'
           )){
@@ -1293,7 +1299,8 @@ jobs:
             'HII_GRAPH_NAV_REALTIME=PASS',
             'HII_GRAPH_NAV_SEMANTIC_ROLE=PASS',
             'HII_GRAPH_SPEECH_DMA_REUSE=PASS',
-            'HII_GRAPH_SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3'
+            'HII_GRAPH_SPEECH_MODE=CLEAR_LETTERNAME_SPELLING_FR_V3',
+            'HII_GRAPH_VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4'
           )){
             if(-not $proofText.Contains($marker)){ throw "persistent proof marker missing: $marker" }
           }
@@ -1307,6 +1314,7 @@ jobs:
             'hda-lpib-progress=PASS'
             'speech-pacing=PASS'
             'speech-mode=clear-lettername-spelling-fr-v3'
+            'voice-profile=hi-intelligibility-16khz-v4'
             'physical-pc-artifact-gate=PASS'
             'physical-bare-metal-boot=NOT_EXECUTED_BY_THIS_JOB'
             'audible-speaker=REQUIRES_HUMAN_CONFIRMATION'
