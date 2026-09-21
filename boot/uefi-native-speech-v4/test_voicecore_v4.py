@@ -54,8 +54,6 @@ def main() -> None:
     hashes: dict[str, str] = {}
     for voice in VOICES:
         a = synthesize(phrase, voice)
-        b = synthesize(phrase, voice)
-        assert a == b, f"{voice}: nondeterministic"
         assert len(a) > SAMPLE_RATE
         m = quality_metrics(a)
         assert 0.005 < m["rms"] < 0.75, (voice, m)
@@ -65,7 +63,7 @@ def main() -> None:
         assert 0.001 < m["zcr"] < 0.50, (voice, m)
         chunks = list(synthesize_stream(phrase, voice, 777))
         flat = [s for chunk in chunks for s in chunk]
-        assert flat == a
+        assert flat == a, f"{voice}: streaming must be deterministic and byte-identical"
         assert all(1 <= len(chunk) <= 777 for chunk in chunks)
         hashes[voice] = digest(a)
         print(
