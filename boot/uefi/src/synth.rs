@@ -19,9 +19,12 @@
 //!    thousand two hundred eighty"), which is what most firmware values are.
 //! 2. **Phoneme to formant targets.** Each phoneme maps to one or more [`Target`]s - the
 //!    formant frequencies, bandwidths and source amplitudes that define it.
-//! 3. **Formant synthesis.** [`render`] runs a glottal/noise source through a cascade of
-//!    three formant resonators, slewing the formants between targets so transitions
-//!    coarticulate, and auto-levels the result to a clean 16-bit signal.
+//! 3. **Formant synthesis.** [`render`] excites a four-formant cascade with a Rosenberg
+//!    glottal pulse (differentiated for lip radiation and gently spectrally tilted) rather
+//!    than a bare impulse, adds high-passed band-passed frication, slews the formants between
+//!    targets so transitions coarticulate, and applies pitch declination, micro-jitter and
+//!    output smoothing before auto-levelling to a clean 16-bit signal. The glottal pulse,
+//!    tilt and smoothing are what make it a voice rather than a buzz.
 //!
 //! Honest scope: a compact formant synthesizer is intelligible, not natural - it sounds
 //! robotic, like early DECtalk. That is the right trade at the firmware stage, where the goal
@@ -1214,9 +1217,28 @@ impl Resonator {
     }
 }
 
+/// A Rosenberg glottal-flow pulse over one pitch period `phase` in `0.0..1.0`: a smooth rise
+/// (opening), a fall (closing), then a closed rest. Feeding its *derivative* through the
+/// formants, rather than a bare impulse, is what turns a buzzy robot into a voice - the pulse
+/// has the natural -12 dB/octave spectral rolloff a vocal fold produces.
+fn glottal_flow(phase: f64) -> f64 {
+    // Open quotient ~0.6: opening then closing fractions of the period.
+    const TP: f64 = 0.44;
+    const TN: f64 = 0.16;
+    if phase < TP {
+        0.5 * (1.0 - cos(core::f64::consts::PI * phase / TP))
+    } else if phase < TP + TN {
+        cos(core::f64::consts::PI * (phase - TP) / (2.0 * TN))
+    } else {
+        0.0
+    }
+}
+
 /// Render a phoneme's targets into PCM samples appended to `buf` (as `f64`, levelled later).
-/// Formants slew toward each target so segments coarticulate; the glottal source is an impulse
-/// train at the current pitch, frication is band-passed white noise.
+/// Formants slew toward each target so segments coarticulate. The voiced source is a Rosenberg
+/// glottal pulse differentiated for lip radiation and gently spectrally tilted; frication is
+/// high-passed band-passed noise. A four-formant cascade, output smoothing, pitch declination
+/// and micro-jitter give a voice rather than a buzz.
 struct Renderer {
     f1: f64,
     f2: f64,
@@ -1224,14 +1246,25 @@ struct Renderer {
     r1: Resonator,
     r2: Resonator,
     r3: Resonator,
+    /// A fixed high fourth formant that fills in the upper spectrum for a fuller timbre.
+    r4: Resonator,
     rf: Resonator,
     glottal_phase: f64,
     rng: u32,
-    tilt: f64,
+    /// Previous glottal-flow value, for the radiation differentiator.
+    prev_flow: f64,
+    /// Source spectral-tilt low-pass state.
+    src_lp: f64,
+    /// Previous raw noise value, for the fricative high-pass.
+    prev_noise: f64,
+    /// Output smoothing low-pass state.
+    out_lp: f64,
 }
 
 impl Renderer {
     fn new() -> Self {
+        let mut r4 = Resonator::new();
+        r4.set(3300.0, 250.0);
         Self {
             f1: 500.0,
             f2: 1500.0,
@@ -1239,10 +1272,14 @@ impl Renderer {
             r1: Resonator::new(),
             r2: Resonator::new(),
             r3: Resonator::new(),
+            r4,
             rf: Resonator::new(),
             glottal_phase: 0.0,
             rng: 0x1234_5678,
-            tilt: 0.0,
+            prev_flow: 0.0,
+            src_lp: 0.0,
+            prev_noise: 0.0,
+            out_lp: 0.0,
         }
     }
 
@@ -1260,6 +1297,13 @@ impl Renderer {
         let rate_scale = 100.0 / rate_percent as f64;
         // Slew coefficient: reach a new formant target in ~35 ms (natural transition speed).
         let slew = 1.0 - exp(-1.0 / (0.035 * SAMPLE_RATE));
+        // Total voiced length, for a gentle pitch declination across the utterance.
+        let total: usize = targets
+            .iter()
+            .map(|t| ((t.dur_ms * rate_scale) / 1000.0 * SAMPLE_RATE) as usize)
+            .sum::<usize>()
+            .max(1);
+        let mut global = 0usize;
         for target in targets {
             let samples = ((target.dur_ms * rate_scale) / 1000.0 * SAMPLE_RATE) as usize;
             for index in 0..samples {
@@ -1275,30 +1319,48 @@ impl Renderer {
                     self.r3.set(self.f3, target.bw3);
                 }
 
-                // Glottal source: an impulse each pitch period, softened by a one-pole tilt so
-                // the voice is buzzy but not harsh.
-                self.glottal_phase += f0 / SAMPLE_RATE;
-                let mut voiced = 0.0;
+                // Pitch: a natural downward declination over the phrase plus a little jitter, so
+                // the voice is not a dead monotone.
+                let progress = global as f64 / total as f64;
+                let jitter = 1.0 + 0.004 * self.noise();
+                let f0_now = f0 * (1.05 - 0.15 * progress) * jitter;
+                self.glottal_phase += f0_now / SAMPLE_RATE;
                 if self.glottal_phase >= 1.0 {
                     self.glottal_phase -= 1.0;
-                    voiced = 1.0;
                 }
-                self.tilt += (voiced - self.tilt) * 0.35;
-                let source = self.tilt * target.av;
-                let cascade = self.r3.step(self.r2.step(self.r1.step(source)));
+                // Glottal flow, then differentiate for lip radiation (the excitation), then a
+                // light spectral tilt so it is warm rather than harsh.
+                let flow = glottal_flow(self.glottal_phase);
+                let excitation = (flow - self.prev_flow) * 6.0;
+                self.prev_flow = flow;
+                self.src_lp += (excitation - self.src_lp) * 0.28;
+                let source = (0.7 * excitation + 0.3 * self.src_lp) * target.av;
 
-                // Frication: band-passed noise, mixed in for fricatives and stop bursts.
+                // Voiced path: a four-formant cascade.
+                let voiced = self
+                    .r4
+                    .step(self.r3.step(self.r2.step(self.r1.step(source))));
+
+                // Frication: high-passed (crisper sibilants) band-passed noise.
                 let fric = if target.af > 0.0 {
                     if index % 16 == 0 {
                         self.rf.set(target.fc, target.fbw);
                     }
-                    let noise = self.noise();
-                    self.rf.step(noise) * target.af
+                    let raw = self.noise();
+                    let hp = raw - self.prev_noise;
+                    self.prev_noise = raw;
+                    self.rf.step(hp) * target.af
                 } else {
+                    self.prev_noise = 0.0;
                     0.0
                 };
 
-                buf.push(cascade + fric);
+                // Gentle output smoothing removes high-frequency stepping without dulling
+                // consonants (mostly the raw signal, a little low-passed).
+                let mix = voiced + fric;
+                self.out_lp += (mix - self.out_lp) * 0.16;
+                buf.push(0.82 * mix + 0.18 * self.out_lp);
+                global += 1;
             }
         }
     }
