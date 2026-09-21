@@ -8,7 +8,7 @@ from pathlib import Path
 
 TEXT_RVA = 0x1000
 DATA_RVA = 0x4000
-SAMPLE_RATE = 8000
+SAMPLE_RATE = 16000
 UNIT_MS = 105
 TAU = 6.283185307179586
 
@@ -28,21 +28,21 @@ UNIT_SPECS = {
     "r":  ("r", 80,  (420, 1450, 2200)),
     "l":  ("l", 85,  (390, 1500, 2400)),
     "w":  ("v", 75,  (330, 900, 2200)),
-    # Keep every spectral target below 0.45*Fs (3.6 kHz at 8 kHz).
-    # The previous 3.9-6.5 kHz targets aliased into the speech band and made
-    # sibilants/plosives sound like unrelated low-frequency noise.
-    "s":  ("f", 100, (2200, 3000, 3600)),
-    "sh": ("f", 110, (1600, 2400, 3200)),
-    "f":  ("f", 100, (1100, 2000, 3000)),
-    "v":  ("z", 100, (700, 1500, 2800)),
-    "z":  ("z", 100, (900, 1800, 3000)),
-    "zh": ("z", 105, (700, 1800, 3000)),
-    "t":  ("p", 80,  (2200, 3000, 3500)),
-    "d":  ("p", 85,  (700, 1600, 2600)),
-    "k":  ("p", 90,  (1400, 2400, 3400)),
-    "g":  ("p", 90,  (600, 1400, 2400)),
-    "p":  ("p", 85,  (800, 1800, 2800)),
-    "b":  ("p", 85,  (500, 1300, 2300)),
+    # Voice profile v4 runs at 16 kHz. Keep every spectral target below
+    # 0.45*Fs (7.2 kHz) while restoring the high-frequency consonant energy
+    # that an 8 kHz source cannot represent cleanly.
+    "s":  ("f", 100, (2600, 4600, 6500)),
+    "sh": ("f", 110, (1800, 3000, 4300)),
+    "f":  ("f", 100, (1200, 3200, 5200)),
+    "v":  ("z", 100, (700, 1800, 3600)),
+    "z":  ("z", 100, (1000, 2800, 5000)),
+    "zh": ("z", 105, (800, 2400, 4300)),
+    "t":  ("p", 80,  (2600, 4800, 6800)),
+    "d":  ("p", 85,  (700, 1900, 3300)),
+    "k":  ("p", 90,  (1500, 3200, 5400)),
+    "g":  ("p", 90,  (700, 1700, 3200)),
+    "p":  ("p", 85,  (900, 2600, 4800)),
+    "b":  ("p", 85,  (500, 1500, 2900)),
     "sil":("s", 65,  (0, 0, 0)),
 }
 
@@ -76,7 +76,7 @@ PHRASES = {
 }
 
 MARKERS = {
-    "boot": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=BOOT\r\nSYNTH=ALLOPHONE_CONCATENATIVE_V1\r\nFOCUS=CONTINUE\r\nSPEECH=DONE\r\nEND\r\n",
+    "boot": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=BOOT\r\nSYNTH=ALLOPHONE_CONCATENATIVE_V1\r\nVOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4\r\nFOCUS=CONTINUE\r\nSPEECH=DONE\r\nEND\r\n",
     "focus_accessibility": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=FOCUS\r\nFOCUS=ACCESSIBILITY\r\nSPEECH=DONE\r\nEND\r\n",
     "focus_recovery": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=FOCUS\r\nFOCUS=RECOVERY\r\nSPEECH=DONE\r\nEND\r\n",
     "focus_continue": b"QEVARYNOX-UEFI-NATIVE-SPEECH-V1\r\nEVENT=FOCUS\r\nFOCUS=CONTINUE\r\nSPEECH=DONE\r\nEND\r\n",
@@ -102,9 +102,10 @@ def make_unit(name: str, spec: tuple[str, int, tuple[int, int, int]]) -> bytes:
     out = bytearray()
     pitch = 118.0 if name not in ("i","e") else 128.0
     seed = 0x51455641 ^ sum((i + 1) * ord(ch) for i, ch in enumerate(name))
+    edge_samples = max(1, SAMPLE_RATE * 6 // 1000)
     for idx in range(count):
         t = idx / SAMPLE_RATE
-        edge = min(1.0, idx / 48.0, (count - 1 - idx) / 48.0)
+        edge = min(1.0, idx / edge_samples, (count - 1 - idx) / edge_samples)
         f1, f2, f3 = formants
         form = (
             0.55 * math.sin(TAU * f1 * t) +
@@ -125,11 +126,14 @@ def make_unit(name: str, spec: tuple[str, int, tuple[int, int, int]]) -> bytes:
         elif kind == "z":
             x = 0.48 * form * glottal + 0.20 * noise
         elif kind == "f":
-            x = 0.08 * form + 0.72 * noise * (0.5 + 0.5 * math.sin(TAU * min(f2, 3500) * t))
+            # Broadband aspiration plus stable high-frequency landmarks.
+            carrier = 0.55 * math.sin(TAU * f2 * t) + 0.45 * math.sin(TAU * f3 * t)
+            x = 0.10 * form + 0.56 * noise + 0.24 * carrier
         else:  # plosive
-            burst = 1.0 if idx < min(80, count // 3) else 0.18
-            x = burst * (0.62 * noise + 0.12 * form)
-        val = int(round(128 + max(-1.0, min(1.0, x * edge)) * 92))
+            burst_samples = max(1, SAMPLE_RATE * 10 // 1000)
+            burst = 1.0 if idx < min(burst_samples, count // 3) else 0.16
+            x = burst * (0.58 * noise + 0.18 * form)
+        val = int(round(128 + max(-1.0, min(1.0, x * edge)) * 96))
         out.append(max(0, min(255, val)))
     return bytes(out)
 
@@ -281,7 +285,7 @@ def build_code(units: dict[str, bytes], off: dict[str, int]) -> bytes:
     c.emit(b"\x66\xba\x2a\x02\xec\x3c\xaa")
     c.rel32(b"\x0f\x85", "fail")
 
-    for value in (0xD1, 0x41, 0x1F, 0x40):
+    for value in (0xD1, 0x41, 0x3E, 0x80):
         c.emit(b"\x41\xb2" + bytes((value,)))
         c.rel32(b"\xe8", "dsp_write")
 
@@ -429,7 +433,7 @@ def build_code(units: dict[str, bytes], off: dict[str, int]) -> bytes:
     c.emit(b"\x41\x88\xc2")
     c.rel32(b"\xe8", "dsp_write")
 
-    c.emit(b"\x41\x6b\xcc\x7d")
+    # 16 kHz playback: ~62.5 us/sample. A 63 us wait is a safe +0.8%.\n    c.emit(b"\x41\x6b\xcc\x3f")
     c.emit(b"\x81\xc1\xa8\x61\x00\x00")
     c.emit(b"\x49\x8b\x87\xf8\x00\x00\x00\xff\xd0")
     c.emit(b"\xc3")
@@ -560,6 +564,8 @@ def validate(image: bytes, units: dict[str, bytes]) -> None:
             raise SystemExit(f"speech unit not bound: {name}")
     if b"SYNTH=ALLOPHONE_CONCATENATIVE_V1" not in image:
         raise SystemExit("native speech marker missing")
+    if b"VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4" not in image:
+        raise SystemExit("16 kHz voice profile marker missing")
 
 
 def main() -> None:
