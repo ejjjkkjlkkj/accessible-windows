@@ -35,17 +35,24 @@ exist).
 - **Runtime speech synthesis** for arbitrary dynamic text — a from-scratch Klatt-style
   cascade formant synthesizer (`boot/uefi/src/synth.rs`), so the enumerated boot-device
   names, CPU brand, memory sizes, resolutions and firmware setting values are spoken as
-  *words*, not just spelled. English letter-to-sound rules drive the word path, all-caps
-  tokens spell as letters, and numbers are read in words (English and French). It emits the
-  same 24 kHz mono PCM the codecs already stream, so nothing new sits below it; the speech
-  rate and pitch are adjustable live (`[`/`]`, `,`/`.`). Proven at boot on OVMF
-  (`AW_UEFI_SYNTH_SELFTEST`). Honest scope: intelligible and robotic, like early DECtalk —
-  the right trade for understanding a value you otherwise could not hear at all.
+  *words*, not just spelled. **Bilingual**: English letter-to-sound rules drive the word path
+  in English; in French, a full French grapheme-to-phoneme frontend and phoneme inventory
+  (nasal vowels and all), ported from the companion Sintaise UEFI TTS, pronounce the setup's
+  French labels and values (`AW_UEFI_SYNTH_SPEAK "Système, QEMU Standard PC…"` proven on OVMF).
+  Numbers are read in words in both languages (including the irregular soixante-dix /
+  quatre-vingts). It emits the same 24 kHz mono PCM the codecs already stream, so nothing new
+  sits below it; the speech rate and pitch are adjustable live (`[`/`]`, `,`/`.`). Proven at
+  boot on OVMF (`AW_UEFI_SYNTH_SELFTEST`). Honest scope: intelligible and robotic, like early
+  DECtalk — the right trade for understanding a value you otherwise could not hear at all.
 - **TPM and Secure Boot key state** — the TCG2 TPM presence/PCR-bank state and the PK/KEK/db/dbx
   certificate counts are read and spoken (Security submenu and agent), proven headless as
   `AW_UEFI_SECURITY`.
 
-## Roadmap (surveyed gaps, not yet implemented)
+## Roadmap (status of the surveyed gaps)
+
+Most of what this section once listed as future work is now built and proven; each item below
+says what shipped and what, if anything, remains. The one genuinely large piece still open is a
+USB host-controller (XHCI) driver with isochronous support, needed only for USB Audio Class.
 
 - **Audio hardware coverage beyond HDA and AC'97**: **VirtIO-sound is done** — a modern
   VirtIO 1.x PCI driver (`boot/uefi/src/virtio_snd.rs`) that negotiates the device, sets up the
@@ -59,9 +66,13 @@ exist).
   (`AW_UEFI_USB_SUMMARY audio=...`). Tracks the still-unstandardized UEFI audio
   work (no audio output protocol in the UEFI spec as of 2.11, Dec 2024; see the GSoC effort and
   [tait.tech/blog/uefi-audio](https://tait.tech/blog/uefi-audio/)).
-- **HII integration** — voice the firmware's *own* setup forms via the Human Interface
-  Infrastructure ([UEFI 2.11 ch. 33](https://uefi.org/specs/UEFI/2.11/33_Human_Interface_Infrastructure.html)),
-  so settings only the firmware owns (SATA mode, XMP, CSM, passwords, TPM) become spoken.
+- **HII integration** — *done* for settings: the firmware's own HII database is parsed
+  ([UEFI 2.11 ch. 33](https://uefi.org/specs/UEFI/2.11/33_Human_Interface_Infrastructure.html)),
+  so the settings only the firmware owns (SATA mode, XMP, CSM, …) are enumerated, their values
+  read (by NVRAM variable or the Config Routing export), spoken by meaning, and changed by name
+  via SetVariable or RouteConfig (`boot/uefi/src/hii_ifr.rs`, `setup.rs`). What remains is
+  presentation parity with the firmware's *own* form layout (grouping, dependency expressions);
+  the settings themselves are already reachable and voiced.
 - **Pre-boot braille** via a USB HID Braille display
   ([HUTRR78](https://usb.org/sites/default/files/hutrr78_-_creation_of_a_braille_display_usage_page_0.pdf))
   — *built* (`boot/uefi/src/usb.rs`). Rather than write an XHCI driver, it uses the firmware's
@@ -72,10 +83,12 @@ exist).
   enumerated and correctly classified `braille=false`); the cell send is exercised on a real
   display (QEMU emulates only a Baum *serial* display, a different transport). BRLTTY is
   post-kernel only.
-- **More screen-reader depth**: an independent review cursor and read-by-line across the whole
-  screen still to come. (Done: adjustable rate/volume/pitch, phonetic Alpha/Bravo spelling,
-  cycled verbosity levels (`V`), punctuation levels (`X`), and read-by-word of the focused line
-  (`O`) - all proven driven from the keyboard under QEMU.)
+- **More screen-reader depth**: *done* — adjustable rate/volume/pitch, phonetic Alpha/Bravo
+  spelling, cycled verbosity levels (`V`), punctuation levels (`X`), read-by-word of the focused
+  line (`O`), and an independent review cursor (`N`/`B` to survey lines without moving the
+  selection, `G` to route focus there); read-by-line falls out of the review cursor. All proven
+  driven from the keyboard under QEMU (`AW_UEFI_REVIEW`, `AW_UEFI_VERBOSITY`, …). What a future
+  pass could still add: key/character echo toggles and independent character-review within a line.
 - **More real UEFI settings**: *done* — setting the RTC clock (raw `SetTime` from the agent,
   "set time 14:30" / "set date 2026-09-21"), the `Driver####`/`SysPrep####` load lists (read
   and spoken, `AW_UEFI_LOADOPTS`), and richer Secure Boot key/certificate state (PK/KEK/db/dbx)
