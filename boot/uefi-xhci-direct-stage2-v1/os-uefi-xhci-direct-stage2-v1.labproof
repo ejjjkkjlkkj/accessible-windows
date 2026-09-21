@@ -1,0 +1,24 @@
+OS-UEFI-XHCI-DIRECT-STAGE2-V1
+role = destructively reinitialize xHCI and prove independent command/event ring ownership
+target = OVMF + QEMU q35 + qemu-xhci + usb-audio
+depends-on = OS-UEFI-XHCI-DIRECT-STAGE1-V1
+required = discover xHCI PCI class 0c:03:30
+required = stop controller and observe HCHalted
+required = HCRST completes
+required = Controller Not Ready clears
+required = configure one slot
+required = program DCBAAP
+required = program command ring with RCS=1
+required = program event ring segment table and event ring
+required = restart controller
+required = preserve/recover connected USB Audio root port
+required = issue Enable Slot command directly
+required = receive Command Completion Event
+required = completion code Success
+required = nonzero Slot ID
+claim = PASS proves direct xHCI takeover through MMIO and DMA rings under the tested OVMF/QEMU configuration
+claim = PASS does not yet Address Device
+claim = PASS does not yet configure USB Audio endpoint 1
+claim = PASS does not yet transmit an Isoch TRB
+physical-hardware = not-established
+proof = pending
