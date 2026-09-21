@@ -121,10 +121,15 @@ and the historical Klatt synthesizers show.
 
 ## What is not done — stated so no one has to guess
 
-- **USB Audio Class output** is not implemented. Audio streaming is isochronous, which the
-  firmware's `UsbIo` does not reliably carry, so a UAC backend needs a dedicated XHCI
-  host-controller driver with isochronous support — the one genuinely large piece still open.
-  `usb.rs` detects and reports a UAC device but does not drive it.
+- **USB Audio Class output** is *nearly* there, and the attempt itself is a first. Because EDK
+  II's `UsbIo` returns `EFI_UNSUPPORTED` for isochronous transfers (the wall the 2021 GSoC hit),
+  `boot/uefi/src/usb_audio.rs` is a from-scratch xHCI host-controller driver: it brings up the
+  controller, enumerates the device (Enable Slot, Address Device, EP0 control transfers reading
+  the device descriptor), and configures the isochronous endpoint and `SET_INTERFACE` — all
+  proven on QEMU, already past where the GSoC effort stopped. The one remaining step, the
+  isochronous data burst, trips QEMU's host-controller-error bit and is not yet resolved. USB
+  audio does not yet make sound, but the hardest parts — a working xHCI stack and USB
+  enumeration from a bootable application — are done and on the record.
 - **End-to-end braille on physical hardware** is not yet demonstrated in this repository (no
   emulated HID braille display exists to prove it headlessly).
 - **Physical-hardware audio** beyond QEMU/VMware is asserted only where a machine has been booted;

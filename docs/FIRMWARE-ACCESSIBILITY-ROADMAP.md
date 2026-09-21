@@ -58,12 +58,16 @@ USB host-controller (XHCI) driver with isochronous support, needed only for USB 
   VirtIO 1.x PCI driver (`boot/uefi/src/virtio_snd.rs`) that negotiates the device, sets up the
   control and TX split virtqueues, and streams PCM through the virtio-snd handshake; proven on
   QEMU (`-device virtio-sound-pci`), where `AW_UEFI_AUDIO_BACKEND channel=virtio` and the boot
-  clips play as `AW_UEFI_VIRTIO_SND_PLAY`, captured to WAV. USB Audio Class remains (thin
-  laptops / dongles): unlike braille (control transfers, which the firmware's `UsbIo` carries),
-  audio streaming is *isochronous*, which `UsbIo` does not reliably expose, so a UAC backend
-  needs a dedicated XHCI host-controller driver with isochronous support - the one genuinely
-  large piece still outstanding. `usb.rs` already detects and reports a UAC device
-  (`AW_UEFI_USB_SUMMARY audio=...`). Tracks the still-unstandardized UEFI audio
+  clips play as `AW_UEFI_VIRTIO_SND_PLAY`, captured to WAV. **USB Audio Class**: a from-scratch
+  xHCI host-controller driver (`boot/uefi/src/usb_audio.rs`) - EDK II's `UsbIo` returns
+  `EFI_UNSUPPORTED` for the isochronous transfers audio needs, the exact wall the 2021 GSoC
+  effort hit, so this brings up its own controller (rings, DCBAA, scratchpads, run), enumerates
+  the device (Enable Slot, Address Device, EP0 control transfers), and configures the
+  isochronous endpoint and `SET_INTERFACE`. Proven that far on QEMU (`-device usb-audio`):
+  `AW_UEFI_XHCI_RUNNING`/`_SLOT`/`_ADDRESSED`, `AW_UEFI_USB_AUDIO_DESC vid=0x46f4`,
+  `_EP_CONFIGURED`, `_STREAMING` - already past where the GSoC work stopped. Remaining: the final
+  isochronous data burst trips QEMU's host-controller-error bit (`_PLAY completed=0`), not yet
+  resolved. Tracks the still-unstandardized UEFI audio
   work (no audio output protocol in the UEFI spec as of 2.11, Dec 2024; see the GSoC effort and
   [tait.tech/blog/uefi-audio](https://tait.tech/blog/uefi-audio/)).
 - **HII integration** — *done* for settings: the firmware's own HII database is parsed
