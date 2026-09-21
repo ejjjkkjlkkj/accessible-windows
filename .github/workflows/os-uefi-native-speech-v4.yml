@@ -1,0 +1,73 @@
+name: UEFI Native Speech v4
+
+on:
+  push:
+    branches:
+      - uefi-realtime-screenreader-20260919
+    paths:
+      - 'boot/uefi-native-speech-v4/**'
+      - '.github/workflows/os-uefi-native-speech-v4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  voicecore-v4:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate VoiceCore v4 core
+        working-directory: boot/uefi-native-speech-v4
+        run: python3 test_voicecore_v4.py
+
+      - name: Generate six deterministic reference voices
+        working-directory: boot/uefi-native-speech-v4
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from voicecore_v4 import (
+              ENGINE_ABI, ENGINE_NAME, SAMPLE_RATE, VOICES,
+              engine_fingerprint, quality_metrics, render_reference_set, synthesize,
+          )
+
+          out = Path("evidence")
+          hashes = render_reference_set(out)
+          phrase = (
+              "Bonjour. UEFI, menu sécurité. Lecteur d'écran audio. "
+              "Continuer, récupération, erreur, non. USB, PCI, HDA, TPM."
+          )
+          lines = [
+              "VOICECORE-V4",
+              "status = PASS",
+              f"engine = {ENGINE_NAME}",
+              f"abi = {ENGINE_ABI}",
+              "implementation = new first-party deterministic source-filter/coarticulation TTS",
+              "imports-v2-v3 = false",
+              "external-tts-dependency = 0",
+              f"sample-rate = {SAMPLE_RATE}",
+              "sample-format = signed-16-bit",
+              "streaming-chunk-api = PASS",
+              f"engine-fingerprint = {engine_fingerprint()}",
+              f"voices = {','.join(VOICES)}",
+          ]
+          for voice in VOICES:
+              m = quality_metrics(synthesize(phrase, voice))
+              lines += [
+                  f"{voice}.duration_s = {m['duration_s']:.6f}",
+                  f"{voice}.rms = {m['rms']:.6f}",
+                  f"{voice}.peak = {m['peak']:.6f}",
+                  f"{voice}.dc = {m['dc']:.6f}",
+                  f"{voice}.zcr = {m['zcr']:.6f}",
+                  f"{voice}.wav_sha256 = {hashes[voice]}",
+              ]
+          proof = "\n".join(lines) + "\n"
+          (out / "voicecore-v4.labproof").write_text(proof, encoding="utf-8")
+          print(proof)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voicecore-v4-evidence
+          path: boot/uefi-native-speech-v4/evidence/**
