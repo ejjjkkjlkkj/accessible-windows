@@ -1,0 +1,204 @@
+name: UEFI Accessibility Platform v2 QEMU VoiceCore
+
+on:
+  push:
+    branches:
+      - uefi-realtime-screenreader-20260919
+    paths:
+      - 'boot/uefi-native-speech-v4/**'
+      - 'boot/uefi-accessibility-platform-v2/**'
+      - 'boot/uefi-hii-graph-prompt-speech-v1/hii_graph_prompt_speech_uefi.c'
+      - '.github/workflows/uefi-accessibility-platform-v2-qemu.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qemu-ovmf-navigation-audio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build and virtualization tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld qemu-system-x86 ovmf dosfstools mtools
+
+      - name: Build VoiceCore v4 interactive EFI
+        run: |
+          set -euo pipefail
+          out=boot/uefi-accessibility-platform-v2
+          src=boot/uefi-hii-graph-prompt-speech-v1
+          python3 boot/uefi-native-speech-v4/test_voicecore_v4.py
+          python3 "$out/generate_hii_voicecore_v4.py" "$out/speech_units.c" "$out/voicecore-v4-hii-metadata.txt"
+          flags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+          clang $flags -DQEV_INTERACTIVE_NAV=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/nav-main.obj"
+          clang $flags -c "$out/speech_units.c" -o "$out/nav-units.obj"
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$out/NAV-VOICECORE-V4.EFI" "$out/nav-main.obj" "$out/nav-units.obj"
+          test -s "$out/NAV-VOICECORE-V4.EFI"
+          grep -aF 'HII_GRAPH_NAV_READY=PASS' "$out/NAV-VOICECORE-V4.EFI"
+          grep -aF 'HII_GRAPH_SPEECH_LONG_LABEL_CAPACITY=PASS' "$out/NAV-VOICECORE-V4.EFI"
+
+      - name: Resolve OVMF
+        run: |
+          set -euo pipefail
+          CODE=''; VARS=''
+          for pair in             '/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd'             '/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd'             '/usr/share/edk2/ovmf/OVMF_CODE.fd|/usr/share/edk2/ovmf/OVMF_VARS.fd'
+          do
+            IFS='|' read -r code vars <<< "$pair"
+            if test -f "$code" -a -f "$vars"; then CODE="$code"; VARS="$vars"; break; fi
+          done
+          test -n "$CODE" -a -n "$VARS"
+          printf 'CODE=%s\nVARS=%s\n' "$CODE" "$VARS" > boot/uefi-accessibility-platform-v2/ovmf.env
+
+      - name: Execute interactive HII navigation with VoiceCore v4 HDA
+        run: |
+          set -euo pipefail
+          source boot/uefi-accessibility-platform-v2/ovmf.env
+          root=boot/uefi-accessibility-platform-v2
+          cp "$VARS" "$root/nav-vars.fd"
+          rm -f "$root/nav-esp.img" "$root/nav.serial" "$root/nav.wav" "$root/nav-qmp.sock" "$root/nav-proof.txt"
+          truncate -s 64M "$root/nav-esp.img"
+          mkfs.vfat -F 16 "$root/nav-esp.img"
+          mmd -i "$root/nav-esp.img" ::/EFI
+          mmd -i "$root/nav-esp.img" ::/EFI/BOOT
+          mcopy -i "$root/nav-esp.img" "$root/NAV-VOICECORE-V4.EFI" ::/EFI/BOOT/BOOTX64.EFI
+
+          qemu-system-x86_64             -machine q35,accel=tcg -m 256M             -drive if=pflash,format=raw,readonly=on,file="$CODE"             -drive if=pflash,format=raw,file="$root/nav-vars.fd"             -drive format=raw,file="$root/nav-esp.img"             -audiodev wav,id=aud,path="$root/nav.wav",out.frequency=48000,out.channels=2             -device ich9-intel-hda,bus=pcie.0,addr=1b.0,id=hda0             -device hda-duplex,bus=hda0.0,cad=0,audiodev=aud             -display none -monitor none             -qmp unix:"$root/nav-qmp.sock",server=on,wait=off             -serial file:"$root/nav.serial"             -parallel none -net none -no-reboot -no-shutdown &
+          qpid=$!
+          trap 'kill $qpid 2>/dev/null || true' EXIT
+
+          ROOT="$root" python3 - <<'PY'
+          from pathlib import Path
+          import json, os, re, socket, time
+
+          root=Path(os.environ['ROOT'])
+          serial=root/'nav.serial'
+          qmp=root/'nav-qmp.sock'
+
+          def raw():
+              return serial.read_bytes() if serial.exists() else b''
+
+          def wait_for(marker, count=1, timeout=75):
+              end=time.time()+timeout
+              while time.time()<end:
+                  data=raw()
+                  if b'STATUS=BLOCKED\r\n' in data:
+                      raise SystemExit('VoiceCore navigation blocked: '+repr(data[-24000:]))
+                  if data.count(marker) >= count:
+                      return data
+                  time.sleep(.05)
+              raise SystemExit('marker timeout '+repr(marker)+': '+repr(raw()[-24000:]))
+
+          data=wait_for(b'HII_GRAPH_NAV_READY=PASS\r\n')
+          m=re.search(br'HII_GRAPH_NAV_TOTAL=0x([0-9A-F]{2})\r\n',data)
+          if not m or int(m.group(1),16) < 2:
+              raise SystemExit('insufficient HII prompts: '+repr(data[-24000:]))
+
+          end=time.time()+20
+          while time.time()<end and not qmp.exists():
+              time.sleep(.05)
+          if not qmp.exists():
+              raise SystemExit('QMP socket missing')
+
+          s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+          s.connect(str(qmp))
+          f=s.makefile('rwb',buffering=0)
+          greeting=json.loads(f.readline())
+          if 'QMP' not in greeting:
+              raise SystemExit('invalid QMP greeting')
+          f.write((json.dumps({'execute':'qmp_capabilities'})+'\r\n').encode())
+          while True:
+              reply=json.loads(f.readline())
+              if 'return' in reply:
+                  break
+
+          def send(qcode):
+              f.write((json.dumps({'execute':'send-key','arguments':{'keys':[{'type':'qcode','data':qcode}],'hold-time':50}})+'\r\n').encode())
+              while True:
+                  reply=json.loads(f.readline())
+                  if 'return' in reply:
+                      return
+                  if 'error' in reply:
+                      raise SystemExit('QMP send-key error: '+repr(reply))
+
+          sequence=[
+              ('down', b'HII_GRAPH_NAV_KEY=DOWN\r\n'),
+              ('up', b'HII_GRAPH_NAV_KEY=UP\r\n'),
+              ('end', b'HII_GRAPH_NAV_KEY=END\r\n'),
+              ('home', b'HII_GRAPH_NAV_KEY=HOME\r\n'),
+              ('pgdn', b'HII_GRAPH_NAV_KEY=PAGE_DOWN\r\n'),
+              ('pgup', b'HII_GRAPH_NAV_KEY=PAGE_UP\r\n'),
+              ('r', b'HII_GRAPH_NAV_KEY=R\r\n'),
+          ]
+          for idx,(qcode,marker) in enumerate(sequence,1):
+              send(qcode)
+              wait_for(marker)
+              wait_for(b'HII_GRAPH_NAV_SPEECH_DMA=PASS\r\n',idx)
+              wait_for(b'HII_GRAPH_SPEECH_DMA_REUSE=PASS\r\n',idx)
+
+          send('esc')
+          s.close()
+
+          data=wait_for(b'STATUS=PASS\r\n')
+          required=[
+              b'HII_GRAPH_NAV_EXIT=PASS\r\n',
+              b'BOOT_MEDIA_PERSISTENT_PROOF=PASS\r\n',
+              b'HDA_GRAPH_SEARCH_LIVE=PASS\r\n',
+              b'HDA_SELECTOR_APPLY_LIVE=PASS\r\n',
+              b'HII_PROMPT_SPEECH_HDA=PASS\r\n',
+          ]
+          for marker in required:
+              if marker not in data:
+                  raise SystemExit('missing '+repr(marker)+': '+repr(data[-24000:]))
+          if data.count(b'HII_GRAPH_NAV_SPEECH_HDA=PASS\r\n') < 7:
+              raise SystemExit('VoiceCore HDA event count too low')
+          if data.count(b'HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n') < 7:
+              raise SystemExit('VoiceCore LPIB progress count too low')
+          print(data.decode('ascii','replace'))
+          print('VOICECORE_V4_QEMU_NAVIGATION=PASS')
+          print('VOICECORE_V4_QEMU_HDA_SPEECH=PASS')
+          print('VOICECORE_V4_QEMU_DMA_REUSE=PASS')
+          PY
+
+          sleep 1
+          kill $qpid 2>/dev/null || true
+          wait $qpid 2>/dev/null || true
+          trap - EXIT
+
+          mcopy -o -i "$root/nav-esp.img" ::/QEVARYNOX-PHYSICAL-PROOF.TXT "$root/nav-proof.txt"
+          test -s "$root/nav-proof.txt"
+
+      - name: Validate captured VoiceCore waveform
+        shell: python
+        run: |
+          from pathlib import Path
+          import struct, wave
+          p=Path('boot/uefi-accessibility-platform-v2/nav.wav')
+          assert p.exists() and p.stat().st_size > 10000, p
+          with wave.open(str(p),'rb') as w:
+              assert w.getnchannels() == 2
+              assert w.getframerate() == 48000
+              assert w.getsampwidth() == 2
+              raw=w.readframes(w.getnframes())
+          vals=struct.unpack('<'+'h'*(len(raw)//2), raw)
+          peak=max(abs(v) for v in vals)
+          active=sum(abs(v)>=500 for v in vals)
+          clipped=sum(abs(v)>=32760 for v in vals)
+          assert peak >= 5000, peak
+          assert active >= 1000, active
+          assert clipped == 0, clipped
+          print(f'peak={peak} active={active} clipped={clipped}')
+          print('VOICECORE_V4_QEMU_WAVEFORM=PASS')
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefi-platform-v2-qemu-voicecore
+          path: |
+            boot/uefi-accessibility-platform-v2/NAV-VOICECORE-V4.EFI
+            boot/uefi-accessibility-platform-v2/voicecore-v4-hii-metadata.txt
+            boot/uefi-accessibility-platform-v2/nav.serial
+            boot/uefi-accessibility-platform-v2/nav.wav
+            boot/uefi-accessibility-platform-v2/nav-proof.txt
