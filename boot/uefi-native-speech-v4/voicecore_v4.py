@@ -15,7 +15,7 @@ MAX_I16 = 32767
 MIN_I16 = -32768
 TAU = math.tau
 ENGINE_NAME = "VoiceCore v4"
-ENGINE_ABI = 1
+ENGINE_ABI = 2
 DEFAULT_CHUNK_FRAMES = 960  # 20 ms at 48 kHz
 
 @dataclass(frozen=True)
@@ -28,6 +28,9 @@ class VoiceProfile:
     breath: float
     pitch_range: float
     energy: float
+    spectral_tilt: float = 0.0
+    jitter: float = 0.0
+    shimmer: float = 0.0
 
 @dataclass(frozen=True)
 class PhoneSpec:
@@ -53,6 +56,9 @@ VOICES: dict[str, VoiceProfile] = {
     "grave": VoiceProfile("grave", 104.0, 0.92, 0.95, 0.88, 0.018, 0.10, 0.96),
     "rapide": VoiceProfile("rapide", 150.0, 1.34, 1.01, 1.02, 0.014, 0.07, 0.95),
     "compact": VoiceProfile("compact", 138.0, 1.12, 1.00, 1.00, 0.012, 0.06, 0.92),
+    # Original adult female voices. They are not modeled on any real person.
+    "femme": VoiceProfile("femme", 196.0, 0.99, 1.08, 1.06, 0.040, 0.22, 0.98, -0.07, 0.0035, 0.018),
+    "jeune_femme": VoiceProfile("jeune_femme", 224.0, 1.04, 1.12, 1.12, 0.050, 0.28, 0.96, -0.11, 0.0045, 0.022),
 }
 
 def _p(symbol: str, kind: str, duration_ms: int, formants=(0.0,0.0,0.0,0.0),
@@ -250,10 +256,27 @@ def text_to_events(text: str) -> list[PhoneEvent]:
     words_total = max(1, sum(tok not in ".,:;!?" for tok in tokens))
     for tok in tokens:
         if tok in {".","!","?"}:
+            # Apply sentence-final prosody to the most recent spoken phones.
+            recent = [idx for idx, e in enumerate(events) if e.symbol != "sil"][-8:]
+            if recent and tok in {"?","!"}:
+                for rank, idx in enumerate(recent, start=1):
+                    e = events[idx]
+                    ratio = rank / len(recent)
+                    if tok == "?":
+                        events[idx] = PhoneEvent(
+                            e.symbol, e.duration_scale,
+                            e.pitch_scale * (1.0 + 0.16 * ratio),
+                            e.energy_scale,
+                        )
+                    else:
+                        events[idx] = PhoneEvent(
+                            e.symbol, e.duration_scale,
+                            e.pitch_scale * (1.0 + 0.06 * ratio),
+                            e.energy_scale * (1.0 + 0.08 * ratio),
+                        )
             count = 3 if tok == "." else 4
-            pitch = 1.0
             for _ in range(count):
-                events.append(PhoneEvent("sil", 1.0, pitch, 0.0))
+                events.append(PhoneEvent("sil", 1.0, 1.0, 0.0))
             continue
         if tok in {",",":",";"}:
             for _ in range(2):
@@ -353,6 +376,8 @@ def _segment(events: list[PhoneEvent], index: int, voice: VoiceProfile) -> list[
         phrase_pos = index / max(1, len(events) - 1)
         f0 = voice.base_f0 * event.pitch_scale * (1.0 + voice.pitch_range * (0.08 - 0.12 * phrase_pos))
         vibrato = 1.0 + 0.006 * math.sin(TAU * 4.7 * (i / SAMPLE_RATE) + index * 0.31)
+        seed, jitter_noise = _noise(seed)
+        f0 *= 1.0 + voice.jitter * jitter_noise
         phase = (phase + f0 * vibrato / SAMPLE_RATE) % 1.0
         # Smooth glottal source with harmonics; deterministic and cheap enough for offline generation.
         glottal = (
@@ -371,8 +396,15 @@ def _segment(events: list[PhoneEvent], index: int, voice: VoiceProfile) -> list[
         else:
             source = spec.voiced * glottal * 0.72 + spec.noise * nz * 0.24 + voice.breath * nz
 
-        filtered = sum(g * r.step(source) for g, r in zip((1.0,0.78,0.48,0.25), resonators))
-        x = (0.73 * filtered + 0.15 * source) * env * event.energy_scale * voice.energy
+        gains = (
+            1.0,
+            0.78,
+            0.48 * (1.0 - voice.spectral_tilt),
+            0.25 * (1.0 - voice.spectral_tilt),
+        )
+        filtered = sum(g * r.step(source) for g, r in zip(gains, resonators))
+        shimmer = 1.0 + voice.shimmer * math.sin(TAU * 3.2 * (i / SAMPLE_RATE) + index * 0.19)
+        x = (0.73 * filtered + 0.15 * source) * env * event.energy_scale * voice.energy * shimmer
         dc = 0.9975 * dc + 0.0025 * x
         x = x - dc + 0.07 * (x - prev_x)
         prev_x = x
