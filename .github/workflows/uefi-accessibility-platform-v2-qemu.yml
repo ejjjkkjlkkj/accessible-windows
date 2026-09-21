@@ -34,12 +34,13 @@ jobs:
           python3 boot/uefi-native-speech-v4/test_voicecore_v4.py
           python3 "$out/generate_hii_voicecore_v4.py" "$out/speech_units.c" "$out/voicecore-v4-hii-metadata.txt"
           flags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
-          clang $flags -DQEV_INTERACTIVE_NAV=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/nav-main.obj"
+          clang $flags -DQEV_INTERACTIVE_NAV=1 -DQEV_VOICECORE_V4=1 -c "$src/hii_graph_prompt_speech_uefi.c" -o "$out/nav-main.obj"
           clang $flags -c "$out/speech_units.c" -o "$out/nav-units.obj"
           lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:"$out/NAV-VOICECORE-V4.EFI" "$out/nav-main.obj" "$out/nav-units.obj"
           test -s "$out/NAV-VOICECORE-V4.EFI"
           grep -aF 'HII_GRAPH_NAV_READY=PASS' "$out/NAV-VOICECORE-V4.EFI"
           grep -aF 'HII_GRAPH_SPEECH_LONG_LABEL_CAPACITY=PASS' "$out/NAV-VOICECORE-V4.EFI"
+          grep -aF 'VOICECORE_V4_RUNTIME_BINDING=PASS' "$out/NAV-VOICECORE-V4.EFI"
 
       - name: Resolve OVMF
         run: |
@@ -149,6 +150,7 @@ jobs:
               b'HDA_GRAPH_SEARCH_LIVE=PASS\r\n',
               b'HDA_SELECTOR_APPLY_LIVE=PASS\r\n',
               b'HII_PROMPT_SPEECH_HDA=PASS\r\n',
+              b'VOICECORE_V4_RUNTIME_BINDING=PASS\r\n',
           ]
           for marker in required:
               if marker not in data:
