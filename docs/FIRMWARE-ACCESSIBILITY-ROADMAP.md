@@ -96,6 +96,15 @@ USB host-controller (XHCI) driver with isochronous support, needed only for USB 
 
 ## Standards framing
 
-EN 301 549 and Section 508 require **self-voicing** for *closed functionality* — systems
-that do not permit assistive technology to attach, which a BIOS/UEFI setup is. A firmware
-setup that speaks itself is exactly what those standards call for.
+EN 301 549 (Chapter 5) and Section 508 (§402.2) require **built-in speech output** for *closed
+functionality* — systems that do not permit assistive technology to attach, which a BIOS/UEFI
+setup is (you cannot load NVDA/JAWS/VoiceOver before there is an OS). Section 508 §402.2 states
+that such ICT "shall be speech-output enabled … for full and independent use by individuals with
+vision impairments," which in practice "means ensuring that the ICT has built-in speech output."
+A firmware setup that speaks itself is exactly what those standards call for.
+
+For the full prior-art comparison and citations — the 2017 beep-only prototype, the 2021 GSoC
+EFI-audio effort that never made sound and was never merged, the absence of any UEFI audio
+protocol through 2.11 (2024), and why Apple's Recovery VoiceOver and the GRUB/BRLTTY tradition
+are post-firmware rather than firmware-stage — see
+[PRIOR-ART-AND-SIGNIFICANCE.md](PRIOR-ART-AND-SIGNIFICANCE.md).
