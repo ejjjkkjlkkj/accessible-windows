@@ -161,22 +161,33 @@ jobs:
                   if 'error' in reply:
                       raise SystemExit(repr(reply))
 
-          send('down')
-          wait_for(b'HII_GRAPH_NAV_KEY=DOWN\r\n')
-          wait_for(b'HII_GRAPH_NAV_SPEECH_DMA=PASS\r\n',1)
-          wait_for(b'HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n',1)
-          send('up')
-          wait_for(b'HII_GRAPH_NAV_KEY=UP\r\n')
-          wait_for(b'HII_GRAPH_NAV_SPEECH_DMA=PASS\r\n',2)
-          wait_for(b'HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n',2)
+          sequence=[
+              ('down', b'HII_GRAPH_NAV_KEY=DOWN\r\n'),
+              ('up', b'HII_GRAPH_NAV_KEY=UP\r\n'),
+              ('end', b'HII_GRAPH_NAV_KEY=END\r\n'),
+              ('home', b'HII_GRAPH_NAV_KEY=HOME\r\n'),
+              ('pgdn', b'HII_GRAPH_NAV_KEY=PAGE_DOWN\r\n'),
+              ('pgup', b'HII_GRAPH_NAV_KEY=PAGE_UP\r\n'),
+              ('r', b'HII_GRAPH_NAV_KEY=R\r\n'),
+          ]
+          for idx,(qcode,marker) in enumerate(sequence,1):
+              send(qcode)
+              wait_for(marker)
+              wait_for(b'HII_GRAPH_NAV_SPEECH_DMA=PASS\r\n',idx)
+              wait_for(b'HII_GRAPH_NAV_LPIB_PROGRESS=PASS\r\n',idx)
+              wait_for(b'HII_GRAPH_SPEECH_DMA_REUSE=PASS\r\n',idx)
+
           send('esc')
           s.close()
-          wait_for(b'STATUS=PASS\r\n')
+          data=wait_for(b'STATUS=PASS\r\n')
+          wait_for(b'HII_GRAPH_NAV_REQUIRED_EVENTS=PASS\r\n')
+          wait_for(b'HII_GRAPH_NAV_EXIT=PASS\r\n')
 
           print('PHYSICAL_IMAGE_QEMU_BOOT=PASS')
           print('PHYSICAL_IMAGE_VOICECORE_BINDING=PASS')
           print('PHYSICAL_IMAGE_HII_NAVIGATION=PASS')
           print('PHYSICAL_IMAGE_HDA_DMA=PASS')
+          print('PHYSICAL_IMAGE_REQUIRED_NAV_EVENTS=PASS')
           PY
 
           sleep 1
