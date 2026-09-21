@@ -410,17 +410,33 @@ def synthesize_stream(text: str, voice: str = "screen",
     profile = VOICES[voice]
     ready: list[int] = []
     pending: list[int] = []
+    hp_prev_in = 0.0
+    hp_prev_out = 0.0
+
+    def filter_chunk(raw: list[int]) -> list[int]:
+        nonlocal hp_prev_in, hp_prev_out
+        filtered: list[int] = []
+        # Stateful first-order DC blocker. State spans every emitted chunk,
+        # preserving byte-identical output regardless of chunk size.
+        for sample in raw:
+            x = float(sample)
+            y = x - hp_prev_in + 0.995 * hp_prev_out
+            hp_prev_in = x
+            hp_prev_out = y
+            value = int(round(y))
+            filtered.append(max(MIN_I16, min(MAX_I16, value)))
+        return filtered
 
     def drain(force: bool = False) -> Iterator[list[int]]:
         nonlocal ready
         while len(ready) >= chunk_frames:
-            chunk = ready[:chunk_frames]
+            raw = ready[:chunk_frames]
             del ready[:chunk_frames]
-            yield chunk
+            yield filter_chunk(raw)
         if force and ready:
-            chunk = list(ready)
+            raw = list(ready)
             ready.clear()
-            yield chunk
+            yield filter_chunk(raw)
 
     for idx, event in enumerate(events):
         seg = _segment(events, idx, profile)
