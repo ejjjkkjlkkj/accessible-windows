@@ -5,11 +5,14 @@ import sys
 
 src = Path(sys.argv[1]).read_bytes()
 out = Path(sys.argv[2])
-total = 131072
+size_mib = int(sys.argv[3]) if len(sys.argv) >= 4 else 64
+if size_mib < 16 or size_mib > 512:
+    raise SystemExit("size MiB must be between 16 and 512")
+total = size_mib * 1024 * 1024 // 512
 start = 2048
 psecs = total - start
 bps = 512
-spc = 4
+spc = 4 if size_mib <= 128 else 8
 reserved = 1
 nfats = 2
 roots = 512
@@ -22,6 +25,8 @@ while True:
         break
     spf = need
 
+if clusters < 4085 or clusters > 65524:
+    raise SystemExit(f"invalid FAT16 cluster count: {clusters}")
 data_start = start + reserved + nfats * spf + rootsecs
 clbytes = bps * spc
 file_clusters = (len(src) + clbytes - 1) // clbytes
@@ -95,4 +100,4 @@ for i in range(file_clusters):
 
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_bytes(img)
-print(f"FAT16_UEFI_DISK=PASS bytes={len(img)} clusters={file_clusters}")
+print(f"FAT16_UEFI_DISK=PASS bytes={len(img)} size_mib={size_mib} spc={spc} clusters={file_clusters}")
