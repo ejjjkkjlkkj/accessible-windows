@@ -381,50 +381,67 @@ def _segment(events: list[PhoneEvent], index: int, voice: VoiceProfile) -> list[
         out.append(max(MIN_I16, min(MAX_I16, sample)))
     return out
 
-def _crossfade(a: list[int], b: list[int], ms: float) -> list[int]:
-    if not a:
-        return list(b)
-    if not b:
-        return list(a)
-    n = min(len(a), len(b), max(1, int(SAMPLE_RATE * ms / 1000.0)))
-    out = list(a[:-n])
+def _crossfade_samples(a_tail: list[int], b_head: list[int], count: int) -> list[int]:
+    n = min(len(a_tail), len(b_head), max(0, count))
+    out: list[int] = []
     for i in range(n):
         x = (i + 1) / (n + 1)
         wa = math.cos(x * math.pi * 0.5)
         wb = math.sin(x * math.pi * 0.5)
-        v = int(round(a[-n + i] * wa + b[i] * wb))
+        v = int(round(a_tail[-n + i] * wa + b_head[i] * wb))
         out.append(max(MIN_I16, min(MAX_I16, v)))
-    out.extend(b[n:])
     return out
 
-def _render_samples(text: str, voice_name: str) -> list[int]:
-    if voice_name not in VOICES:
-        raise KeyError(f"unknown voice: {voice_name}")
-    events = text_to_events(text)
-    if not events:
-        return []
-    voice = VOICES[voice_name]
-    out: list[int] = []
-    for idx, event in enumerate(events):
-        seg = _segment(events, idx, voice)
-        kind = PHONES[event.symbol].kind
-        fade = 1.5 if kind in {"p","s"} else 4.0
-        out = _crossfade(out, seg, fade)
-    if not out:
-        return []
-    mean = sum(out) / len(out)
-    centered = [int(round(s - mean)) for s in out]
-    peak = max(1, max(abs(s) for s in centered))
-    scale = min(1.0, (0.94 * MAX_I16) / peak)
-    return [max(MIN_I16, min(MAX_I16, int(round(s * scale)))) for s in centered]
+def _fade_frames(kind: str) -> int:
+    ms = 1.5 if kind in {"p","s"} else 4.0
+    return max(1, int(SAMPLE_RATE * ms / 1000.0))
 
 def synthesize_stream(text: str, voice: str = "screen",
                       chunk_frames: int = DEFAULT_CHUNK_FRAMES) -> Iterator[list[int]]:
+    if voice not in VOICES:
+        raise KeyError(f"unknown voice: {voice}")
     if chunk_frames <= 0:
         raise ValueError("chunk_frames must be positive")
-    samples = _render_samples(text, voice)
-    for i in range(0, len(samples), chunk_frames):
-        yield samples[i:i + chunk_frames]
+
+    events = text_to_events(text)
+    if not events:
+        return
+
+    profile = VOICES[voice]
+    ready: list[int] = []
+    pending: list[int] = []
+
+    def drain(force: bool = False) -> Iterator[list[int]]:
+        nonlocal ready
+        while len(ready) >= chunk_frames:
+            chunk = ready[:chunk_frames]
+            del ready[:chunk_frames]
+            yield chunk
+        if force and ready:
+            chunk = list(ready)
+            ready.clear()
+            yield chunk
+
+    for idx, event in enumerate(events):
+        seg = _segment(events, idx, profile)
+        if not pending:
+            pending = seg
+            continue
+
+        fade = min(_fade_frames(PHONES[event.symbol].kind), len(pending), len(seg))
+        if fade:
+            safe = pending[:-fade]
+            blended = _crossfade_samples(pending, seg, fade)
+            ready.extend(safe)
+            pending = blended + seg[fade:]
+        else:
+            ready.extend(pending)
+            pending = seg
+
+        yield from drain(False)
+
+    ready.extend(pending)
+    yield from drain(True)
 
 def synthesize(text: str, voice: str = "screen") -> list[int]:
     out: list[int] = []
