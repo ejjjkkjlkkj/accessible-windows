@@ -2,7 +2,7 @@ name: uefi-realtime-screenreader-ci
 
 on:
   push:
-    branches: [uefi-realtime-screenreader-20260919, uefi-realtime-integration-20260919]
+    branches: [uefi-realtime-screenreader-20260919, uefi-realtime-integration-20260919, uefi-native-voice-v4-20260921]
     paths:
       - 'boot/uefi-hii-graph-prompt-speech-v1/**'
       - 'boot/uefi-native-speech-v1/build_uefi_native_speech.py'
