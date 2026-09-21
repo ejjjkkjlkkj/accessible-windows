@@ -2,7 +2,7 @@ name: os-uefi-native-speech-v1
 
 on:
   push:
-    branches: [os]
+    branches: [os, uefi-native-voice-v4-20260921]
     paths:
       - 'boot/uefi-native-speech-v1/build_uefi_native_speech.py'
       - 'boot/uefi-native-speech-v1/os-uefi-native-speech-v1.labproof'
