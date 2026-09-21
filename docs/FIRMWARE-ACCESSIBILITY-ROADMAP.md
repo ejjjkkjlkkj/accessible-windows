@@ -32,13 +32,21 @@ exist).
   interruptible speech (barge-in).
 - **COM1 serial mirror** so VMware and physical hardware capture the same `AW_UEFI_*`
   markers as QEMU's 0xE9 debug port.
+- **Runtime speech synthesis** for arbitrary dynamic text — a from-scratch Klatt-style
+  cascade formant synthesizer (`boot/uefi/src/synth.rs`), so the enumerated boot-device
+  names, CPU brand, memory sizes, resolutions and firmware setting values are spoken as
+  *words*, not just spelled. English letter-to-sound rules drive the word path, all-caps
+  tokens spell as letters, and numbers are read in words (English and French). It emits the
+  same 24 kHz mono PCM the codecs already stream, so nothing new sits below it; the speech
+  rate and pitch are adjustable live (`[`/`]`, `,`/`.`). Proven at boot on OVMF
+  (`AW_UEFI_SYNTH_SELFTEST`). Honest scope: intelligible and robotic, like early DECtalk —
+  the right trade for understanding a value you otherwise could not hear at all.
+- **TPM and Secure Boot key state** — the TCG2 TPM presence/PCR-bank state and the PK/KEK/db/dbx
+  certificate counts are read and spoken (Security submenu and agent), proven headless as
+  `AW_UEFI_SECURITY`.
 
 ## Roadmap (surveyed gaps, not yet implemented)
 
-- **Runtime speech synthesis** for arbitrary dynamic text (device names, values) instead of
-  spell-by-character — e.g. an embedded formant synthesizer such as
-  [eSpeak NG](https://github.com/espeak-ng/espeak-ng) (formant, small footprint). Enables
-  multilingual output too.
 - **Audio hardware coverage beyond HDA and AC'97**: USB Audio Class (thin laptops /
   dongles, needs a USB host stack) and VirtIO-sound (VMs) are the remaining backends to
   build into `audio.rs`. Tracks the still-unstandardized UEFI audio work (no audio output
@@ -50,11 +58,11 @@ exist).
 - **Pre-boot braille** via a USB HID Braille display
   ([HUTRR78](https://usb.org/sites/default/files/hutrr78_-_creation_of_a_braille_display_usage_page_0.pdf));
   `aw-braille` already renders cells at the kernel stage. BRLTTY is post-kernel only.
-- **More screen-reader depth**: read-by-word/line, an independent review cursor, verbosity
-  and punctuation levels, key/character echo, phonetic (Alpha/Bravo) spelling, adjustable
-  rate/volume/pitch.
-- **More real UEFI settings**: set the RTC clock, `Driver####`/`SysPrep####` lists, richer
-  Secure Boot key/certificate state (PK/KEK/db/dbx), TPM presence.
+- **More screen-reader depth**: read-by-word/line and an independent review cursor, verbosity
+  and punctuation levels, key/character echo. (Adjustable rate/volume/pitch and phonetic
+  Alpha/Bravo spelling are done.)
+- **More real UEFI settings**: set the RTC clock, `Driver####`/`SysPrep####` lists. (Richer
+  Secure Boot key/certificate state PK/KEK/db/dbx and TPM presence are done.)
 
 ## Standards framing
 

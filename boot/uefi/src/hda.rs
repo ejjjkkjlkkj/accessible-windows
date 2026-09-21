@@ -12,8 +12,8 @@
 //! The words are short clips of the boot screen's fixed lines, synthesized ahead
 //! of time and embedded as raw 24 kHz mono PCM ([`CLIP_WELCOME`] and friends). At
 //! boot the controller is brought up once ([`bring_up`]) and each clip is played
-//! through it ([`Speaker::speak`]); the same DMA path will later carry a running
-//! speech synthesizer for dynamic text. The firmware identity-maps all of memory
+//! through it ([`Speaker::speak`]); the same DMA path also carries the runtime
+//! formant synthesizer ([`crate::synth`]) for dynamic text. The firmware identity-maps all of memory
 //! during boot services, so a `static`'s address is its physical address and no
 //! page mapping is needed.
 
@@ -38,8 +38,8 @@ pub static CLIP_LOADING: &[u8] = include_bytes!("speech/loading.pcm");
 /// the submenu titles and the fixed action labels - each carries a clip, so a blind user
 /// hears the whole navigable structure. Dynamic lines (Main/Advanced/Security values and
 /// the enumerated Boot#### device names, composed at runtime) carry no clip: they are
-/// spoken on the console with a move cue, and runtime speech synthesis for them is future
-/// work.
+/// spoken as words by the runtime formant synthesizer ([`crate::synth`]) through this same
+/// codec, and spelled character by character as a fallback.
 pub static CLIP_SETUP_INTRO: &[u8] = include_bytes!("speech/menu_intro.pcm");
 pub static CLIP_INSTRUCTIONS: &[u8] = include_bytes!("speech/instructions.pcm");
 pub static CLIP_TAB_MAIN: &[u8] = include_bytes!("speech/tab_main.pcm");

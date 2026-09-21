@@ -1342,11 +1342,11 @@ fn render(tree: &Tree, tab_index: usize, screen_index: usize, item_index: usize,
     uefi::println!();
     if depth == 0 {
         uefi::println!(
-            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  M: mute.  P: phonetic.  H: help."
+            "  Left/Right: tab.  Up/Down: item.  Enter: select.  Esc: boot normally.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  Brackets: rate.  Comma/dot: pitch.  M: mute.  P: phonetic.  H: help."
         );
     } else {
         uefi::println!(
-            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  M: mute.  P: phonetic.  H: help.  W: where."
+            "  Up/Down: item.  Enter: select.  Esc: back.  Space: repeat.  A: read all.  S: spell.  C: command.  Plus/minus: volume.  Brackets: rate.  Comma/dot: pitch.  M: mute.  P: phonetic.  H: help.  W: where."
         );
     }
 }
@@ -1451,8 +1451,12 @@ fn announce_item(
     // through the alphabet bank - so a blind user hears the value on arrival instead of
     // having to ask for it with the spell key. Interruptible: moving on stops a long value.
     if matches!(item.action, Action::Info) {
-        let french = CURRENT_FRENCH.load(core::sync::atomic::Ordering::Relaxed);
-        spell_chars(&item.text, french, speaker, pending);
+        let lang = if CURRENT_FRENCH.load(core::sync::atomic::Ordering::Relaxed) {
+            Lang::Fr
+        } else {
+            Lang::En
+        };
+        speak_dynamic(&item.text, lang, speaker, pending);
     }
     true
 }
@@ -1737,6 +1741,12 @@ enum Nav {
     Mute,
     /// Toggle NATO phonetic spelling (P).
     Phonetic,
+    /// Speak faster (`]`) or slower (`[`): the synthesizer's speech rate.
+    RateUp,
+    RateDown,
+    /// Raise (`.`) or lower (`,`) the synthesized voice pitch.
+    PitchUp,
+    PitchDown,
     Ignore,
 }
 
@@ -1767,6 +1777,10 @@ fn classify(key: Key) -> Nav {
             '-' | '_' => Nav::VolumeDown,
             'm' | 'M' => Nav::Mute,
             'p' | 'P' => Nav::Phonetic,
+            ']' => Nav::RateUp,
+            '[' => Nav::RateDown,
+            '.' | '>' => Nav::PitchUp,
+            ',' | '<' => Nav::PitchDown,
             _ => Nav::Ignore,
         },
         Key::Special(_) => Nav::Ignore,
@@ -1799,6 +1813,43 @@ fn spell_current(
     uefi::println!("  Spelling: {text}");
     aw_mark!("AW_UEFI_SETUP_SPELL \"{text}\"");
     spell_chars(text, matches!(lang, Lang::Fr), speaker, pending);
+}
+
+/// Speak a dynamic line as *words* through the runtime formant synthesizer - the boot-device
+/// names, machine-state values and setting values that have no pre-recorded clip and were, until
+/// now, only spellable. Synthesizes 24 kHz PCM and plays it on the real codec with barge-in;
+/// falls back to spelling character by character when there is no codec, the text does not
+/// synthesize, or synthesis yields nothing. The full text is emitted as a marker so the boot
+/// proofs can assert what was spoken.
+fn speak_dynamic(
+    text: &str,
+    lang: Lang,
+    speaker: &mut Option<audio::Speaker>,
+    pending: &mut Option<Key>,
+) {
+    let french = matches!(lang, Lang::Fr);
+    if speaker.is_some()
+        && pending.is_none()
+        && let Some(sp) = speaker.as_mut()
+    {
+        let pcm = crate::synth::say(text, french);
+        if !pcm.is_empty() {
+            aw_mark!("AW_UEFI_SYNTH_SPEAK bytes={} \"{text}\"", pcm.len());
+            let mut hit: Option<Key> = None;
+            sp.speak_until(&pcm, || {
+                if hit.is_none() {
+                    hit = read_key_raw();
+                }
+                hit.is_some()
+            });
+            if hit.is_some() {
+                *pending = hit;
+            }
+            return;
+        }
+    }
+    // No codec, a queued key, or nothing to synthesize: spell it instead.
+    spell_chars(text, french, speaker, pending);
 }
 
 /// Play one clip per character of `text`, honouring phonetic mode and language, and
@@ -1936,7 +1987,7 @@ fn dispatch_agent(
         match first_number(cmd) {
             Some(secs) if set_boot_timeout(secs as u16) => {
                 play(ag(hda::AGENT_TIMEOUT_SET), speaker, pending);
-                spell_current(&format!("{secs}"), lang, speaker, pending);
+                speak_dynamic(&format!("{secs}"), lang, speaker, pending);
             }
             Some(_) => play(ag(hda::AGENT_FAILED), speaker, pending),
             None => play(ag(hda::AGENT_UNKNOWN), speaker, pending),
@@ -1962,7 +2013,7 @@ fn dispatch_agent(
     if has("tpm") || has("trusted platform") {
         let state = tpm_status(lang);
         play(ag(hda::AGENT_VALUE_IS), speaker, pending);
-        spell_current(&state, lang, speaker, pending);
+        speak_dynamic(&state, lang, speaker, pending);
         return;
     }
 
@@ -1973,7 +2024,7 @@ fn dispatch_agent(
         uefi::println!("  {summary}");
         aw_mark!("AW_UEFI_AGENT_SECUREBOOT_KEYS");
         play(ag(hda::AGENT_VALUE_IS), speaker, pending);
-        spell_current(&summary, lang, speaker, pending);
+        speak_dynamic(&summary, lang, speaker, pending);
         return;
     }
 
@@ -1988,7 +2039,7 @@ fn dispatch_agent(
             tx(lang, "inconnu", "unknown"),
         );
         play(ag(hda::AGENT_SECURE_BOOT_IS), speaker, pending);
-        spell_current(&state, lang, speaker, pending);
+        speak_dynamic(&state, lang, speaker, pending);
         if wants_change(cmd) {
             play(ag(hda::AGENT_FIRMWARE_ONLY), speaker, pending);
             enter_firmware_setup();
@@ -2001,7 +2052,7 @@ fn dispatch_agent(
     if has("virtu") || has("vt-x") || has("vmx") || has("svm") {
         let state = virtualization_status(lang);
         play(ag(hda::AGENT_VALUE_IS), speaker, pending);
-        spell_current(&state, lang, speaker, pending);
+        speak_dynamic(&state, lang, speaker, pending);
         if wants_change(cmd) {
             play(ag(hda::AGENT_FIRMWARE_ONLY), speaker, pending);
             enter_firmware_setup();
@@ -2022,7 +2073,7 @@ fn dispatch_agent(
                 t.minute()
             );
             play(ag(hda::AGENT_TIME_IS), speaker, pending);
-            spell_current(&text, lang, speaker, pending);
+            speak_dynamic(&text, lang, speaker, pending);
         } else {
             play(ag(hda::AGENT_FAILED), speaker, pending);
         }
@@ -2033,7 +2084,7 @@ fn dispatch_agent(
     if has("memory") || has("memoire") || has("ram") {
         let mem = installed_memory_mib();
         play(ag(hda::AGENT_MEMORY_IS), speaker, pending);
-        spell_current(
+        speak_dynamic(
             &format!("{mem} {}", tx(lang, "mega-octets", "megabytes")),
             lang,
             speaker,
@@ -2045,7 +2096,7 @@ fn dispatch_agent(
     // Processor.
     if has("cpu") || has("processor") || has("processeur") {
         play(ag(hda::AGENT_PROCESSOR_IS), speaker, pending);
-        spell_current(&cpu_brand(), lang, speaker, pending);
+        speak_dynamic(&cpu_brand(), lang, speaker, pending);
         return;
     }
 
@@ -2059,7 +2110,7 @@ fn dispatch_agent(
             system::firmware_revision()
         );
         play(ag(hda::AGENT_FIRMWARE_IS), speaker, pending);
-        spell_current(&text, lang, speaker, pending);
+        speak_dynamic(&text, lang, speaker, pending);
         return;
     }
 
@@ -2073,7 +2124,7 @@ fn dispatch_agent(
         aw_mark!("AW_UEFI_AGENT_INFO mem={mem}");
         play(ag(hda::AGENT_VALUE_IS), speaker, pending);
         let summary = format!("{mem} {}, {virt}", tx(lang, "mega-octets", "megabytes"));
-        spell_current(&summary, lang, speaker, pending);
+        speak_dynamic(&summary, lang, speaker, pending);
         return;
     }
 
@@ -2100,14 +2151,14 @@ fn dispatch_agent(
                     tx(lang, "groupes", "groups"),
                     tx(lang, "reglages", "settings")
                 );
-                spell_current(&summary, lang, speaker, pending);
+                speak_dynamic(&summary, lang, speaker, pending);
                 // Read the real store names aloud too, so the firmware's own configuration is
                 // heard by ear, not just counted. Interruptible.
                 for name in &names {
                     if pending.is_some() {
                         break;
                     }
-                    spell_current(name, lang, speaker, pending);
+                    speak_dynamic(name, lang, speaker, pending);
                 }
             }
             None => play(ag(hda::AGENT_FAILED), speaker, pending),
@@ -2151,7 +2202,7 @@ fn dispatch_agent(
             .collect();
         uefi::println!("  {} firmware settings, {} shown", all.len(), shown.len());
         play(ag(hda::AGENT_VALUE_IS), speaker, pending);
-        spell_current(&format!("{}", all.len()), lang, speaker, pending);
+        speak_dynamic(&format!("{}", all.len()), lang, speaker, pending);
         let config = firmware_config_values();
         for setting in &shown {
             if pending.is_some() {
@@ -2176,7 +2227,7 @@ fn dispatch_agent(
                 setting.offset,
                 setting.width
             );
-            spell_current(
+            speak_dynamic(
                 &format!("{}, {value}", setting.name),
                 lang,
                 speaker,
@@ -2284,7 +2335,7 @@ fn dispatch_agent(
                 if pending.is_some() {
                     break;
                 }
-                spell_current(
+                speak_dynamic(
                     &format!("{}. {}", index + 1, opt.label),
                     lang,
                     speaker,
@@ -2641,6 +2692,20 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
             count(cstr16!("KEK"), &VariableVendor::GLOBAL_VARIABLE),
             count(cstr16!("db"), &IMAGE_SECURITY_DATABASE),
             count(cstr16!("dbx"), &IMAGE_SECURITY_DATABASE),
+        );
+    }
+
+    // Prove the runtime formant synthesizer runs on this firmware: synthesize a fixed phrase
+    // (in soft-float, before any OS) and report the PCM it produced. A non-zero byte count is
+    // headless evidence that arbitrary dynamic text - device names, values - can now be spoken
+    // as words, not just spelled. The clip is not played here, so it adds no boot latency.
+    {
+        let pcm = crate::synth::say("boot device one two eight zero", false);
+        aw_mark!(
+            "AW_UEFI_SYNTH_SELFTEST bytes={} rate={} pitch={}",
+            pcm.len(),
+            crate::synth::rate(),
+            crate::synth::pitch(),
         );
     }
 
@@ -3024,6 +3089,29 @@ pub fn run(width: usize, height: usize, speaker: &mut Option<audio::Speaker>) {
                     if let Some(clip) = hda::spell_clip('a', matches!(lang, Lang::Fr)) {
                         play(clip, speaker, &mut pending);
                     }
+                }
+                // Speech rate and pitch drive the runtime synthesizer. After each change,
+                // speak the new value through the synthesizer itself, so the user hears the
+                // effect on the real voice at once.
+                Nav::RateUp | Nav::RateDown => {
+                    let percent = if matches!(classify(key), Nav::RateUp) {
+                        crate::synth::rate_up()
+                    } else {
+                        crate::synth::rate_down()
+                    };
+                    aw_mark!("AW_UEFI_SYNTH_RATE percent={percent}");
+                    sound::cue(CUE_MOVE_HZ, Duration::from_millis(40));
+                    speak_dynamic(&format!("{percent}"), lang, speaker, &mut pending);
+                }
+                Nav::PitchUp | Nav::PitchDown => {
+                    let hz = if matches!(classify(key), Nav::PitchUp) {
+                        crate::synth::pitch_up()
+                    } else {
+                        crate::synth::pitch_down()
+                    };
+                    aw_mark!("AW_UEFI_SYNTH_PITCH hz={hz}");
+                    sound::cue(CUE_MOVE_HZ, Duration::from_millis(40));
+                    speak_dynamic(&format!("{hz}"), lang, speaker, &mut pending);
                 }
                 Nav::Ignore => {}
             }

@@ -180,7 +180,8 @@ pub fn run(width: usize, height: usize) {
         node(5, Role::StaticText, "Loading the operating system"),
     ];
     // Pre-recorded speech for each line, in order; the dynamic display line has no
-    // clip and is spoken only on the console (until a runtime synthesizer lands).
+    // clip and is spoken on the console (the runtime formant synthesizer in
+    // `synth.rs` now voices dynamic values inside the setup that follows).
     let clips: [Option<&'static [u8]>; 5] = [
         Some(hda::CLIP_WELCOME),
         Some(hda::CLIP_ACTIVE),
