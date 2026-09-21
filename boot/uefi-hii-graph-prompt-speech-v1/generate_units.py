@@ -78,6 +78,8 @@ def main():
         raise SystemExit('usage: generate_units.py OUTPUT_C METADATA')
     out=Path(sys.argv[1]); meta=Path(sys.argv[2])
     speech=load_source()
+    if speech.SAMPLE_RATE != 16000:
+        raise SystemExit(f'voice profile v4 requires 16000 Hz source, got {speech.SAMPLE_RATE}')
     names=sorted({'sil'} | {u for seq in LETTER_UNITS.values() for u in seq})
     source_units=speech.make_units()
     converted={n:convert(source_units[n], speech.SAMPLE_RATE) for n in names}
@@ -110,6 +112,10 @@ def main():
         'OS-UEFI-HII-GRAPH-PROMPT-SPEECH-UNITS-V1\n'
         'source=boot/uefi-native-speech-v1/build_uefi_native_speech.py\n'
         f'source-sha256={hashlib.sha256(SOURCE.read_bytes()).hexdigest()}\n'
+        f'source-sample-rate={speech.SAMPLE_RATE}\n'
+        'output-sample-rate=48000\n'
+        'voice-profile=hi-intelligibility-16khz-v4\n'
+        'resampler=linear-interpolation-v1\n'
         f'unit-names={",".join(names)}\n'
         f'unit-count={len(names)}\n'
         f'bank-bytes={len(bank)}\n'
@@ -125,6 +131,7 @@ def main():
     print('HII_GRAPH_PROMPT_UNIT_GENERATION=PASS')
     print('UNIT_COUNT='+str(len(names)))
     print('BANK_BYTES='+str(len(bank)))
+    print('VOICE_PROFILE=HI_INTELLIGIBILITY_16KHZ_V4')
 
 if __name__=='__main__':
     main()
