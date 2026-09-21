@@ -101,7 +101,6 @@ static int map_bar(u32 cfg,u64*bar){
 static inline u8 mr8(u32 o){return *(volatile u8*)(g_mmio+o);}
 static inline u32 mr32(u32 o){return *(volatile u32*)(g_mmio+o);}
 static inline void mw32(u32 o,u32 v){*(volatile u32*)(g_mmio+o)=v;fence();}
-static inline u64 mr64(u32 o){return (u64)mr32(o)|((u64)mr32(o+4u)<<32);}
 static inline void mw64(u32 o,u64 v){mw32(o,(u32)v);mw32(o+4u,(u32)(v>>32));}
 static void zero(void*p,usize n){volatile u8*d=(volatile u8*)p;while(n--)*d++=0;}
 static int wait_mask(u32 off,u32 mask,u32 want,u32 loops){
