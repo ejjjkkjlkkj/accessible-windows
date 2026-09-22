@@ -143,8 +143,13 @@ static int sr_live_append_forms(
         char *value;
         uint32_t flags;
         size_t converted = 0u;
+        size_t j;
 
         *meta = local[i];
+        for (j = 0u; j < snapshot->count; ++j) {
+            if (snapshot->records[j].id == meta->stable_id) return 0;
+        }
+
         prompt = sr_live_resolve_required(
             snapshot,
             string_resolver,
@@ -235,7 +240,8 @@ int sr_live_hii_build_package_list(
         }
 
         if (type == SR_HII_PACKAGE_END) {
-            if (length != SR_HII_PACKAGE_HEADER_SIZE) {
+            if (length != SR_HII_PACKAGE_HEADER_SIZE ||
+                offset + length != list_length) {
                 sr_live_zero(snapshot);
                 return 0;
             }
@@ -261,9 +267,6 @@ int sr_live_hii_build_package_list(
         offset += length;
     }
 
-    if (!saw_forms || snapshot->count == 0u) {
-        sr_live_zero(snapshot);
-        return 0;
-    }
-    return 1;
+    sr_live_zero(snapshot);
+    return 0;
 }
