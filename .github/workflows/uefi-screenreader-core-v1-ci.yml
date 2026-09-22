@@ -1,0 +1,51 @@
+name: uefi-screenreader-core-v1-ci
+
+on:
+  push:
+    branches: [uefi-screenreader-core-v1-20260922]
+    paths:
+      - 'boot/uefi-screenreader-core-v1/**'
+      - '.github/workflows/uefi-screenreader-core-v1-ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: uefi-screenreader-core-v1-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prove golden boot path untouched
+        run: |
+          set -euo pipefail
+          git diff --exit-code 9cd02dc7db3ab728aba024ecca2a2e5801014007..HEAD --             boot/uefi-hii-graph-prompt-speech-v1             scripts/build-uefi-screenreader-usb-image.sh
+          echo UEFI_GOLDEN_BOOT_PATH_UNTOUCHED=PASS
+
+      - name: Compile freestanding core
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-core-v1
+          clang -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone             -O2 -Wall -Wextra -Werror -pedantic             -c "$root/screenreader_core.c" -o "$root/screenreader_core.o"
+          test -s "$root/screenreader_core.o"
+          echo UEFI_SCREENREADER_FREESTANDING_BUILD=PASS
+
+      - name: Run behavior tests with sanitizers
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-core-v1
+          clang -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             "$root/screenreader_core.c" "$root/screenreader_core_test.c"             -o "$root/screenreader_core_test"
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1             "$root/screenreader_core_test"
+          echo UEFI_SCREENREADER_SANITIZERS=PASS
+
+      - name: Static analyzer
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-core-v1
+          clang --analyze -std=c11 -Wall -Wextra -Werror             "$root/screenreader_core.c"
+          echo UEFI_SCREENREADER_STATIC_ANALYSIS=PASS
