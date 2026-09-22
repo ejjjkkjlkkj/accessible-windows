@@ -30,7 +30,8 @@ enum {
     SR_HII_FLAG_CHANGED    = 1u << 3,
     SR_HII_FLAG_DANGER     = 1u << 4,
     SR_HII_FLAG_SUPPRESSED = 1u << 5,
-    SR_HII_FLAG_GRAYED     = 1u << 6
+    SR_HII_FLAG_GRAYED     = 1u << 6,
+    SR_HII_FLAG_READ_ONLY  = 1u << 7
 };
 
 typedef struct {
