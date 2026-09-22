@@ -168,6 +168,8 @@ static u8 g_nav_event_mask;
 static u8 g_nav_speech_events;
 static u8 g_nav_realtime_events;
 static u8 g_nav_speech_interruptions;
+static u8 g_nav_role_events;
+static u8 g_nav_first_letter_events;
 #define NAV_SEEN_UP        0x01u
 #define NAV_SEEN_DOWN      0x02u
 #define NAV_SEEN_R         0x04u
@@ -376,9 +378,24 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_REQUIRED_EVENTS=");
     proof_puts(proof,sizeof(proof),&n,
         ((g_nav_event_mask & NAV_REQUIRED_MASK) == NAV_REQUIRED_MASK &&
-         g_nav_speech_events >= 7u) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+         g_nav_speech_events >= 10u &&
+         g_nav_role_events >= 2u &&
+         g_nav_first_letter_events >= 1u) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_EXIT=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SEMANTIC_ROLE=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_POSITION_SPEECH=PASS\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ROLE_NEXT=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_role_events >= 1u ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ROLE_PREVIOUS=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_role_events >= 2u ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_FIRST_LETTER=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_first_letter_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ROLE_EVENTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_role_events);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_FIRST_LETTER_EVENTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_first_letter_events);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SPEECH_EVENTS=0x");
     proof_hex8(proof,sizeof(proof),&n,g_nav_speech_events);
     proof_puts(proof,sizeof(proof),&n,"\r\n");
@@ -1110,6 +1127,26 @@ static int nav_prompt_add(u8 opcode, const char *text, u32 count) {
     return 1;
 }
 
+static u32 nav_append_text(char *out, u32 n, const char *text) {
+    while (*text && n < MAX_HII_PROMPT_CHARS) out[n++] = *text++;
+    return n;
+}
+
+static u32 nav_append_u8_decimal(char *out, u32 n, u8 value) {
+    if (value >= 100u) {
+        if (n < MAX_HII_PROMPT_CHARS) out[n++] = (char)('0' + (value / 100u));
+        value = (u8)(value % 100u);
+        if (n < MAX_HII_PROMPT_CHARS) out[n++] = (char)('0' + (value / 10u));
+        if (n < MAX_HII_PROMPT_CHARS) out[n++] = (char)('0' + (value % 10u));
+    } else if (value >= 10u) {
+        if (n < MAX_HII_PROMPT_CHARS) out[n++] = (char)('0' + (value / 10u));
+        if (n < MAX_HII_PROMPT_CHARS) out[n++] = (char)('0' + (value % 10u));
+    } else if (n < MAX_HII_PROMPT_CHARS) {
+        out[n++] = (char)('0' + value);
+    }
+    return n;
+}
+
 static void nav_prompt_load(u8 index) {
     if (index >= g_nav_prompt_total) return;
     g_nav_prompt_index = index;
@@ -1118,16 +1155,58 @@ static void nav_prompt_load(u8 index) {
     for (u32 j = 0; j < g_prompt_count; ++j) g_prompt_text[j] = g_nav_prompts[index][j];
     g_prompt_text[g_prompt_count] = 0;
 
-    /* A screen reader must announce semantics, not only raw label text.
-       Put the IFR role first so it can never be truncated away. */
+    /*
+     * Speak semantic role + position + label.  The role and position are
+     * deliberately emitted first so they survive a 64-character truncation.
+     * Example: "choice 2 sur 7 boot mode".
+     */
     const char *role = ifr_semantic_role(g_nav_prompt_opcode);
     u32 n = 0;
-    while (*role && n < MAX_HII_PROMPT_CHARS) g_nav_speech_text[n++] = *role++;
-    if (n < MAX_HII_PROMPT_CHARS && g_prompt_count) g_nav_speech_text[n++] = ' ';
+    n = nav_append_text(g_nav_speech_text, n, role);
+    n = nav_append_text(g_nav_speech_text, n, " ");
+    n = nav_append_u8_decimal(g_nav_speech_text, n, (u8)(g_nav_prompt_index + 1u));
+    n = nav_append_text(g_nav_speech_text, n, " sur ");
+    n = nav_append_u8_decimal(g_nav_speech_text, n, g_nav_prompt_total);
+    if (g_prompt_count) n = nav_append_text(g_nav_speech_text, n, " ");
     for (u32 j = 0; j < g_prompt_count && n < MAX_HII_PROMPT_CHARS; ++j)
         g_nav_speech_text[n++] = g_prompt_text[j];
     g_nav_speech_text[n] = 0;
     g_nav_speech_length = (u8)n;
+}
+
+static int nav_find_first_letter(u16 key, u8 *target_out) {
+    if (!target_out || !g_nav_prompt_total) return 0;
+    u16 folded = fold_prompt_char(key);
+    if (folded < (u16)'a' || folded > (u16)'z') return 0;
+    for (u8 step = 1u; step <= g_nav_prompt_total; ++step) {
+        u8 index = (u8)((g_nav_prompt_index + step) % g_nav_prompt_total);
+        if ((u8)g_nav_prompts[index][0] == (u8)folded) {
+            *target_out = index;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int nav_find_distinct_role(int direction, u8 *target_out) {
+    if (!target_out || g_nav_prompt_total < 2u) return 0;
+    u8 start_role = g_nav_prompt_opcode;
+    for (u8 step = 1u; step < g_nav_prompt_total; ++step) {
+        u8 index;
+        if (direction > 0) {
+            index = (u8)((g_nav_prompt_index + step) % g_nav_prompt_total);
+        } else {
+            u8 delta = (u8)(step % g_nav_prompt_total);
+            index = g_nav_prompt_index >= delta
+                ? (u8)(g_nav_prompt_index - delta)
+                : (u8)(g_nav_prompt_total - (delta - g_nav_prompt_index));
+        }
+        if (g_nav_prompt_opcodes[index] != start_role) {
+            *target_out = index;
+            return 1;
+        }
+    }
+    return 0;
 }
 #endif
 
@@ -1156,6 +1235,8 @@ static int resolve_hii_prompt(void *system_table) {
     g_nav_speech_events = 0;
     g_nav_realtime_events = 0;
     g_nav_speech_interruptions = 0;
+    g_nav_role_events = 0;
+    g_nav_first_letter_events = 0;
 #endif
 
     for (u32 hi = 0; hi < handles; ++hi) {
@@ -1218,6 +1299,12 @@ static int resolve_hii_prompt(void *system_table) {
         serial_puts("HII_GRAPH_NAV_ROLE=");
         serial_puts(ifr_semantic_role(g_nav_prompt_opcode));
         serial_puts("\r\n");
+        serial_puts("HII_GRAPH_NAV_POSITION=0x");
+        serial_hex8((u8)(g_nav_prompt_index + 1u));
+        serial_puts("/0x");
+        serial_hex8(g_nav_prompt_total);
+        serial_puts("\r\n");
+        marker("HII_GRAPH_NAV_POSITION_SPEECH=PASS");
         serial_puts("HII_GRAPH_NAV_SPEECH_TEXT=");
         serial_puts(g_nav_speech_text);
         serial_puts("\r\n");
@@ -1502,7 +1589,9 @@ static int wait_navigation_keys(void *system_table) {
                 marker("HII_GRAPH_NAV_KEY=ESC");
                 speech_dma_stop();
                 if ((g_nav_event_mask & NAV_REQUIRED_MASK) != NAV_REQUIRED_MASK ||
-                    g_nav_speech_events < 7u) {
+                    g_nav_speech_events < 10u ||
+                    g_nav_role_events < 2u ||
+                    g_nav_first_letter_events < 1u) {
                     marker("HII_GRAPH_NAV_REQUIRED_EVENTS=PENDING");
                     marker("HII_GRAPH_NAV_EXIT=BLOCKED_INCOMPLETE");
                     continue;
@@ -1515,6 +1604,41 @@ static int wait_navigation_keys(void *system_table) {
                 marker("HII_GRAPH_NAV_KEY=R");
                 g_nav_event_mask |= NAV_SEEN_R;
                 speak = 1;
+            } else if (key.scan_code == 0x0010u) {
+                marker("HII_GRAPH_NAV_KEY=F6");
+                u8 target = 0;
+                if (nav_find_distinct_role(1, &target)) {
+                    nav_prompt_load(target);
+                    if (g_nav_role_events != 0xffu) ++g_nav_role_events;
+                    marker("HII_GRAPH_NAV_ROLE_NEXT=PASS");
+                    speak = 1;
+                } else {
+                    marker("HII_GRAPH_NAV_ROLE_NEXT=NOT_AVAILABLE");
+                }
+            } else if (key.scan_code == 0x0011u) {
+                marker("HII_GRAPH_NAV_KEY=F7");
+                u8 target = 0;
+                if (nav_find_distinct_role(-1, &target)) {
+                    nav_prompt_load(target);
+                    if (g_nav_role_events != 0xffu) ++g_nav_role_events;
+                    marker("HII_GRAPH_NAV_ROLE_PREVIOUS=PASS");
+                    speak = 1;
+                } else {
+                    marker("HII_GRAPH_NAV_ROLE_PREVIOUS=NOT_AVAILABLE");
+                }
+            } else if (key.unicode_char &&
+                       fold_prompt_char(key.unicode_char) >= (u16)'a' &&
+                       fold_prompt_char(key.unicode_char) <= (u16)'z') {
+                u8 target = 0;
+                marker("HII_GRAPH_NAV_KEY=FIRST_LETTER");
+                if (nav_find_first_letter(key.unicode_char, &target)) {
+                    nav_prompt_load(target);
+                    if (g_nav_first_letter_events != 0xffu) ++g_nav_first_letter_events;
+                    marker("HII_GRAPH_NAV_FIRST_LETTER=PASS");
+                    speak = 1;
+                } else {
+                    marker("HII_GRAPH_NAV_FIRST_LETTER=NO_MATCH");
+                }
             } else if (key.scan_code == 0x0001u) {
                 marker("HII_GRAPH_NAV_KEY=UP");
                 g_nav_event_mask |= NAV_SEEN_UP;
@@ -1564,6 +1688,12 @@ static int wait_navigation_keys(void *system_table) {
                 serial_puts("HII_GRAPH_NAV_ROLE=");
                 serial_puts(ifr_semantic_role(g_nav_prompt_opcode));
                 serial_puts("\r\n");
+                serial_puts("HII_GRAPH_NAV_POSITION=0x");
+                serial_hex8((u8)(g_nav_prompt_index + 1u));
+                serial_puts("/0x");
+                serial_hex8(g_nav_prompt_total);
+                serial_puts("\r\n");
+                marker("HII_GRAPH_NAV_POSITION_SPEECH=PASS");
                 serial_puts("HII_GRAPH_NAV_SPEECH_TEXT=");
                 serial_puts(g_nav_speech_text);
                 serial_puts("\r\n");
@@ -1691,7 +1821,10 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("LPIB_PROGRESS=PASS");
     marker("HII_GRAPH_NAV_REALTIME_CAPABLE=PASS");
 #ifdef QEV_INTERACTIVE_NAV
-    marker("HII_GRAPH_NAV_SEMANTIC_SPEECH=ROLE_PLUS_LABEL");
+    marker("HII_GRAPH_NAV_SEMANTIC_SPEECH=ROLE_POSITION_LABEL");
+    marker("HII_GRAPH_NAV_POSITION_SPEECH=PASS");
+    marker("HII_GRAPH_NAV_FIRST_LETTER_CAPABLE=PASS");
+    marker("HII_GRAPH_NAV_ROLE_ROTOR_CAPABLE=PASS");
 #endif
     if (g_controller_preferred && g_codec_vendor_id == 0x10ec0256u) {
         marker("PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS");
