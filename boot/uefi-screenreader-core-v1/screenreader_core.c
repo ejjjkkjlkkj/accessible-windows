@@ -286,6 +286,15 @@ int sr_chooser_previous(SrNavigator *nav) {
     return 1;
 }
 
+const SrItem *sr_chooser_current(const SrNavigator *nav) {
+    size_t index;
+    if (!nav || !nav->chooser_open || nav->chooser_match_count == 0) return NULL;
+    if (nav->chooser_cursor >= nav->chooser_match_count) return NULL;
+    index = nav->chooser_matches[nav->chooser_cursor];
+    if (index >= nav->count) return NULL;
+    return &nav->items[index];
+}
+
 int sr_chooser_select(SrNavigator *nav) {
     size_t selected;
     if (!nav || !nav->chooser_open || nav->chooser_match_count == 0) return 0;
@@ -373,6 +382,34 @@ size_t sr_format_hint(const SrNavigator *nav, char *out, size_t cap) {
     item = sr_nav_current(nav);
     if (!item || !item->hint || !item->hint[0]) return 0;
     return sr_copy_text(out, cap, 0, item->hint);
+}
+
+size_t sr_format_chooser(const SrNavigator *nav, char *out, size_t cap) {
+    const SrItem *item;
+    size_t pos = 0;
+
+    if (!out || cap == 0) return 0;
+    out[0] = '\0';
+    item = sr_chooser_current(nav);
+    if (!item) return 0;
+
+    pos = sr_copy_text(out, cap, pos, "Item chooser");
+    pos = sr_append_sep(out, cap, pos);
+    if (item->label && item->label[0]) {
+        pos = sr_copy_text(out, cap, pos, item->label);
+        pos = sr_append_sep(out, cap, pos);
+    }
+    if (item->value && item->value[0] && item->role != SR_ROLE_PASSWORD) {
+        pos = sr_copy_text(out, cap, pos, item->value);
+        pos = sr_append_sep(out, cap, pos);
+    }
+    pos = sr_copy_text(out, cap, pos, sr_role_name(item->role));
+    pos = sr_append_sep(out, cap, pos);
+    pos = sr_copy_text(out, cap, pos, "match ");
+    pos = sr_append_u32(out, cap, pos, (uint32_t)(nav->chooser_cursor + 1u));
+    pos = sr_copy_text(out, cap, pos, " of ");
+    pos = sr_append_u32(out, cap, pos, (uint32_t)nav->chooser_match_count);
+    return pos;
 }
 
 size_t sr_format_alert(const char *title, const char *detail, char *out, size_t cap) {
