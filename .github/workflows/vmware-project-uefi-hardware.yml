@@ -2,7 +2,7 @@ name: vmware-project-uefi-hardware
 
 on:
   push:
-    branches: [main]
+    branches: [main, amd5800h-vmware-live-20260922]
     paths:
       - ".github/workflows/vmware-project-uefi-hardware.yml"
   workflow_dispatch:
