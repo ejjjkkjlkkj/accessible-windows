@@ -341,11 +341,16 @@ size_t sr_format_focus(const SrNavigator *nav, char *out, size_t cap) {
         pos = sr_copy_text(out, cap, pos, " of ");
         pos = sr_append_u32(out, cap, pos, (uint32_t)total);
     }
-    if (item->hint && item->hint[0]) {
-        pos = sr_append_sep(out, cap, pos);
-        pos = sr_copy_text(out, cap, pos, item->hint);
-    }
     return pos;
+}
+
+size_t sr_format_hint(const SrNavigator *nav, char *out, size_t cap) {
+    const SrItem *item;
+    if (!out || cap == 0) return 0;
+    out[0] = '\0';
+    item = sr_nav_current(nav);
+    if (!item || !item->hint || !item->hint[0]) return 0;
+    return sr_copy_text(out, cap, 0, item->hint);
 }
 
 size_t sr_format_alert(const char *title, const char *detail, char *out, size_t cap) {
