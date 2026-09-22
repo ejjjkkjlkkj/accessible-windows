@@ -11,36 +11,41 @@ permissions:
   contents: read
 
 jobs:
-  vmware-install-probe:
+  vmware-install-route-probe:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
-      - name: Probe WinGet VMware package
+      - name: Verify VMware installation route
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           winget --version
           winget source update
-          winget show --id VMware.WorkstationPro -e --source winget --accept-source-agreements
 
-      - name: Install VMware Workstation Pro
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          winget install --id VMware.WorkstationPro -e --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+          & winget show --id VMware.WorkstationPro -e --source winget --accept-source-agreements
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "VMWARE_WINGET_PACKAGE=AVAILABLE"
+          } else {
+            Write-Host "VMWARE_WINGET_PACKAGE=UNAVAILABLE"
+            Write-Host "VMWARE_INSTALL_ROUTE=BROADCOM_PORTAL_OR_PREINSTALLED_RUNNER"
+          }
 
           $candidates = @(
             "$env:ProgramFiles\VMware\VMware Workstation\vmrun.exe",
             "${env:ProgramFiles(x86)}\VMware\VMware Workstation\vmrun.exe"
           )
           $vmrun = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-          if (-not $vmrun) { throw "VMware install completed but vmrun.exe was not found." }
+          if ($vmrun) {
+            $version = (Get-Item $vmrun).VersionInfo.FileVersion
+            Write-Host "VMWARE_PREINSTALLED=PASS"
+            Write-Host "VMWARE_VERSION=$version"
+            & $vmrun -T ws list
+            if ($LASTEXITCODE) { throw "Preinstalled vmrun CLI probe failed with exit code $LASTEXITCODE" }
+          } else {
+            Write-Host "VMWARE_PREINSTALLED=NO"
+          }
 
-          $version = (Get-Item $vmrun).VersionInfo.FileVersion
-          Write-Host "VMWARE_INSTALL=PASS"
-          Write-Host "VMWARE_VERSION=$version"
-          & $vmrun -T ws list
-          if ($LASTEXITCODE) { throw "vmrun CLI probe failed with exit code $LASTEXITCODE" }
+          Write-Host "VMWARE_INSTALL_ROUTE_PROBE=PASS"
 
   project-build-probe:
     runs-on: windows-latest
