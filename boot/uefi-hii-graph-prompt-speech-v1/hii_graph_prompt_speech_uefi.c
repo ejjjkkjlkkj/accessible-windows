@@ -170,6 +170,10 @@ static u8 g_nav_realtime_events;
 static u8 g_nav_speech_interruptions;
 static u8 g_nav_role_events;
 static u8 g_nav_first_letter_events;
+static u8 g_nav_chooser_open_events;
+static u8 g_nav_chooser_filter_events;
+static u8 g_nav_chooser_select_events;
+static u8 g_nav_chooser_cancel_events;
 #define NAV_SEEN_UP        0x01u
 #define NAV_SEEN_DOWN      0x02u
 #define NAV_SEEN_R         0x04u
@@ -378,9 +382,13 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_REQUIRED_EVENTS=");
     proof_puts(proof,sizeof(proof),&n,
         ((g_nav_event_mask & NAV_REQUIRED_MASK) == NAV_REQUIRED_MASK &&
-         g_nav_speech_events >= 10u &&
+         g_nav_speech_events >= 15u &&
          g_nav_role_events >= 2u &&
-         g_nav_first_letter_events >= 1u) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+         g_nav_first_letter_events >= 1u &&
+         g_nav_chooser_open_events >= 2u &&
+         g_nav_chooser_filter_events >= 1u &&
+         g_nav_chooser_select_events >= 1u &&
+         g_nav_chooser_cancel_events >= 1u) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_EXIT=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SEMANTIC_ROLE=PASS\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_POSITION_SPEECH=PASS\r\n");
@@ -395,6 +403,20 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_FIRST_LETTER_EVENTS=0x");
     proof_hex8(proof,sizeof(proof),&n,g_nav_first_letter_events);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_OPEN=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_chooser_open_events >= 2u ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_FILTER=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_chooser_filter_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_SELECT=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_chooser_select_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_CANCEL=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_chooser_cancel_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_OPEN_EVENTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_chooser_open_events);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_FILTER_EVENTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_chooser_filter_events);
     proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SPEECH_EVENTS=0x");
     proof_hex8(proof,sizeof(proof),&n,g_nav_speech_events);
@@ -1208,6 +1230,51 @@ static int nav_find_distinct_role(int direction, u8 *target_out) {
     }
     return 0;
 }
+
+#define MAX_HII_CHOOSER_QUERY 16u
+
+static int nav_prompt_contains(u8 index, const char *query, u8 query_len) {
+    if (index >= g_nav_prompt_total || !query) return 0;
+    if (!query_len) return 1;
+    u8 len = g_nav_prompt_lengths[index];
+    if (query_len > len) return 0;
+    for (u8 start = 0; start <= (u8)(len - query_len); ++start) {
+        u8 same = 1;
+        for (u8 j = 0; j < query_len; ++j) {
+            if ((u8)g_nav_prompts[index][start + j] != (u8)query[j]) {
+                same = 0;
+                break;
+            }
+        }
+        if (same) return 1;
+    }
+    return 0;
+}
+
+static u8 nav_collect_matches(const char *query, u8 query_len, u8 *matches) {
+    if (!matches) return 0;
+    u8 count = 0;
+    for (u8 i = 0; i < g_nav_prompt_total; ++i) {
+        if (nav_prompt_contains(i, query, query_len))
+            matches[count++] = i;
+    }
+    return count;
+}
+
+static void nav_build_chooser_speech(u8 match_position, u8 match_total) {
+    const char *role = ifr_semantic_role(g_nav_prompt_opcode);
+    u32 n = 0;
+    n = nav_append_text(g_nav_speech_text, n, role);
+    n = nav_append_text(g_nav_speech_text, n, " recherche ");
+    n = nav_append_u8_decimal(g_nav_speech_text, n, (u8)(match_position + 1u));
+    n = nav_append_text(g_nav_speech_text, n, " sur ");
+    n = nav_append_u8_decimal(g_nav_speech_text, n, match_total);
+    if (g_prompt_count) n = nav_append_text(g_nav_speech_text, n, " ");
+    for (u32 j = 0; j < g_prompt_count && n < MAX_HII_PROMPT_CHARS; ++j)
+        g_nav_speech_text[n++] = g_prompt_text[j];
+    g_nav_speech_text[n] = 0;
+    g_nav_speech_length = (u8)n;
+}
 #endif
 
 static int resolve_hii_prompt(void *system_table) {
@@ -1237,6 +1304,10 @@ static int resolve_hii_prompt(void *system_table) {
     g_nav_speech_interruptions = 0;
     g_nav_role_events = 0;
     g_nav_first_letter_events = 0;
+    g_nav_chooser_open_events = 0;
+    g_nav_chooser_filter_events = 0;
+    g_nav_chooser_select_events = 0;
+    g_nav_chooser_cancel_events = 0;
 #endif
 
     for (u32 hi = 0; hi < handles; ++hi) {
@@ -1578,6 +1649,14 @@ static int wait_navigation_keys(void *system_table) {
     serial_puts("\r\n");
 
     u8 audio_progress_for_current = 0;
+    u8 chooser_active = 0;
+    u8 chooser_origin = 0;
+    u8 chooser_matches[MAX_HII_NAV_PROMPTS];
+    u8 chooser_count = 0;
+    u8 chooser_position = 0;
+    char chooser_query[MAX_HII_CHOOSER_QUERY + 1u];
+    u8 chooser_query_len = 0;
+    chooser_query[0] = 0;
     for (;;) {
         efi_input_key key;
         key.scan_code = 0;
@@ -1585,13 +1664,111 @@ static int wait_navigation_keys(void *system_table) {
         u64 st = conin->read_key(conin, &key);
         if (st == 0) {
             u8 speak = 0;
-            if (key.unicode_char == 0x001bu || key.scan_code == 0x0017u) {
+            if (chooser_active) {
+                if (key.unicode_char == 0x001bu || key.scan_code == 0x0017u ||
+                    key.scan_code == 0x0012u) {
+                    marker("HII_GRAPH_NAV_ITEM_CHOOSER_KEY=ESC");
+                    chooser_active = 0;
+                    nav_prompt_load(chooser_origin);
+                    if (g_nav_chooser_cancel_events != 0xffu) ++g_nav_chooser_cancel_events;
+                    marker("HII_GRAPH_NAV_ITEM_CHOOSER_CANCEL=PASS");
+                    speak = 1;
+                } else if (key.unicode_char == 0x000du) {
+                    marker("HII_GRAPH_NAV_ITEM_CHOOSER_KEY=ENTER");
+                    chooser_active = 0;
+                    nav_prompt_load(g_nav_prompt_index);
+                    if (g_nav_chooser_select_events != 0xffu) ++g_nav_chooser_select_events;
+                    marker("HII_GRAPH_NAV_ITEM_CHOOSER_SELECT=PASS");
+                    speak = 1;
+                } else if (key.scan_code == 0x0001u && chooser_count) {
+                    chooser_position = chooser_position
+                        ? (u8)(chooser_position - 1u)
+                        : (u8)(chooser_count - 1u);
+                    nav_prompt_load(chooser_matches[chooser_position]);
+                    nav_build_chooser_speech(chooser_position, chooser_count);
+                    marker("HII_GRAPH_NAV_ITEM_CHOOSER_PREVIOUS=PASS");
+                    speak = 1;
+                } else if (key.scan_code == 0x0002u && chooser_count) {
+                    chooser_position = (u8)(chooser_position + 1u);
+                    if (chooser_position >= chooser_count) chooser_position = 0;
+                    nav_prompt_load(chooser_matches[chooser_position]);
+                    nav_build_chooser_speech(chooser_position, chooser_count);
+                    marker("HII_GRAPH_NAV_ITEM_CHOOSER_NEXT=PASS");
+                    speak = 1;
+                } else if (key.unicode_char == 0x0008u && chooser_query_len) {
+                    --chooser_query_len;
+                    chooser_query[chooser_query_len] = 0;
+                    chooser_count = nav_collect_matches(
+                        chooser_query, chooser_query_len, chooser_matches);
+                    chooser_position = 0;
+                    if (chooser_count) {
+                        nav_prompt_load(chooser_matches[0]);
+                        nav_build_chooser_speech(0, chooser_count);
+                        if (g_nav_chooser_filter_events != 0xffu) ++g_nav_chooser_filter_events;
+                        marker("HII_GRAPH_NAV_ITEM_CHOOSER_FILTER=PASS");
+                        speak = 1;
+                    }
+                } else if (key.unicode_char && chooser_query_len < MAX_HII_CHOOSER_QUERY) {
+                    u16 folded = fold_prompt_char(key.unicode_char);
+                    if ((folded >= (u16)'a' && folded <= (u16)'z') ||
+                        (folded >= (u16)'0' && folded <= (u16)'9')) {
+                        chooser_query[chooser_query_len++] = (char)folded;
+                        chooser_query[chooser_query_len] = 0;
+                        chooser_count = nav_collect_matches(
+                            chooser_query, chooser_query_len, chooser_matches);
+                        chooser_position = 0;
+                        serial_puts("HII_GRAPH_NAV_ITEM_CHOOSER_QUERY=");
+                        serial_puts(chooser_query);
+                        serial_puts("\r\n");
+                        serial_puts("HII_GRAPH_NAV_ITEM_CHOOSER_MATCHES=0x");
+                        serial_hex8(chooser_count);
+                        serial_puts("\r\n");
+                        if (chooser_count) {
+                            nav_prompt_load(chooser_matches[0]);
+                            nav_build_chooser_speech(0, chooser_count);
+                            if (g_nav_chooser_filter_events != 0xffu) ++g_nav_chooser_filter_events;
+                            marker("HII_GRAPH_NAV_ITEM_CHOOSER_FILTER=PASS");
+                            speak = 1;
+                        } else {
+                            --chooser_query_len;
+                            chooser_query[chooser_query_len] = 0;
+                            chooser_count = nav_collect_matches(
+                                chooser_query, chooser_query_len, chooser_matches);
+                            marker("HII_GRAPH_NAV_ITEM_CHOOSER_FILTER=NO_MATCH");
+                        }
+                    }
+                }
+            } else if (key.scan_code == 0x0012u) {
+                marker("HII_GRAPH_NAV_KEY=F8");
+                chooser_active = 1;
+                chooser_origin = g_nav_prompt_index;
+                chooser_query_len = 0;
+                chooser_query[0] = 0;
+                chooser_count = nav_collect_matches(
+                    chooser_query, chooser_query_len, chooser_matches);
+                chooser_position = 0;
+                for (u8 i = 0; i < chooser_count; ++i) {
+                    if (chooser_matches[i] == g_nav_prompt_index) {
+                        chooser_position = i;
+                        break;
+                    }
+                }
+                nav_prompt_load(chooser_matches[chooser_position]);
+                nav_build_chooser_speech(chooser_position, chooser_count);
+                if (g_nav_chooser_open_events != 0xffu) ++g_nav_chooser_open_events;
+                marker("HII_GRAPH_NAV_ITEM_CHOOSER_OPEN=PASS");
+                speak = 1;
+            } else if (key.unicode_char == 0x001bu || key.scan_code == 0x0017u) {
                 marker("HII_GRAPH_NAV_KEY=ESC");
                 speech_dma_stop();
                 if ((g_nav_event_mask & NAV_REQUIRED_MASK) != NAV_REQUIRED_MASK ||
-                    g_nav_speech_events < 10u ||
+                    g_nav_speech_events < 15u ||
                     g_nav_role_events < 2u ||
-                    g_nav_first_letter_events < 1u) {
+                    g_nav_first_letter_events < 1u ||
+                    g_nav_chooser_open_events < 2u ||
+                    g_nav_chooser_filter_events < 1u ||
+                    g_nav_chooser_select_events < 1u ||
+                    g_nav_chooser_cancel_events < 1u) {
                     marker("HII_GRAPH_NAV_REQUIRED_EVENTS=PENDING");
                     marker("HII_GRAPH_NAV_EXIT=BLOCKED_INCOMPLETE");
                     continue;
@@ -1600,11 +1777,11 @@ static int wait_navigation_keys(void *system_table) {
                 marker("HII_GRAPH_NAV_EXIT=PASS");
                 return 1;
             }
-            if (key.unicode_char == (u16)'r' || key.unicode_char == (u16)'R') {
+            if (!chooser_active && (key.unicode_char == (u16)'r' || key.unicode_char == (u16)'R')) {
                 marker("HII_GRAPH_NAV_KEY=R");
                 g_nav_event_mask |= NAV_SEEN_R;
                 speak = 1;
-            } else if (key.scan_code == 0x0010u) {
+            } else if (!chooser_active && key.scan_code == 0x0010u) {
                 marker("HII_GRAPH_NAV_KEY=F6");
                 u8 target = 0;
                 if (nav_find_distinct_role(1, &target)) {
@@ -1615,7 +1792,7 @@ static int wait_navigation_keys(void *system_table) {
                 } else {
                     marker("HII_GRAPH_NAV_ROLE_NEXT=NOT_AVAILABLE");
                 }
-            } else if (key.scan_code == 0x0011u) {
+            } else if (!chooser_active && key.scan_code == 0x0011u) {
                 marker("HII_GRAPH_NAV_KEY=F7");
                 u8 target = 0;
                 if (nav_find_distinct_role(-1, &target)) {
@@ -1626,7 +1803,7 @@ static int wait_navigation_keys(void *system_table) {
                 } else {
                     marker("HII_GRAPH_NAV_ROLE_PREVIOUS=NOT_AVAILABLE");
                 }
-            } else if (key.unicode_char &&
+            } else if (!chooser_active && key.unicode_char &&
                        fold_prompt_char(key.unicode_char) >= (u16)'a' &&
                        fold_prompt_char(key.unicode_char) <= (u16)'z') {
                 u8 target = 0;
@@ -1639,37 +1816,37 @@ static int wait_navigation_keys(void *system_table) {
                 } else {
                     marker("HII_GRAPH_NAV_FIRST_LETTER=NO_MATCH");
                 }
-            } else if (key.scan_code == 0x0001u) {
+            } else if (!chooser_active && key.scan_code == 0x0001u) {
                 marker("HII_GRAPH_NAV_KEY=UP");
                 g_nav_event_mask |= NAV_SEEN_UP;
                 u8 next = g_nav_prompt_index ? (u8)(g_nav_prompt_index - 1u)
                                              : (u8)(g_nav_prompt_total - 1u);
                 nav_prompt_load(next);
                 speak = 1;
-            } else if (key.scan_code == 0x0002u) {
+            } else if (!chooser_active && key.scan_code == 0x0002u) {
                 marker("HII_GRAPH_NAV_KEY=DOWN");
                 g_nav_event_mask |= NAV_SEEN_DOWN;
                 u8 next = (u8)(g_nav_prompt_index + 1u);
                 if (next >= g_nav_prompt_total) next = 0;
                 nav_prompt_load(next);
                 speak = 1;
-            } else if (key.scan_code == 0x0005u) {
+            } else if (!chooser_active && key.scan_code == 0x0005u) {
                 marker("HII_GRAPH_NAV_KEY=HOME");
                 g_nav_event_mask |= NAV_SEEN_HOME;
                 nav_prompt_load(0u);
                 speak = 1;
-            } else if (key.scan_code == 0x0006u) {
+            } else if (!chooser_active && key.scan_code == 0x0006u) {
                 marker("HII_GRAPH_NAV_KEY=END");
                 g_nav_event_mask |= NAV_SEEN_END;
                 nav_prompt_load((u8)(g_nav_prompt_total - 1u));
                 speak = 1;
-            } else if (key.scan_code == 0x0009u) {
+            } else if (!chooser_active && key.scan_code == 0x0009u) {
                 marker("HII_GRAPH_NAV_KEY=PAGE_UP");
                 g_nav_event_mask |= NAV_SEEN_PAGE_UP;
                 u8 next = g_nav_prompt_index > 5u ? (u8)(g_nav_prompt_index - 5u) : 0u;
                 nav_prompt_load(next);
                 speak = 1;
-            } else if (key.scan_code == 0x000au) {
+            } else if (!chooser_active && key.scan_code == 0x000au) {
                 marker("HII_GRAPH_NAV_KEY=PAGE_DOWN");
                 g_nav_event_mask |= NAV_SEEN_PAGE_DOWN;
                 u8 next = (u8)(g_nav_prompt_index + 5u);
@@ -1825,6 +2002,7 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("HII_GRAPH_NAV_POSITION_SPEECH=PASS");
     marker("HII_GRAPH_NAV_FIRST_LETTER_CAPABLE=PASS");
     marker("HII_GRAPH_NAV_ROLE_ROTOR_CAPABLE=PASS");
+    marker("HII_GRAPH_NAV_ITEM_CHOOSER_CAPABLE=PASS");
 #endif
     if (g_controller_preferred && g_codec_vendor_id == 0x10ec0256u) {
         marker("PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS");
