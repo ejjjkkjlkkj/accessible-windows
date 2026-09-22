@@ -23,9 +23,11 @@ enum {
     SR_HII_FLAG_NONE     = 0u,
     SR_HII_FLAG_DISABLED = 1u << 0,
     SR_HII_FLAG_CHECKED  = 1u << 1,
-    SR_HII_FLAG_SELECTED = 1u << 2,
-    SR_HII_FLAG_CHANGED  = 1u << 3,
-    SR_HII_FLAG_DANGER   = 1u << 4
+    SR_HII_FLAG_SELECTED   = 1u << 2,
+    SR_HII_FLAG_CHANGED    = 1u << 3,
+    SR_HII_FLAG_DANGER     = 1u << 4,
+    SR_HII_FLAG_SUPPRESSED = 1u << 5,
+    SR_HII_FLAG_GRAYED     = 1u << 6
 };
 
 typedef struct {
