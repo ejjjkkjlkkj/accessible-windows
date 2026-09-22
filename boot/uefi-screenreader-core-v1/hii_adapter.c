@@ -49,6 +49,7 @@ static const char *sr_hii_copy_text(SrSemanticSnapshot *snapshot, const char *sr
 static uint32_t sr_hii_state(uint32_t flags) {
     uint32_t state = SR_STATE_NONE;
     if (flags & (SR_HII_FLAG_DISABLED | SR_HII_FLAG_GRAYED)) state |= SR_STATE_DISABLED;
+    if (flags & SR_HII_FLAG_READ_ONLY) state |= SR_STATE_READ_ONLY;
     if (flags & SR_HII_FLAG_CHECKED) state |= SR_STATE_CHECKED;
     if (flags & SR_HII_FLAG_SELECTED) state |= SR_STATE_SELECTED;
     if (flags & SR_HII_FLAG_CHANGED) state |= SR_STATE_CHANGED;
