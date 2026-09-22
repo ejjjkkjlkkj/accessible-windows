@@ -1727,6 +1727,12 @@ static int wait_navigation_keys(void *system_table) {
                     chooser_count = nav_collect_matches(
                         chooser_query, chooser_query_len, chooser_matches);
                     chooser_position = 0;
+                    serial_puts("HII_GRAPH_NAV_ITEM_CHOOSER_QUERY=");
+                    serial_puts(chooser_query);
+                    serial_puts("\r\n");
+                    serial_puts("HII_GRAPH_NAV_ITEM_CHOOSER_MATCHES=0x");
+                    serial_hex8(chooser_count);
+                    serial_puts("\r\n");
                     if (chooser_count) {
                         nav_prompt_load(chooser_matches[0]);
                         nav_build_chooser_speech(0, chooser_count);
