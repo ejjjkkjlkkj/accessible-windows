@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ejjjkkjlkkj/project
-          ref: vmware-uefi-selfhosted-20260922
+          ref: main
           path: project
 
       - name: Verify Windows physical runner
@@ -36,7 +36,7 @@ jobs:
           Write-Host "RUNNER_MACHINE=$env:COMPUTERNAME"
           Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors | Format-List
 
-      - name: Detect or install VMware Workstation
+      - name: Verify VMware Workstation
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -54,15 +54,8 @@ jobs:
 
           $vmrun = Find-Vmrun
           if (-not $vmrun) {
-            $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-            if (-not $winget) {
-              throw "VMware Workstation is missing and winget is unavailable."
-            }
-            winget install --id VMware.WorkstationPro -e --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-            $vmrun = Find-Vmrun
+            throw "VMware Workstation is not installed on this trusted runner. Install it from the Broadcom Support Portal, then rerun this workflow."
           }
-
-          if (-not $vmrun) { throw "VMware Workstation installation failed." }
 
           $auth = Get-Service -Name VMAuthdService -ErrorAction SilentlyContinue
           if ($auth -and $auth.Status -ne 'Running') { Start-Service VMAuthdService }
