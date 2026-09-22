@@ -146,7 +146,10 @@ jobs:
           p=root/'core-v2.serial'
           required=[
               b'UEFI_CORE_V2_BOOT=PASS\r\n',
+              b'UEFI_CORE_V2_IFR_COLLECTOR=PASS\r\n',
+              b'UEFI_CORE_V2_STABLE_QUESTION_ID=PASS\r\n',
               b'UEFI_CORE_V2_HII_BUILD=PASS\r\n',
+              b'UEFI_CORE_V2_READ_ONLY_STATE=PASS\r\n',
               b'UEFI_CORE_V2_INITIAL_FOCUS=PASS\r\n',
               b'UEFI_CORE_V2_NAVIGATION=PASS\r\n',
               b'UEFI_CORE_V2_CHOOSER_OPEN=PASS\r\n',
