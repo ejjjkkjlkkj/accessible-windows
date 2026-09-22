@@ -19,6 +19,22 @@ static int sr_session_item_equal(const SrItem *a, const SrItem *b) {
            sr_session_text_equal(a->value, b->value);
 }
 
+static int sr_session_emit_chooser(SrScreenReaderSession *session) {
+    const SrItem *item;
+    SrSpeechEvent event;
+
+    if (!session) return 0;
+    item = sr_chooser_current(&session->nav);
+    if (!item) return 0;
+
+    event.key = item->id;
+    event.priority = SR_SPEECH_FOCUS;
+    event.interruptible = 1u;
+    if (sr_format_chooser(&session->nav, event.text, sizeof(event.text)) == 0u) return 0;
+    (void)sr_speech_submit(&session->speech, &event);
+    return 1;
+}
+
 static int sr_session_emit_focus(SrScreenReaderSession *session) {
     const SrItem *item;
     SrSpeechEvent event;
@@ -95,6 +111,48 @@ int sr_session_navigate(
     if (!sr_nav_move(&session->nav, command, first_letter)) return 0;
     (void)sr_session_emit_focus(session);
     return 1;
+}
+
+int sr_session_repeat_focus(SrScreenReaderSession *session) {
+    return sr_session_emit_focus(session);
+}
+
+int sr_session_chooser_open(SrScreenReaderSession *session) {
+    if (!session || !sr_chooser_open(&session->nav)) return 0;
+    return sr_session_emit_chooser(session);
+}
+
+int sr_session_chooser_type(SrScreenReaderSession *session, char ch) {
+    if (!session || !sr_chooser_type(&session->nav, ch)) return 0;
+    if (session->nav.chooser_match_count == 0u) return 1;
+    return sr_session_emit_chooser(session);
+}
+
+int sr_session_chooser_backspace(SrScreenReaderSession *session) {
+    if (!session || !sr_chooser_backspace(&session->nav)) return 0;
+    if (session->nav.chooser_match_count == 0u) return 1;
+    return sr_session_emit_chooser(session);
+}
+
+int sr_session_chooser_next(SrScreenReaderSession *session) {
+    if (!session || !sr_chooser_next(&session->nav)) return 0;
+    return sr_session_emit_chooser(session);
+}
+
+int sr_session_chooser_previous(SrScreenReaderSession *session) {
+    if (!session || !sr_chooser_previous(&session->nav)) return 0;
+    return sr_session_emit_chooser(session);
+}
+
+int sr_session_chooser_select(SrScreenReaderSession *session) {
+    if (!session || !sr_chooser_select(&session->nav)) return 0;
+    return sr_session_emit_focus(session);
+}
+
+int sr_session_chooser_cancel(SrScreenReaderSession *session) {
+    if (!session || !session->nav.chooser_open) return 0;
+    sr_chooser_cancel(&session->nav);
+    return sr_session_emit_focus(session);
 }
 
 int sr_session_speak_hint(SrScreenReaderSession *session) {
