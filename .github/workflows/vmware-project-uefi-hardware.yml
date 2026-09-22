@@ -1,0 +1,245 @@
+name: vmware-project-uefi-hardware
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/vmware-project-uefi-hardware.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vmware-project-uefi:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout project under test
+        uses: actions/checkout@v5
+        with:
+          repository: ejjjkkjlkkj/project
+          ref: vmware-uefi-selfhosted-20260922
+          path: project
+
+      - name: Verify Windows physical runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $IsWindows) { throw "This workflow requires the Windows self-hosted runner." }
+          Write-Host "RUNNER_WINDOWS=PASS"
+          Write-Host "RUNNER_MACHINE=$env:COMPUTERNAME"
+          Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors | Format-List
+
+      - name: Detect or install VMware Workstation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Find-Vmrun {
+            $candidates = @(
+              "$env:ProgramFiles\VMware\VMware Workstation\vmrun.exe",
+              "${env:ProgramFiles(x86)}\VMware\VMware Workstation\vmrun.exe"
+            )
+            foreach ($p in $candidates) {
+              if ($p -and (Test-Path $p)) { return $p }
+            }
+            return $null
+          }
+
+          $vmrun = Find-Vmrun
+          if (-not $vmrun) {
+            $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+            if (-not $winget) {
+              throw "VMware Workstation is missing and winget is unavailable."
+            }
+            winget install --id VMware.WorkstationPro -e --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+            $vmrun = Find-Vmrun
+          }
+
+          if (-not $vmrun) { throw "VMware Workstation installation failed." }
+
+          $auth = Get-Service -Name VMAuthdService -ErrorAction SilentlyContinue
+          if ($auth -and $auth.Status -ne 'Running') { Start-Service VMAuthdService }
+
+          $version = (Get-Item $vmrun).VersionInfo.FileVersion
+          "VMRUN=$vmrun" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VMWARE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "VMWARE_WORKSTATION=PASS"
+          Write-Host "VMWARE_VERSION=$version"
+          & $vmrun -T ws list
+
+      - name: Ensure LLVM
+        shell: pwsh
+        working-directory: project
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $clangCmd = Get-Command clang.exe -ErrorAction SilentlyContinue
+          $lldCmd = Get-Command lld-link.exe -ErrorAction SilentlyContinue
+          $clang = if ($clangCmd) { $clangCmd.Source } else { $null }
+          $lld = if ($lldCmd) { $lldCmd.Source } else { $null }
+
+          if (-not $clang -or -not $lld) {
+            $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+            if (-not $winget) { throw "LLVM missing and winget unavailable." }
+            winget install --id LLVM.LLVM -e --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+            $env:Path = "C:\Program Files\LLVM\bin;$env:Path"
+            $clangCmd = Get-Command clang.exe -ErrorAction SilentlyContinue
+            $lldCmd = Get-Command lld-link.exe -ErrorAction SilentlyContinue
+            $clang = if ($clangCmd) { $clangCmd.Source } else { $null }
+            $lld = if ($lldCmd) { $lldCmd.Source } else { $null }
+          }
+
+          if (-not $clang -or -not $lld) { throw "LLVM unavailable." }
+          "CLANG=$clang" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "LLDLINK=$lld" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build NAVIGATION.EFI
+        shell: pwsh
+        working-directory: project
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force build | Out-Null
+          python navigation/uefi/generate_units.py build/navigation_units.c build/navigation_units.txt
+
+          $flags = @(
+            '--target=x86_64-pc-windows-msvc',
+            '-DQEV_INTERACTIVE_NAV=1',
+            '-ffreestanding',
+            '-fshort-wchar',
+            '-fno-stack-protector',
+            '-fno-builtin',
+            '-mno-red-zone',
+            '-nostdlib',
+            '-O2',
+            '-Wall',
+            '-Wextra',
+            '-Werror'
+          )
+
+          & $env:CLANG @flags -c navigation/uefi/semantic_core.c -o build/semantic_core.obj
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $env:CLANG @flags -c navigation/uefi/hii_graph_prompt_speech_uefi.c -o build/navigation.obj
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $env:CLANG @flags -c build/navigation_units.c -o build/navigation_units.obj
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $env:LLDLINK /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:build/NAVIGATION.EFI build/navigation.obj build/navigation_units.obj build/semantic_core.obj
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+          if (-not (Test-Path build/NAVIGATION.EFI)) { throw "NAVIGATION.EFI missing." }
+          Write-Host "NAVIGATION_EFI_BUILD=PASS"
+
+      - name: Create VMware UEFI boot media
+        shell: pwsh
+        working-directory: project
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vmDir = Join-Path $PWD "build\vmware-smoke-$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Force $vmDir | Out-Null
+          $img = Join-Path $vmDir "uefi-floppy.img"
+
+          python navigation/uefi/create_fat12_boot_image.py build/NAVIGATION.EFI $img
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+          $vmx = Join-Path $vmDir "qevarynx-uefi.vmx"
+          @'
+          .encoding = "windows-1252"
+          config.version = "8"
+          virtualHW.version = "20"
+          displayName = "QEVARYNOX UEFI Hardware CI"
+          guestOS = "other-64"
+          firmware = "efi"
+          uefi.secureBoot.enabled = "FALSE"
+          memsize = "512"
+          numvcpus = "1"
+          cpuid.coresPerSocket = "1"
+          floppy0.present = "TRUE"
+          floppy0.fileType = "file"
+          floppy0.fileName = "uefi-floppy.img"
+          floppy0.startConnected = "TRUE"
+          bios.bootOrder = "floppy"
+          serial0.present = "TRUE"
+          serial0.fileType = "file"
+          serial0.fileName = "serial.log"
+          serial0.tryNoRxLoss = "FALSE"
+          sound.present = "TRUE"
+          sound.virtualDev = "hdaudio"
+          sound.autodetect = "TRUE"
+          ethernet0.present = "FALSE"
+          usb.present = "FALSE"
+          tools.syncTime = "FALSE"
+          '@ | Set-Content -Path $vmx -Encoding ascii
+
+          "VMWARE_TEST_DIR=$vmDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VMX_PATH=$vmx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "VMWARE_MEDIA=PASS"
+
+      - name: Boot NAVIGATION.EFI in VMware UEFI
+        shell: pwsh
+        working-directory: project
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $serial = Join-Path $env:VMWARE_TEST_DIR "serial.log"
+
+          try {
+            & $env:VMRUN -T ws start $env:VMX_PATH nogui
+            if ($LASTEXITCODE) { throw "vmrun start failed: $LASTEXITCODE" }
+
+            $deadline = (Get-Date).AddSeconds(60)
+            while ((Get-Date) -lt $deadline) {
+              if (Test-Path $serial) {
+                $text = Get-Content -Raw -Path $serial -ErrorAction SilentlyContinue
+                if ($text -match 'HII_GRAPH_NAV_DISCOVERY_PROMPT=PASS' -or $text -match 'STATUS=BLOCKED') {
+                  break
+                }
+              }
+              Start-Sleep -Seconds 1
+            }
+
+            if (-not (Test-Path $serial)) {
+              throw "No serial log: VMware UEFI did not execute the EFI payload."
+            }
+
+            $text = Get-Content -Raw -Path $serial
+            $text | Set-Content -Path (Join-Path $env:VMWARE_TEST_DIR "serial-final.txt") -Encoding utf8
+
+            if ($text -notmatch 'QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V1') {
+              throw "EFI program signature missing."
+            }
+            if ($text -notmatch 'STATE=START') {
+              throw "EFI entry marker missing."
+            }
+            Write-Host "VMWARE_UEFI_BOOT=PASS"
+
+            if ($text -match 'HDA_CONTROLLER_CODEC=PASS') {
+              Write-Host "VMWARE_HDA_DISCOVERY=PASS"
+            } else {
+              Write-Host "VMWARE_HDA_DISCOVERY=NOT_ESTABLISHED"
+            }
+
+            if ($text -match 'HII_GRAPH_NAV_DISCOVERY_PROMPT=PASS') {
+              Write-Host "VMWARE_SCREENREADER_DISCOVERY=PASS"
+            } else {
+              $reason = [regex]::Match($text, 'REASON=([^\r\n]+)').Groups[1].Value
+              if (-not $reason) { $reason = 'DISCOVERY_PROMPT_NOT_REACHED' }
+              throw "Screen-reader runtime blocked before discovery prompt: $reason"
+            }
+          }
+          finally {
+            & $env:VMRUN -T ws stop $env:VMX_PATH hard 2>$null
+          }
+
+      - name: Upload VMware evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmware-project-uefi-evidence
+          path: |
+            project/build/NAVIGATION.EFI
+            project/build/navigation_units.txt
+            project/build/vmware-smoke-*/serial.log
+            project/build/vmware-smoke-*/serial-final.txt
+            project/build/vmware-smoke-*/vmware.log
+            project/build/vmware-smoke-*/*.vmx
+            project/build/vmware-smoke-*/uefi-floppy.img
+          if-no-files-found: warn
