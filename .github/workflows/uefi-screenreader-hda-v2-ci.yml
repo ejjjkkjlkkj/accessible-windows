@@ -1,0 +1,81 @@
+name: uefi-screenreader-hda-v2-ci
+
+on:
+  push:
+    branches: [uefi-screenreader-live-integration-v2-20260922]
+    paths:
+      - 'boot/uefi-hii-graph-prompt-speech-v2/**'
+      - 'boot/uefi-screenreader-core-v1/**'
+      - '.github/workflows/uefi-screenreader-hda-v2-ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: uefi-screenreader-hda-v2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hda-v2-link:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prove golden HDA firmware untouched
+        run: |
+          set -euo pipefail
+          git diff --exit-code 9cd02dc7db3ab728aba024ecca2a2e5801014007..HEAD -- \
+            boot/uefi-hii-graph-prompt-speech-v1 \
+            scripts/build-uefi-screenreader-usb-image.sh
+          echo UEFI_GOLDEN_HDA_PATH_UNTOUCHED=PASS
+
+      - name: Install EFI linker
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld
+
+      - name: Generate speech units
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-graph-prompt-speech-v2
+          python -m py_compile "$root/generate_units.py"
+          python "$root/generate_units.py" "$root/v2-units.c" "$root/v2-units.txt"
+          grep -F 'speech-mode=clear-lettername-spelling-fr-v3' "$root/v2-units.txt"
+          grep -F 'voice-profile=hi-intelligibility-16khz-v4' "$root/v2-units.txt"
+          grep -F 'max-input-graphemes=64' "$root/v2-units.txt"
+          echo UEFI_HDA_V2_UNITS=PASS
+
+      - name: Cross-link HDA V2 with screen reader core
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-graph-prompt-speech-v2
+          core=boot/uefi-screenreader-core-v1
+          flags='--target=x86_64-pc-windows-msvc -DQEV_INTERACTIVE_NAV=1 -DQEV_SCREENREADER_V2=1 -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+
+          clang $flags -c "$root/hii_graph_prompt_speech_uefi.c" -o "$root/v2-main.obj"
+          clang $flags -c "$root/v2-units.c" -o "$root/v2-units.obj"
+          for src in screenreader_core hii_adapter screenreader_session legacy_bridge legacy_session_adapter ifr_collector live_hii_adapter; do
+            clang $flags -c "$core/$src.c" -o "$root/$src.obj"
+          done
+
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 \
+            /out:"$root/SCREENREADER-V2.EFI" \
+            "$root/v2-main.obj" \
+            "$root/v2-units.obj" \
+            "$root/screenreader_core.obj" \
+            "$root/hii_adapter.obj" \
+            "$root/screenreader_session.obj" \
+            "$root/legacy_bridge.obj" \
+            "$root/legacy_session_adapter.obj" \
+            "$root/ifr_collector.obj" \
+            "$root/live_hii_adapter.obj"
+
+          test -s "$root/SCREENREADER-V2.EFI"
+          grep -aF 'QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V2' "$root/SCREENREADER-V2.EFI"
+          grep -aF 'SCREENREADER_V2_LIVE_HII=PASS' "$root/SCREENREADER-V2.EFI"
+          grep -aF 'SCREENREADER_V2_NAV_MODE=SESSION_SCHEDULER_HDA_DMA' "$root/SCREENREADER-V2.EFI"
+          grep -aF 'SCREENREADER_V2_SPEECH_DMA=STARTED' "$root/SCREENREADER-V2.EFI"
+          grep -aF 'HDA_GRAPH_SEARCH_LIVE=PASS' "$root/SCREENREADER-V2.EFI"
+          echo UEFI_HDA_V2_LINK=PASS
