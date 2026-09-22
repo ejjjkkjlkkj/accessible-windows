@@ -1,6 +1,10 @@
 name: vmware-project-uefi-hardware
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/vmware-project-uefi-hardware.yml"
   pull_request:
     paths:
       - ".github/workflows/vmware-project-uefi-hardware.yml"
