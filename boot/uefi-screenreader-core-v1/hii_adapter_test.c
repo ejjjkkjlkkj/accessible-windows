@@ -10,7 +10,9 @@ static void test_semantic_mapping(void) {
         {2, SR_HII_OP_CHECKBOX, SR_HII_FLAG_CHECKED, "Secure Boot", "Enabled", "Press Enter to toggle"},
         {3, SR_HII_OP_ONE_OF, SR_HII_FLAG_CHANGED, "Boot mode", "UEFI", "Use Left or Right"},
         {4, SR_HII_OP_PASSWORD, SR_HII_FLAG_NONE, "Supervisor password", "must-never-escape", "Press Enter to edit"},
-        {5, SR_HII_OP_ACTION, SR_HII_FLAG_DANGER, "Restore defaults", "", "Resets\nfirmware settings"}
+        {5, SR_HII_OP_ACTION, SR_HII_FLAG_DANGER, "Restore defaults", "", "Resets\nfirmware settings"},
+        {6, SR_HII_OP_ACTION, SR_HII_FLAG_SUPPRESSED, "Hidden debug item", "", "must not appear"},
+        {7, SR_HII_OP_ONE_OF, SR_HII_FLAG_GRAYED, "CSM", "Disabled", "Unavailable in this mode"}
     };
     SrSemanticSnapshot snapshot;
     SrNavigator nav;
@@ -18,7 +20,7 @@ static void test_semantic_mapping(void) {
     char hint[SR_MAX_SPEECH_TEXT];
 
     assert(sr_hii_snapshot_build(&snapshot, records, sizeof(records) / sizeof(records[0])));
-    assert(snapshot.count == 5);
+    assert(snapshot.count == 6);
     assert(snapshot.items[0].role == SR_ROLE_SEPARATOR);
     assert(snapshot.items[1].role == SR_ROLE_TOGGLE);
     assert(snapshot.items[1].state & SR_STATE_CHECKED);
@@ -28,6 +30,9 @@ static void test_semantic_mapping(void) {
     assert(strcmp(snapshot.items[3].value, "") == 0);
     assert(snapshot.items[4].state & SR_STATE_DANGER);
     assert(strcmp(snapshot.items[4].hint, "Resets firmware settings") == 0);
+    assert(snapshot.items[5].id == 7);
+    assert(snapshot.items[5].state & SR_STATE_DISABLED);
+    assert(strcmp(snapshot.items[5].label, "CSM") == 0);
 
     sr_nav_init(&nav, snapshot.items, snapshot.count, 3);
     assert(sr_nav_current(&nav)->id == 2);
@@ -65,6 +70,25 @@ static void test_transactional_capacity_failure(void) {
     assert(snapshot.text_used == 0);
 }
 
+static void test_suppressed_records_do_not_consume_capacity(void) {
+    SrSemanticSnapshot snapshot;
+    SrHiiRecord records[SR_HII_MAX_ITEMS + 16u];
+    size_t i;
+
+    for (i = 0; i < SR_HII_MAX_ITEMS + 16u; ++i) {
+        records[i].id = (uint32_t)(1000u + i);
+        records[i].opcode = SR_HII_OP_ACTION;
+        records[i].flags = i == 0 ? 0u : SR_HII_FLAG_SUPPRESSED;
+        records[i].prompt = "Action";
+        records[i].value = "";
+        records[i].help = "";
+    }
+
+    assert(sr_hii_snapshot_build(&snapshot, records, SR_HII_MAX_ITEMS + 16u));
+    assert(snapshot.count == 1);
+    assert(snapshot.items[0].id == 1000u);
+}
+
 static void test_transactional_text_failure(void) {
     SrSemanticSnapshot snapshot;
     SrHiiRecord record;
@@ -89,6 +113,7 @@ static void test_transactional_text_failure(void) {
 int main(void) {
     test_semantic_mapping();
     test_transactional_capacity_failure();
+    test_suppressed_records_do_not_consume_capacity();
     test_transactional_text_failure();
     puts("UEFI_HII_ADAPTER_TESTS=PASS");
     return 0;
