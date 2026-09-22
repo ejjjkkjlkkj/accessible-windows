@@ -50,6 +50,8 @@ static uint32_t sr_ifr_stable_id(
 
     if (has_question_id) {
         hash = sr_ifr_hash_byte(hash, (uint8_t)'Q');
+        hash = sr_ifr_hash_byte(hash, (uint8_t)(form_id & 0xffu));
+        hash = sr_ifr_hash_byte(hash, (uint8_t)(form_id >> 8));
         hash = sr_ifr_hash_byte(hash, (uint8_t)(question_id & 0xffu));
         hash = sr_ifr_hash_byte(hash, (uint8_t)(question_id >> 8));
     } else {
