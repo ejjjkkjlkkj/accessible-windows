@@ -39,6 +39,8 @@ This split is deliberate: firmware parsing, interaction policy and HDA playback 
 - HII/IFR semantic snapshot adapter with bounded fixed storage and all-or-nothing failure.
 - Dynamic IFR visibility: suppressed records are omitted and grayed records remain discoverable as disabled.
 - Stable-ID focus rebinding after semantic snapshot refresh, with safe fallback when the previous control disappears.
+- Double-buffered realtime session layer: failed HII refreshes cannot corrupt the active semantic tree.
+- Refresh announcements are change-driven: unchanged controls stay quiet; value/state/focus changes are spoken.
 - Low-priority hints separated from immediate focus speech; new focus events purge stale queued hints.
 - Strict password value redaction at both adapter and formatter layers.
 - Priority speech queue with duplicate suppression and bounded capacity.
