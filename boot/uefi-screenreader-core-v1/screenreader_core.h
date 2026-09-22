@@ -36,7 +36,8 @@ enum {
     SR_STATE_SELECTED = 1u << 2,
     SR_STATE_EXPANDED = 1u << 3,
     SR_STATE_CHANGED  = 1u << 4,
-    SR_STATE_DANGER   = 1u << 5
+    SR_STATE_DANGER   = 1u << 5,
+    SR_STATE_READ_ONLY = 1u << 6
 };
 
 typedef struct {
