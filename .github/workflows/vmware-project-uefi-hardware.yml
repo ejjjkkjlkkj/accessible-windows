@@ -5,13 +5,14 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/vmware-project-uefi-hardware.yml"
-  pull_request:
-    paths:
-      - ".github/workflows/vmware-project-uefi-hardware.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: vmware-project-uefi-hardware
+  cancel-in-progress: false
 
 jobs:
   vmware-project-uefi:
