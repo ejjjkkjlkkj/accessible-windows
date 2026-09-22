@@ -21,8 +21,10 @@ This directory is a clean-room rewrite of the UEFI screen-reader interaction cor
 1. HII/IFR adapter builds a semantic snapshot of firmware controls.
 2. Navigator owns the virtual focus, role navigation, first-letter navigation, paging and Item Chooser.
 3. Formatter emits concise speech in this order: label, value, role, state, position, hint.
-4. Speech scheduler applies duplicate suppression, coalescing, priorities and preemption.
-5. Audio adapter performs the physical stop/start operation and reports completion.
+4. HII adapter converts bounded firmware records into a transactional semantic snapshot.
+5. Focus formatter stays concise; hints are emitted separately at low priority so navigation cancels them immediately.
+6. Speech scheduler applies duplicate suppression, coalescing, priorities and preemption.
+7. Audio adapter performs the physical stop/start operation and reports completion.
 
 This split is deliberate: firmware parsing, interaction policy and HDA playback are independently testable.
 
@@ -34,7 +36,9 @@ This split is deliberate: firmware parsing, interaction policy and HDA playback 
 - Role rotor next/previous.
 - Searchable Item Chooser with incremental filtering, next/previous, backspace, select and cancel.
 - Semantic focus utterances with state and position.
-- Strict password value redaction.
+- HII/IFR semantic snapshot adapter with bounded fixed storage and all-or-nothing failure.
+- Low-priority hints separated from immediate focus speech.
+- Strict password value redaction at both adapter and formatter layers.
 - Priority speech queue with duplicate suppression and bounded capacity.
 - Preemption for dialogs and critical alerts.
 
