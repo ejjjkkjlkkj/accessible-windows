@@ -76,6 +76,10 @@ const char *sr_role_name(SrRole role) {
         case SR_ROLE_DIALOG: return "dialog";
         case SR_ROLE_ALERT: return "alert";
         case SR_ROLE_SEPARATOR: return "separator";
+        case SR_ROLE_DATE: return "date";
+        case SR_ROLE_TIME: return "time";
+        case SR_ROLE_EDIT: return "edit";
+        case SR_ROLE_ORDERED_LIST: return "ordered list";
         default: return "item";
     }
 }
