@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   vmware-project-uefi:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 20
 
     steps:
@@ -27,14 +27,50 @@ jobs:
           ref: main
           path: project
 
-      - name: Verify Windows physical runner
+      - name: Verify ASUS AMD physical runner
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not $IsWindows) { throw "This workflow requires the Windows self-hosted runner." }
+
+          $cs = Get-CimInstance Win32_ComputerSystem
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+          $bios = Get-CimInstance Win32_BIOS
+          $os = Get-CimInstance Win32_OperatingSystem
+          $secureBoot = try { Confirm-SecureBootUEFI } catch { $null }
+          $deviceGuard = Get-CimInstance -Namespace root\Microsoft\Windows\DeviceGuard -ClassName Win32_DeviceGuard -ErrorAction SilentlyContinue
+
+          if ($cs.Model -notmatch 'M1603QA') {
+            throw "Wrong physical target: expected ASUS M1603QA, got '$($cs.Model)'."
+          }
+          if ($cpu.Name -notmatch 'Ryzen 7 5800H') {
+            throw "Wrong CPU target: expected Ryzen 7 5800H, got '$($cpu.Name)'."
+          }
+
+          New-Item -ItemType Directory -Force project\build | Out-Null
+          @(
+            "RUNNER_MACHINE=$env:COMPUTERNAME"
+            "HOST_MANUFACTURER=$($cs.Manufacturer)"
+            "HOST_MODEL=$($cs.Model)"
+            "HOST_CPU=$($cpu.Name)"
+            "HOST_CORES=$($cpu.NumberOfCores)"
+            "HOST_LOGICAL_PROCESSORS=$($cpu.NumberOfLogicalProcessors)"
+            "HOST_RAM_BYTES=$($cs.TotalPhysicalMemory)"
+            "HOST_BIOS_VERSION=$($bios.SMBIOSBIOSVersion)"
+            "HOST_BIOS_DATE=$($bios.ReleaseDate)"
+            "HOST_OS=$($os.Caption)"
+            "HOST_OS_VERSION=$($os.Version)"
+            "HOST_OS_BUILD=$($os.BuildNumber)"
+            "HOST_HYPERVISOR_PRESENT=$($cs.HypervisorPresent)"
+            "HOST_SECURE_BOOT=$secureBoot"
+            "HOST_VBS_STATUS=$($deviceGuard.VirtualizationBasedSecurityStatus)"
+            "HOST_SECURITY_SERVICES_RUNNING=$($deviceGuard.SecurityServicesRunning -join ',')"
+          ) | Set-Content -Path project\build\host-evidence.txt -Encoding utf8
+
+          Get-Content project\build\host-evidence.txt
           Write-Host "RUNNER_WINDOWS=PASS"
-          Write-Host "RUNNER_MACHINE=$env:COMPUTERNAME"
-          Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors | Format-List
+          Write-Host "HOST_ASUS_M1603QA=PASS"
+          Write-Host "HOST_RYZEN_5800H=PASS"
 
       - name: Verify VMware Workstation
         shell: pwsh
@@ -222,6 +258,23 @@ jobs:
               if (-not $reason) { $reason = 'DISCOVERY_PROMPT_NOT_REACHED' }
               throw "Screen-reader runtime blocked before discovery prompt: $reason"
             }
+
+            $vmwareLog = Join-Path $env:VMWARE_TEST_DIR "vmware.log"
+            $monitorMode = "NOT_REPORTED"
+            if (Test-Path $vmwareLog) {
+              $monitor = Select-String -Path $vmwareLog -Pattern 'Monitor Mode' -ErrorAction SilentlyContinue |
+                Select-Object -Last 1
+              if ($monitor) { $monitorMode = $monitor.Line.Trim() }
+            }
+            @(
+              "VMWARE_WORKSTATION=PASS"
+              "VMWARE_VERSION=$env:VMWARE_VERSION"
+              "VMWARE_UEFI_BOOT=PASS"
+              "VMWARE_HDA_DISCOVERY=$([bool]($text -match 'HDA_CONTROLLER_CODEC=PASS'))"
+              "VMWARE_SCREENREADER_DISCOVERY=PASS"
+              "VMWARE_MONITOR_MODE=$monitorMode"
+            ) | Set-Content -Path (Join-Path $env:VMWARE_TEST_DIR "vmware-runtime-evidence.txt") -Encoding utf8
+            Write-Host "VMWARE_MONITOR_MODE=$monitorMode"
           }
           finally {
             & $env:VMRUN -T ws stop $env:VMX_PATH hard 2>$null
@@ -235,8 +288,10 @@ jobs:
           path: |
             project/build/NAVIGATION.EFI
             project/build/navigation_units.txt
+            project/build/host-evidence.txt
             project/build/vmware-smoke-*/serial.log
             project/build/vmware-smoke-*/serial-final.txt
+            project/build/vmware-smoke-*/vmware-runtime-evidence.txt
             project/build/vmware-smoke-*/vmware.log
             project/build/vmware-smoke-*/*.vmx
             project/build/vmware-smoke-*/uefi-floppy.img
