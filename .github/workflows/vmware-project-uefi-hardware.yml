@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   vmware-project-uefi:
-    runs-on: [self-hosted, Windows, X64]
+    runs-on: self-hosted
     timeout-minutes: 20
 
     steps:
