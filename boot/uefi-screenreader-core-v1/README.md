@@ -37,6 +37,9 @@ This split is deliberate: firmware parsing, interaction policy and HDA playback 
 - Searchable Item Chooser with incremental filtering, next/previous, backspace, select and cancel.
 - Semantic focus utterances with state and position.
 - HII/IFR semantic snapshot adapter with bounded fixed storage and all-or-nothing failure.
+- Strict IFR statement collector validates opcode lengths before publishing any result.
+- Question controls derive stable identity from package GUID + firmware QuestionId, so prompt-token changes do not move focus.
+- Firmware read-only question flags are propagated into spoken semantic state.
 - Dynamic IFR visibility: suppressed records are omitted and grayed records remain discoverable as disabled.
 - Stable-ID focus rebinding after semantic snapshot refresh, with safe fallback when the previous control disappears.
 - Double-buffered realtime session layer: failed HII refreshes cannot corrupt the active semantic tree.
@@ -55,4 +58,4 @@ The CI workflow compiles the core in freestanding mode, runs behavior tests unde
 
 ## Next integration gate
 
-The next code step is an adapter that maps live HII/IFR objects to SrItem without changing BOOTX64.EFI or KERNEL.BIN, then routes existing keyboard events through this core. Only after QEMU runtime evidence is green should the old monolithic navigation policy be replaced.
+The next integration step is to feed exported live HII Forms packages and resolved HII strings into the validated collector/session while preserving the existing HDA/DMA backend. This must be done on an isolated integration path; the golden BOOTX64.EFI carrier remains untouched until QEMU/OVMF evidence is green.
