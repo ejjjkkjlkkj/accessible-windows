@@ -4,6 +4,11 @@ typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef unsigned long long usize;
 
+#ifdef QEV_SCREENREADER_V2
+#include "../uefi-screenreader-core-v1/live_hii_adapter.h"
+#include "../uefi-screenreader-core-v1/legacy_session_adapter.h"
+#endif
+
 #ifndef QEV_SOURCE_BLOB
 #define QEV_SOURCE_BLOB "UNBOUND"
 #endif
@@ -153,6 +158,12 @@ static void *g_hii_handles[256];
 #define MAX_HII_PROMPT_CHARS 64u
 static char g_prompt_text[MAX_HII_PROMPT_CHARS + 1u];
 static u32 g_prompt_count;
+
+#ifdef QEV_SCREENREADER_V2
+static SrScreenReaderSession g_sr_v2_session;
+static SrLiveHiiSnapshot g_sr_v2_live;
+static u8 g_sr_v2_active;
+#endif
 
 #ifdef QEV_INTERACTIVE_NAV
 #define MAX_HII_NAV_PROMPTS 32
@@ -1149,6 +1160,143 @@ static int get_hii_string(hii_string_protocol *str, void *handle, u16 token, cha
     return normalize_prompt(text, out, count_out);
 }
 
+#if defined(QEV_SCREENREADER_V2) && defined(QEV_INTERACTIVE_NAV)
+typedef struct {
+    hii_string_protocol *strings;
+    void *handle;
+} sr_v2_hii_context;
+
+static int sr_v2_string_resolver(
+    void *opaque,
+    uint16_t token,
+    char *out,
+    size_t out_capacity
+) {
+    sr_v2_hii_context *context = (sr_v2_hii_context *)opaque;
+    u32 count = 0u;
+    if (!context || !context->strings || !context->handle ||
+        !out || out_capacity < (size_t)(MAX_HII_PROMPT_CHARS + 1u)) return 0;
+    return get_hii_string(
+        context->strings,
+        context->handle,
+        (u16)token,
+        out,
+        &count
+    );
+}
+
+static u32 sr_v2_copy_text64(char *out, const char *text) {
+    u32 n = 0u;
+    if (!out) return 0u;
+    if (text) {
+        while (text[n] && n < MAX_HII_PROMPT_CHARS) {
+            out[n] = text[n];
+            ++n;
+        }
+    }
+    out[n] = 0;
+    return n;
+}
+
+static int sr_v2_sync_focus_text(void) {
+    const SrItem *item;
+    size_t speech_len;
+
+    item = sr_session_current(&g_sr_v2_session);
+    if (!item) return 0;
+
+    g_prompt_count = sr_v2_copy_text64(g_prompt_text, item->label);
+    speech_len = sr_format_focus(
+        &g_sr_v2_session.nav,
+        g_nav_speech_text,
+        sizeof(g_nav_speech_text)
+    );
+    if (speech_len == 0u || speech_len > MAX_HII_PROMPT_CHARS) return 0;
+    g_nav_speech_length = (u8)speech_len;
+    return 1;
+}
+
+static int sr_v2_resolve_hii_prompt(void *system_table) {
+    void *bs;
+    locate_protocol_fn locate;
+    hii_database_protocol *db = 0;
+    hii_string_protocol *strings = 0;
+    usize handle_bytes;
+    u32 handles;
+
+    if (!system_table) return 0;
+    bs = *(void **)((u8 *)system_table + 0x60);
+    if (!bs) return 0;
+    locate = *(locate_protocol_fn *)((u8 *)bs + 0x140);
+    if (!locate) return 0;
+
+    if (locate(&g_hii_database_guid, 0, (void **)&db) != 0 || !db ||
+        !db->list_package_lists || !db->export_package_lists) return 0;
+    if (locate(&g_hii_string_guid, 0, (void **)&strings) != 0 ||
+        !strings || !strings->get_string) return 0;
+
+    handle_bytes = sizeof(g_hii_handles);
+    if (db->list_package_lists(
+            db, 0x02u, 0, &handle_bytes, g_hii_handles
+        ) != 0 ||
+        handle_bytes == 0u ||
+        handle_bytes > sizeof(g_hii_handles)) return 0;
+
+    handles = (u32)(handle_bytes / sizeof(void *));
+    for (u32 hi = 0u; hi < handles; ++hi) {
+        void *handle = g_hii_handles[hi];
+        usize size = sizeof(g_hii_package);
+        sr_v2_hii_context context;
+
+        if (!handle ||
+            db->export_package_lists(
+                db, handle, &size, g_hii_package
+            ) != 0 ||
+            size < 24u ||
+            size > sizeof(g_hii_package)) continue;
+
+        context.strings = strings;
+        context.handle = handle;
+        if (!sr_live_hii_build_package_list(
+                &g_sr_v2_live,
+                g_hii_package,
+                (size_t)size,
+                sr_v2_string_resolver,
+                0,
+                &context
+            ) ||
+            g_sr_v2_live.count < 2u) {
+            continue;
+        }
+
+        sr_session_init(&g_sr_v2_session, 5u);
+        if (!sr_session_apply_hii(
+                &g_sr_v2_session,
+                g_sr_v2_live.records,
+                g_sr_v2_live.count,
+                0
+            )) {
+            continue;
+        }
+        if (!sr_v2_sync_focus_text()) continue;
+
+        g_sr_v2_active = 1u;
+        marker("SCREENREADER_V2_LIVE_HII=PASS");
+        marker("SCREENREADER_V2_STABLE_IDENTITY=PASS");
+        serial_puts("SCREENREADER_V2_ITEM_COUNT=0x");
+        serial_hex8((u8)(
+            g_sr_v2_live.count > 255u ? 255u : g_sr_v2_live.count
+        ));
+        serial_puts("\r\n");
+        serial_puts("SCREENREADER_V2_INITIAL_SPEECH=");
+        serial_puts(g_nav_speech_text);
+        serial_puts("\r\n");
+        return 1;
+    }
+    return 0;
+}
+#endif
+
 #ifdef QEV_INTERACTIVE_NAV
 static int nav_prompt_add(u8 opcode, const char *text, u32 count) {
     if (!text || !count || count > MAX_HII_PROMPT_CHARS) return 0;
@@ -1299,6 +1447,10 @@ static void nav_build_chooser_speech(u8 match_position, u8 match_total) {
 #endif
 
 static int resolve_hii_prompt(void *system_table) {
+#if defined(QEV_SCREENREADER_V2) && defined(QEV_INTERACTIVE_NAV)
+    if (sr_v2_resolve_hii_prompt(system_table)) return 1;
+    marker("SCREENREADER_V2_LIVE_HII=FALLBACK_LEGACY");
+#endif
     void *bs = *(void **)((u8 *)system_table + 0x60);
     if (!bs) return 0;
     locate_protocol_fn locate = *(locate_protocol_fn *)((u8 *)bs + 0x140);
