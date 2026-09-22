@@ -415,7 +415,10 @@ SrSpeechDecision sr_speech_submit(SrSpeechScheduler *scheduler, const SrSpeechEv
         if (sr_event_same(&scheduler->pending[i], event)) return SR_SPEECH_DROP_DUPLICATE;
     }
 
-    if (event->priority > scheduler->current.priority && scheduler->current.interruptible) {
+    if (scheduler->current.interruptible &&
+        (event->priority > scheduler->current.priority ||
+         (event->key == scheduler->current.key &&
+          event->priority >= scheduler->current.priority))) {
         sr_event_copy(&scheduler->current, event);
         return SR_SPEECH_PREEMPT;
     }
