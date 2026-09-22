@@ -112,6 +112,24 @@ void sr_nav_init(SrNavigator *nav, const SrItem *items, size_t count, size_t pag
     for (i = 0; i < SR_MAX_MATCHES; ++i) nav->chooser_matches[i] = SR_NO_INDEX;
 }
 
+int sr_nav_rebind_by_id(SrNavigator *nav, const SrItem *items, size_t count, uint32_t preferred_id) {
+    size_t i;
+    size_t page_size;
+
+    if (!nav) return 0;
+    page_size = nav->page_size ? nav->page_size : 5u;
+    sr_nav_init(nav, items, count, page_size);
+
+    if (!items || count == 0 || preferred_id == 0u) return 0;
+    for (i = 0; i < count; ++i) {
+        if (items[i].id == preferred_id && sr_item_is_focusable(&items[i])) {
+            nav->focus = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 const SrItem *sr_nav_current(const SrNavigator *nav) {
     if (!nav || !nav->items || nav->focus == SR_NO_INDEX || nav->focus >= nav->count) return NULL;
     return &nav->items[nav->focus];
@@ -404,10 +422,24 @@ static void sr_queue_remove(SrSpeechScheduler *scheduler, size_t index) {
     --scheduler->pending_count;
 }
 
+static void sr_queue_drop_hints(SrSpeechScheduler *scheduler) {
+    size_t i = 0;
+    if (!scheduler) return;
+    while (i < scheduler->pending_count) {
+        if (scheduler->pending[i].priority == SR_SPEECH_HINT) {
+            sr_queue_remove(scheduler, i);
+        } else {
+            ++i;
+        }
+    }
+}
+
 SrSpeechDecision sr_speech_submit(SrSpeechScheduler *scheduler, const SrSpeechEvent *event) {
     size_t i;
     size_t lowest = 0;
     if (!scheduler || !event || event->text[0] == '\0') return SR_SPEECH_DROP_DUPLICATE;
+
+    if (event->priority >= SR_SPEECH_FOCUS) sr_queue_drop_hints(scheduler);
 
     if (!scheduler->active) {
         sr_event_copy(&scheduler->current, event);
