@@ -6,6 +6,7 @@ on:
     paths:
       - 'boot/uefi-screenreader-core-v1/**'
       - '.github/workflows/uefi-screenreader-core-v1-ci.yml'
+      - '.github/workflows/uefi-screenreader-live-integration-v2-ci.yml'
   workflow_dispatch:
 
 concurrency:
