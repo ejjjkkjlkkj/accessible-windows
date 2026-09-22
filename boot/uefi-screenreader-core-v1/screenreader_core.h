@@ -101,6 +101,7 @@ typedef struct {
 } SrSpeechScheduler;
 
 void sr_nav_init(SrNavigator *nav, const SrItem *items, size_t count, size_t page_size);
+int sr_nav_rebind_by_id(SrNavigator *nav, const SrItem *items, size_t count, uint32_t preferred_id);
 int sr_nav_move(SrNavigator *nav, SrNavCommand command, char first_letter);
 const SrItem *sr_nav_current(const SrNavigator *nav);
 
