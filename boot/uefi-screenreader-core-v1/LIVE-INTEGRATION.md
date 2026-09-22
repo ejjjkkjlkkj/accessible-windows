@@ -11,7 +11,7 @@ Pipeline:
 1. validate package-list length and every package header;
 2. select Forms packages;
 3. validate IFR opcode boundaries transactionally;
-4. derive stable control identity from package GUID and QuestionId;
+4. derive stable control identity from package GUID + FormId + QuestionId;
 5. resolve Prompt and Help through a bounded string callback;
 6. resolve non-password current values through a bounded value callback;
 7. map firmware flags into semantic state;
@@ -28,3 +28,5 @@ Pipeline:
 - Password value callbacks are never invoked.
 - Read-only question state is surfaced to speech.
 - Stable IDs survive prompt-token changes for the same firmware question.
+- Duplicate semantic IDs reject the snapshot.
+- A valid HII End package is mandatory and must terminate the declared package-list length.
