@@ -60,6 +60,31 @@ static void test_navigation_cancels_stale_hint(void) {
     assert(strstr(session.speech.current.text, "Boot mode") != NULL);
 }
 
+static void test_spoken_chooser(void) {
+    SrScreenReaderSession session;
+
+    sr_session_init(&session, 3u);
+    assert(sr_session_apply_hii(&session, initial_records, 3u, 0));
+    assert(sr_session_chooser_open(&session));
+    assert(session.nav.chooser_open);
+    assert(strstr(session.speech.current.text, "Item chooser") != NULL);
+
+    assert(sr_session_chooser_type(&session, 's'));
+    assert(session.nav.chooser_match_count == 1u);
+    assert(strstr(session.speech.current.text, "Secure Boot") != NULL);
+
+    assert(sr_session_chooser_select(&session));
+    assert(!session.nav.chooser_open);
+    assert(sr_session_current(&session)->id == 20u);
+    assert(strstr(session.speech.current.text, "Secure Boot") != NULL);
+
+    sr_speech_cancel_all(&session.speech);
+    assert(sr_session_chooser_open(&session));
+    assert(sr_session_chooser_cancel(&session));
+    assert(!session.nav.chooser_open);
+    assert(sr_session_current(&session)->id == 20u);
+}
+
 static void test_atomic_failed_refresh(void) {
     SrScreenReaderSession session;
     SrHiiRecord too_many[SR_HII_MAX_ITEMS + 1u];
@@ -107,6 +132,7 @@ static void test_grayed_refresh_keeps_focus(void) {
 int main(void) {
     test_initial_and_refresh();
     test_navigation_cancels_stale_hint();
+    test_spoken_chooser();
     test_atomic_failed_refresh();
     test_grayed_refresh_keeps_focus();
     puts("UEFI_SCREENREADER_SESSION_TESTS=PASS");
