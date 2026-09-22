@@ -1,15 +1,15 @@
-name: uefi-screenreader-core-v1-ci
+name: uefi-screenreader-core-v2-ci
 
 on:
   push:
-    branches: [uefi-screenreader-core-v1-20260922]
+    branches: [uefi-screenreader-core-v2-20260922]
     paths:
       - 'boot/uefi-screenreader-core-v1/**'
       - '.github/workflows/uefi-screenreader-core-v1-ci.yml'
   workflow_dispatch:
 
 concurrency:
-  group: uefi-screenreader-core-v1-${{ github.ref }}
+  group: uefi-screenreader-core-v2-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -32,7 +32,9 @@ jobs:
           set -euo pipefail
           root=boot/uefi-screenreader-core-v1
           clang -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone             -O2 -Wall -Wextra -Werror -pedantic             -c "$root/screenreader_core.c" -o "$root/screenreader_core.o"
+          clang -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone             -O2 -Wall -Wextra -Werror -pedantic             -c "$root/hii_adapter.c" -o "$root/hii_adapter.o"
           test -s "$root/screenreader_core.o"
+          test -s "$root/hii_adapter.o"
           echo UEFI_SCREENREADER_FREESTANDING_BUILD=PASS
 
       - name: Run behavior tests with sanitizers
@@ -41,6 +43,8 @@ jobs:
           root=boot/uefi-screenreader-core-v1
           clang -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             "$root/screenreader_core.c" "$root/screenreader_core_test.c"             -o "$root/screenreader_core_test"
           ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1             "$root/screenreader_core_test"
+          clang -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/hii_adapter_test.c"             -o "$root/hii_adapter_test"
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1             "$root/hii_adapter_test"
           echo UEFI_SCREENREADER_SANITIZERS=PASS
 
       - name: Static analyzer
@@ -48,4 +52,5 @@ jobs:
           set -euo pipefail
           root=boot/uefi-screenreader-core-v1
           clang --analyze -std=c11 -Wall -Wextra -Werror             "$root/screenreader_core.c"
+          clang --analyze -std=c11 -Wall -Wextra -Werror             "$root/hii_adapter.c"
           echo UEFI_SCREENREADER_STATIC_ANALYSIS=PASS
