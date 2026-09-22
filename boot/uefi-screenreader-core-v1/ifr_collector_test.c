@@ -71,6 +71,27 @@ static void test_question_id_stays_stable_across_prompt_change(void) {
     assert(a[0].stable_id == b[0].stable_id);
 }
 
+static void test_form_id_separates_question_ids(void) {
+    static const uint8_t form_a[] = {
+        0x01u, 0x06u, 0x01u, 0x00u, 0x01u, 0x00u,
+        0x06u, 0x0eu, 0x10u, 0x00u, 0x11u, 0x00u, 0x44u, 0x00u,
+        0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u
+    };
+    static const uint8_t form_b[] = {
+        0x01u, 0x06u, 0x02u, 0x00u, 0x01u, 0x00u,
+        0x06u, 0x0eu, 0x10u, 0x00u, 0x11u, 0x00u, 0x44u, 0x00u,
+        0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u
+    };
+    SrIfrStatementMeta a[1], b[1];
+    size_t count = 0u;
+
+    assert(sr_ifr_collect_statements(guid_a, form_a, sizeof(form_a), a, 1u, &count));
+    assert(sr_ifr_collect_statements(guid_a, form_b, sizeof(form_b), b, 1u, &count));
+    assert(a[0].question_id == b[0].question_id);
+    assert(a[0].form_id != b[0].form_id);
+    assert(a[0].stable_id != b[0].stable_id);
+}
+
 static void test_package_guid_separates_question_ids(void) {
     uint8_t guid_b[SR_IFR_GUID_BYTES];
     static const uint8_t ifr[] = {
@@ -122,6 +143,7 @@ static void test_bind_record_propagates_read_only(void) {
 int main(void) {
     test_collect_question_ids_and_roles();
     test_question_id_stays_stable_across_prompt_change();
+    test_form_id_separates_question_ids();
     test_package_guid_separates_question_ids();
     test_transactional_malformed_input();
     test_bind_record_propagates_read_only();
