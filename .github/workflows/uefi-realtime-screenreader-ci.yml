@@ -2,7 +2,7 @@ name: uefi-realtime-screenreader-ci
 
 on:
   push:
-    branches: [uefi-realtime-screenreader-20260919, uefi-realtime-integration-20260919, uefi-native-voice-v4-20260921, uefi-screenreader-nav-v5-20260922]
+    branches: [uefi-realtime-screenreader-20260919, uefi-realtime-integration-20260919, uefi-native-voice-v4-20260921, uefi-screenreader-nav-v5-20260922, uefi-screenreader-nav-v6-20260922]
     paths:
       - 'boot/uefi-hii-graph-prompt-speech-v1/**'
       - 'boot/uefi-native-speech-v1/build_uefi_native_speech.py'
@@ -58,6 +58,7 @@ jobs:
           grep -aF 'HII_GRAPH_NAV_POSITION_SPEECH=PASS' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_FIRST_LETTER_CAPABLE=PASS' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_ROLE_ROTOR_CAPABLE=PASS' "$root/REALTIME.EFI"
+          grep -aF 'HII_GRAPH_NAV_ITEM_CHOOSER_CAPABLE=PASS' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_ROLE=' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_SPEECH_TEXT=' "$root/REALTIME.EFI"
           grep -aF 'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS' "$root/REALTIME.EFI"
@@ -192,13 +193,42 @@ jobs:
           if not labels or not labels[-1].decode('ascii','replace').strip().lower().startswith(letter):
               raise SystemExit('first-letter navigation did not focus matching label')
 
+          # F8 Item Chooser: open, narrow by typed text, select with Enter.
+          send('f8')
+          wait_marker(b'HII_GRAPH_NAV_KEY=F8\r\n')
+          wait_marker(b'HII_GRAPH_NAV_ITEM_CHOOSER_OPEN=PASS\r\n',1)
+          wait_marker(b'HII_GRAPH_NAV_SPEECH_DMA=STARTED\r\n',11)
+
+          send(letter)
+          wait_marker(b'HII_GRAPH_NAV_ITEM_CHOOSER_FILTER=PASS\r\n',1)
+          b=wait_marker(b'HII_GRAPH_NAV_SPEECH_DMA=STARTED\r\n',12)
+          if b'HII_GRAPH_NAV_ITEM_CHOOSER_QUERY='+letter.encode()+b'\r\n' not in b:
+              raise SystemExit('item chooser query telemetry missing')
+          matches=re.findall(br'HII_GRAPH_NAV_ITEM_CHOOSER_MATCHES=0x([0-9A-F]{2})',b)
+          if not matches or int(matches[-1],16)<1:
+              raise SystemExit('item chooser produced no live HII matches')
+
+          send('ret')
+          wait_marker(b'HII_GRAPH_NAV_ITEM_CHOOSER_KEY=ENTER\r\n')
+          wait_marker(b'HII_GRAPH_NAV_ITEM_CHOOSER_SELECT=PASS\r\n')
+          wait_marker(b'HII_GRAPH_NAV_SPEECH_DMA=STARTED\r\n',13)
+
+          # Reopen and cancel to prove non-destructive escape semantics.
+          send('f8')
+          wait_marker(b'HII_GRAPH_NAV_ITEM_CHOOSER_OPEN=PASS\r\n',2)
+          wait_marker(b'HII_GRAPH_NAV_SPEECH_DMA=STARTED\r\n',14)
+          send('esc')
+          wait_marker(b'HII_GRAPH_NAV_ITEM_CHOOSER_KEY=ESC\r\n')
+          wait_marker(b'HII_GRAPH_NAV_ITEM_CHOOSER_CANCEL=PASS\r\n')
+          b=wait_marker(b'HII_GRAPH_NAV_SPEECH_DMA=STARTED\r\n',15)
+
           b=wait_marker(b'HII_GRAPH_NAV_SPEECH_INTERRUPT=PASS\r\n',1)
-          if b.count(b'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS\r\n') < 10:
-              raise SystemExit('not all focus changes were announced')
-          if b.count(b'HII_GRAPH_NAV_SEMANTIC_ROLE=PASS\r\n') < 11:
-              raise SystemExit('not all focus changes carried an IFR semantic role')
-          if b.count(b'HII_GRAPH_NAV_POSITION_SPEECH=PASS\r\n') < 11:
-              raise SystemExit('not all focus changes carried position speech')
+          if b.count(b'HII_GRAPH_NAV_REALTIME_FOCUS_SPEECH=PASS\r\n') < 15:
+              raise SystemExit('not all focus/search changes were announced')
+          if b.count(b'HII_GRAPH_NAV_SEMANTIC_ROLE=PASS\r\n') < 16:
+              raise SystemExit('not all focus/search changes carried an IFR semantic role')
+          if b.count(b'HII_GRAPH_NAV_POSITION_SPEECH=PASS\r\n') < 16:
+              raise SystemExit('not all focus/search changes carried position speech')
           if b'HII_GRAPH_NAV_ROLE=' not in b:
               raise SystemExit('semantic role output missing')
           if b'HII_GRAPH_NAV_POSITION=' not in b:
@@ -207,6 +237,14 @@ jobs:
               raise SystemExit('semantic rotor navigation missing')
           if b'HII_GRAPH_NAV_FIRST_LETTER=PASS\r\n' not in b:
               raise SystemExit('first-letter navigation missing')
+          for marker in [
+              b'HII_GRAPH_NAV_ITEM_CHOOSER_OPEN=PASS\r\n',
+              b'HII_GRAPH_NAV_ITEM_CHOOSER_FILTER=PASS\r\n',
+              b'HII_GRAPH_NAV_ITEM_CHOOSER_SELECT=PASS\r\n',
+              b'HII_GRAPH_NAV_ITEM_CHOOSER_CANCEL=PASS\r\n',
+          ]:
+              if marker not in b:
+                  raise SystemExit('item chooser runtime marker missing '+repr(marker))
           if b'HII_GRAPH_NAV_SPEECH_TEXT=' not in b:
               raise SystemExit('semantic speech output missing')
 
@@ -245,6 +283,12 @@ jobs:
           tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_NAV_ROLE_NEXT=PASS'
           tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_NAV_ROLE_PREVIOUS=PASS'
           tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_NAV_FIRST_LETTER=PASS'
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_NAV_ITEM_CHOOSER_OPEN=PASS'
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_NAV_ITEM_CHOOSER_FILTER=PASS'
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_NAV_ITEM_CHOOSER_SELECT=PASS'
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -F 'HII_GRAPH_NAV_ITEM_CHOOSER_CANCEL=PASS'
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -E '^HII_GRAPH_NAV_ITEM_CHOOSER_OPEN_EVENTS=0x0[2-9A-F]$|^HII_GRAPH_NAV_ITEM_CHOOSER_OPEN_EVENTS=0x[1-9A-F][0-9A-F]$'
+          tr -d '\r' < "$root/realtime-proof.txt" | grep -E '^HII_GRAPH_NAV_ITEM_CHOOSER_FILTER_EVENTS=0x0[1-9A-F]$|^HII_GRAPH_NAV_ITEM_CHOOSER_FILTER_EVENTS=0x[1-9A-F][0-9A-F]$'
           tr -d '\r' < "$root/realtime-proof.txt" | grep -E '^HII_GRAPH_NAV_ROLE_EVENTS=0x0[2-9A-F]$|^HII_GRAPH_NAV_ROLE_EVENTS=0x[1-9A-F][0-9A-F]$'
           tr -d '\r' < "$root/realtime-proof.txt" | grep -E '^HII_GRAPH_NAV_FIRST_LETTER_EVENTS=0x0[1-9A-F]$|^HII_GRAPH_NAV_FIRST_LETTER_EVENTS=0x[1-9A-F][0-9A-F]$'
           tr -d '\r' < "$root/realtime-proof.txt" | grep -E '^HII_GRAPH_NAV_REALTIME_EVENTS=0x0[A-F]$|^HII_GRAPH_NAV_REALTIME_EVENTS=0x[1-9A-F][0-9A-F]$'
