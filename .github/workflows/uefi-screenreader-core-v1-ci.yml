@@ -34,9 +34,13 @@ jobs:
           clang -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone             -O2 -Wall -Wextra -Werror -pedantic             -c "$root/screenreader_core.c" -o "$root/screenreader_core.o"
           clang -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone             -O2 -Wall -Wextra -Werror -pedantic             -c "$root/hii_adapter.c" -o "$root/hii_adapter.o"
           clang -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone             -O2 -Wall -Wextra -Werror -pedantic             -c "$root/screenreader_session.c" -o "$root/screenreader_session.o"
+          clang -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone             -O2 -Wall -Wextra -Werror -pedantic             -c "$root/legacy_bridge.c" -o "$root/legacy_bridge.o"
+          clang -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone             -O2 -Wall -Wextra -Werror -pedantic             -c "$root/legacy_session_adapter.c" -o "$root/legacy_session_adapter.o"
           test -s "$root/screenreader_core.o"
           test -s "$root/hii_adapter.o"
           test -s "$root/screenreader_session.o"
+          test -s "$root/legacy_bridge.o"
+          test -s "$root/legacy_session_adapter.o"
           echo UEFI_SCREENREADER_FREESTANDING_BUILD=PASS
 
       - name: Run behavior tests with sanitizers
@@ -49,6 +53,10 @@ jobs:
           ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1             "$root/hii_adapter_test"
           clang -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/screenreader_session.c" "$root/screenreader_session_test.c"             -o "$root/screenreader_session_test"
           ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1             "$root/screenreader_session_test"
+          clang -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/legacy_bridge.c" "$root/legacy_bridge_test.c"             -o "$root/legacy_bridge_test"
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1             "$root/legacy_bridge_test"
+          clang -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/screenreader_session.c" "$root/legacy_bridge.c" "$root/legacy_session_adapter.c" "$root/legacy_session_adapter_test.c"             -o "$root/legacy_session_adapter_test"
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1             "$root/legacy_session_adapter_test"
           echo UEFI_SCREENREADER_SANITIZERS=PASS
 
       - name: Static analyzer
@@ -58,4 +66,6 @@ jobs:
           clang --analyze -std=c11 -Wall -Wextra -Werror             "$root/screenreader_core.c"
           clang --analyze -std=c11 -Wall -Wextra -Werror             "$root/hii_adapter.c"
           clang --analyze -std=c11 -Wall -Wextra -Werror             "$root/screenreader_session.c"
+          clang --analyze -std=c11 -Wall -Wextra -Werror             "$root/legacy_bridge.c"
+          clang --analyze -std=c11 -Wall -Wextra -Werror             "$root/legacy_session_adapter.c"
           echo UEFI_SCREENREADER_STATIC_ANALYSIS=PASS
