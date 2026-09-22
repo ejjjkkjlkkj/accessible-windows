@@ -78,11 +78,11 @@ static void test_item_chooser(void) {
     assert(nav.chooser_open);
     assert(nav.chooser_match_count == 7);
 
-    assert(sr_chooser_type(&nav, 'b'));
+    assert(sr_chooser_type(&nav, 'm'));
     assert(sr_chooser_type(&nav, 'o'));
-    assert(sr_chooser_type(&nav, 'o'));
-    assert(sr_chooser_type(&nav, 't'));
-    assert(nav.chooser_match_count >= 1);
+    assert(sr_chooser_type(&nav, 'd'));
+    assert(sr_chooser_type(&nav, 'e'));
+    assert(nav.chooser_match_count == 1);
     assert(sr_chooser_select(&nav));
     assert(!nav.chooser_open);
     assert(sr_nav_current(&nav)->id == 4);
