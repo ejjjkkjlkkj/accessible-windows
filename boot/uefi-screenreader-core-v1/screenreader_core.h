@@ -116,6 +116,7 @@ int sr_item_is_focusable(const SrItem *item);
 const char *sr_role_name(SrRole role);
 
 size_t sr_format_focus(const SrNavigator *nav, char *out, size_t cap);
+size_t sr_format_hint(const SrNavigator *nav, char *out, size_t cap);
 size_t sr_format_alert(const char *title, const char *detail, char *out, size_t cap);
 
 void sr_speech_init(SrSpeechScheduler *scheduler);
