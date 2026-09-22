@@ -1,27 +1,26 @@
-#include "ifr_collector.h"
 #include "legacy_session_adapter.h"
+#include "live_hii_adapter.h"
 
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned long long u64;
 
-#define SMOKE_ITEM_COUNT 7u
-
 static SrScreenReaderSession g_session;
-static SrIfrStatementMeta g_meta[SMOKE_ITEM_COUNT];
-static SrLegacyIfrRecord g_legacy[SMOKE_ITEM_COUNT];
-static SrHiiRecord g_records[SMOKE_ITEM_COUNT];
-
-static const u8 g_package_guid[SR_IFR_GUID_BYTES] = {
-    0x7bu, 0x59u, 0x10u, 0x4au, 0xc0u, 0x0du, 0x41u, 0x58u,
-    0x87u, 0xffu, 0xf0u, 0x4du, 0x63u, 0x96u, 0xa9u, 0x15u
-};
+static SrLiveHiiSnapshot g_live;
 
 /*
- * Synthetic but structurally valid IFR stream for exercising the parser in
- * a real PE/COFF UEFI application. Each question carries a stable QuestionId.
+ * One complete EFI_HII_PACKAGE_LIST containing a Forms package and an End
+ * package. The Forms payload contains seven question controls with stable
+ * QuestionIds. This exercises the same package-list boundary that the real
+ * HII Database ExportPackageLists protocol returns.
  */
-static const u8 g_ifr[] = {
+static const u8 g_package_list[] = {
+    0x7bu, 0x59u, 0x10u, 0x4au, 0xc0u, 0x0du, 0x41u, 0x58u,
+    0x87u, 0xffu, 0xf0u, 0x4du, 0x63u, 0x96u, 0xa9u, 0x15u,
+    0x86u, 0x00u, 0x00u, 0x00u,
+
+    0x6eu, 0x00u, 0x00u, 0x02u,
+
     0x01u, 0x86u, 0x34u, 0x12u, 0x01u, 0x00u,
 
     0x05u, 0x0eu, 0x10u, 0x00u, 0x11u, 0x00u, 0x00u, 0x01u,
@@ -45,38 +44,74 @@ static const u8 g_ifr[] = {
     0x23u, 0x0eu, 0x70u, 0x00u, 0x71u, 0x00u, 0x06u, 0x01u,
     0x01u, 0x00u, 0x1cu, 0x00u, 0x00u, 0x00u,
 
-    0x29u, 0x02u
+    0x29u, 0x02u,
+
+    0x04u, 0x00u, 0x00u, 0xdfu
 };
 
-static const char *const g_labels[SMOKE_ITEM_COUNT] = {
-    "Boot mode",
-    "Secure Boot",
-    "Advanced",
-    "System date",
-    "System time",
-    "Asset tag",
-    "Boot order"
-};
+static int copy_text(char *out, size_t cap, const char *text) {
+    size_t i = 0u;
+    if (!out || cap == 0u || !text) return 0;
+    while (text[i]) {
+        if (i + 1u >= cap) return 0;
+        out[i] = text[i];
+        ++i;
+    }
+    out[i] = '\0';
+    return 1;
+}
 
-static const char *const g_values[SMOKE_ITEM_COUNT] = {
-    "UEFI",
-    "Enabled",
-    "",
-    "2026-09-22",
-    "17:45",
-    "QEV",
-    "NVMe"
-};
+static int resolve_string(void *context, uint16_t token, char *out, size_t cap) {
+    (void)context;
+    switch (token) {
+        case 0x10u: return copy_text(out, cap, "Boot mode");
+        case 0x11u: return copy_text(out, cap, "Use Left or Right");
+        case 0x20u: return copy_text(out, cap, "Secure Boot");
+        case 0x21u: return copy_text(out, cap, "Press Enter to toggle");
+        case 0x30u: return copy_text(out, cap, "Advanced");
+        case 0x31u: return copy_text(out, cap, "Press Enter to open");
+        case 0x40u: return copy_text(out, cap, "System date");
+        case 0x41u: return copy_text(out, cap, "Date");
+        case 0x50u: return copy_text(out, cap, "System time");
+        case 0x51u: return copy_text(out, cap, "Time");
+        case 0x60u: return copy_text(out, cap, "Asset tag");
+        case 0x61u: return copy_text(out, cap, "Edit text");
+        case 0x70u: return copy_text(out, cap, "Boot order");
+        case 0x71u: return copy_text(out, cap, "Ordered list");
+        default: return 0;
+    }
+}
 
-static const char *const g_hints[SMOKE_ITEM_COUNT] = {
-    "Use Left or Right",
-    "Press Enter to toggle",
-    "Press Enter to open",
-    "Date",
-    "Time",
-    "Edit text",
-    "Ordered list"
-};
+static int resolve_value(
+    void *context,
+    const SrIfrStatementMeta *meta,
+    char *out,
+    size_t cap,
+    uint32_t *flags_io
+) {
+    (void)context;
+    if (!meta || !out || !flags_io) return -1;
+
+    switch (meta->question_id) {
+        case 0x0100u:
+            return copy_text(out, cap, "UEFI") ? 1 : -1;
+        case 0x0101u:
+            *flags_io |= SR_HII_FLAG_CHECKED;
+            return copy_text(out, cap, "Enabled") ? 1 : -1;
+        case 0x0102u:
+            return 0;
+        case 0x0103u:
+            return copy_text(out, cap, "2026-09-22") ? 1 : -1;
+        case 0x0104u:
+            return copy_text(out, cap, "17:45") ? 1 : -1;
+        case 0x0105u:
+            return copy_text(out, cap, "QEV") ? 1 : -1;
+        case 0x0106u:
+            return copy_text(out, cap, "NVMe") ? 1 : -1;
+        default:
+            return 0;
+    }
+}
 
 static inline void outb(u16 port, u8 value) {
     __asm__ volatile("outb %0, %1" :: "a"(value), "d"(port));
@@ -124,43 +159,6 @@ static int check(int condition, const char *pass_marker, const char *fail_marker
     return 0;
 }
 
-static int build_hii_records(void) {
-    size_t meta_count = 0u;
-    size_t record_count = 0u;
-    size_t i;
-
-    if (!sr_ifr_collect_statements(
-        g_package_guid,
-        g_ifr,
-        sizeof(g_ifr),
-        g_meta,
-        SMOKE_ITEM_COUNT,
-        &meta_count
-    )) return 0;
-    if (meta_count != SMOKE_ITEM_COUNT) return 0;
-
-    for (i = 0u; i < SMOKE_ITEM_COUNT; ++i) {
-        sr_ifr_bind_legacy_record(
-            &g_meta[i],
-            g_labels[i],
-            g_values[i],
-            g_hints[i],
-            &g_legacy[i]
-        );
-    }
-    g_legacy[1].flags |= SR_HII_FLAG_CHECKED;
-
-    if (!sr_legacy_ifr_convert(
-        g_legacy,
-        SMOKE_ITEM_COUNT,
-        g_records,
-        SMOKE_ITEM_COUNT,
-        &record_count
-    )) return 0;
-
-    return record_count == SMOKE_ITEM_COUNT;
-}
-
 u64 efi_main(void *image_handle, void *system_table) {
     int exit_requested = 0;
     SrFirmwareKey key;
@@ -172,30 +170,37 @@ u64 efi_main(void *image_handle, void *system_table) {
     marker("UEFI_CORE_V2_BOOT=PASS");
 
     if (!check(
-        build_hii_records(),
-        "UEFI_CORE_V2_IFR_COLLECTOR=PASS",
-        "UEFI_CORE_V2_IFR_COLLECTOR=FAIL"
+        sr_live_hii_build_package_list(
+            &g_live,
+            g_package_list,
+            sizeof(g_package_list),
+            resolve_string,
+            resolve_value,
+            NULL
+        ) && g_live.count == 7u,
+        "UEFI_CORE_V2_LIVE_PACKAGE=PASS",
+        "UEFI_CORE_V2_LIVE_PACKAGE=FAIL"
     )) return 1u;
 
     if (!check(
-        g_meta[0].stable_id != 0u &&
-        g_meta[0].question_id == 0x0100u &&
-        g_meta[1].question_id == 0x0101u &&
-        g_meta[2].question_id == 0x0102u,
+        g_live.meta[0].stable_id != 0u &&
+        g_live.meta[0].question_id == 0x0100u &&
+        g_live.meta[1].question_id == 0x0101u &&
+        g_live.meta[2].question_id == 0x0102u,
         "UEFI_CORE_V2_STABLE_QUESTION_ID=PASS",
         "UEFI_CORE_V2_STABLE_QUESTION_ID=FAIL"
     )) return 1u;
 
     sr_session_init(&g_session, 5u);
     if (!check(
-        sr_session_apply_hii(&g_session, g_records, SMOKE_ITEM_COUNT, 0),
+        sr_session_apply_hii(&g_session, g_live.records, g_live.count, 0),
         "UEFI_CORE_V2_HII_BUILD=PASS",
         "UEFI_CORE_V2_HII_BUILD=FAIL"
     )) return 1u;
 
     current = sr_session_current(&g_session);
     if (!check(
-        current && current->id == g_meta[0].stable_id,
+        current && current->id == g_live.meta[0].stable_id,
         "UEFI_CORE_V2_INITIAL_FOCUS=PASS",
         "UEFI_CORE_V2_INITIAL_FOCUS=FAIL"
     )) return 1u;
@@ -205,7 +210,7 @@ u64 efi_main(void *image_handle, void *system_table) {
     if (!check(
         sr_legacy_session_handle_key(&g_session, key, &exit_requested) &&
         sr_session_current(&g_session) &&
-        sr_session_current(&g_session)->id == g_meta[1].stable_id,
+        sr_session_current(&g_session)->id == g_live.meta[1].stable_id,
         "UEFI_CORE_V2_NAVIGATION=PASS",
         "UEFI_CORE_V2_NAVIGATION=FAIL"
     )) return 1u;
@@ -237,7 +242,7 @@ u64 efi_main(void *image_handle, void *system_table) {
         sr_legacy_session_handle_key(&g_session, key, &exit_requested) &&
         g_session.nav.chooser_match_count == 1u &&
         sr_chooser_current(&g_session.nav) &&
-        sr_chooser_current(&g_session.nav)->id == g_meta[2].stable_id,
+        sr_chooser_current(&g_session.nav)->id == g_live.meta[2].stable_id,
         "UEFI_CORE_V2_CHOOSER_FILTER=PASS",
         "UEFI_CORE_V2_CHOOSER_FILTER=FAIL"
     )) return 1u;
@@ -247,7 +252,7 @@ u64 efi_main(void *image_handle, void *system_table) {
         sr_legacy_session_handle_key(&g_session, key, &exit_requested) &&
         !g_session.nav.chooser_open &&
         sr_session_current(&g_session) &&
-        sr_session_current(&g_session)->id == g_meta[2].stable_id,
+        sr_session_current(&g_session)->id == g_live.meta[2].stable_id,
         "UEFI_CORE_V2_CHOOSER_SELECT=PASS",
         "UEFI_CORE_V2_CHOOSER_SELECT=FAIL"
     )) return 1u;
