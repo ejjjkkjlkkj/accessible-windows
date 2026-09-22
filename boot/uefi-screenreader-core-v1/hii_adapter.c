@@ -45,7 +45,7 @@ static const char *sr_hii_copy_text(SrSemanticSnapshot *snapshot, const char *sr
 
 static uint32_t sr_hii_state(uint32_t flags) {
     uint32_t state = SR_STATE_NONE;
-    if (flags & SR_HII_FLAG_DISABLED) state |= SR_STATE_DISABLED;
+    if (flags & (SR_HII_FLAG_DISABLED | SR_HII_FLAG_GRAYED)) state |= SR_STATE_DISABLED;
     if (flags & SR_HII_FLAG_CHECKED) state |= SR_STATE_CHECKED;
     if (flags & SR_HII_FLAG_SELECTED) state |= SR_STATE_SELECTED;
     if (flags & SR_HII_FLAG_CHANGED) state |= SR_STATE_CHANGED;
@@ -63,10 +63,18 @@ int sr_hii_snapshot_build(
     if (!snapshot) return 0;
     sr_hii_snapshot_reset(snapshot);
     if (record_count == 0) return 1;
-    if (!records || record_count > SR_HII_MAX_ITEMS) return 0;
+    if (!records) return 0;
 
     for (i = 0; i < record_count; ++i) {
-        SrItem *item = &snapshot->items[snapshot->count];
+        SrItem *item;
+
+        if (records[i].flags & SR_HII_FLAG_SUPPRESSED) continue;
+        if (snapshot->count >= SR_HII_MAX_ITEMS) {
+            sr_hii_snapshot_reset(snapshot);
+            return 0;
+        }
+
+        item = &snapshot->items[snapshot->count];
         const char *label;
         const char *value;
         const char *hint;
