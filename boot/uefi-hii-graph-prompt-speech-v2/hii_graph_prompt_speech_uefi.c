@@ -1812,7 +1812,170 @@ static int wait_repeat_key(void *system_table) {
 #endif
 
 #ifdef QEV_INTERACTIVE_NAV
+#ifdef QEV_SCREENREADER_V2
+static int sr_v2_event_text_equal(const SrSpeechEvent *a, const SrSpeechEvent *b) {
+    size_t i;
+    if (!a || !b) return a == b;
+    if (a->key != b->key ||
+        a->priority != b->priority ||
+        a->interruptible != b->interruptible) return 0;
+    for (i = 0u; i < SR_MAX_SPEECH_TEXT; ++i) {
+        if (a->text[i] != b->text[i]) return 0;
+        if (a->text[i] == '\0') return 1;
+    }
+    return 1;
+}
+
+static int sr_v2_start_scheduler_speech(void) {
+    const SrItem *item;
+    const char *text;
+    u32 n;
+
+    if (!g_sr_v2_session.speech.active) return 1;
+    text = g_sr_v2_session.speech.current.text;
+    n = sr_v2_copy_text64(g_nav_speech_text, text);
+    if (n == 0u) return 1;
+    g_nav_speech_length = (u8)n;
+
+    item = sr_session_current(&g_sr_v2_session);
+    if (item) g_prompt_count = sr_v2_copy_text64(g_prompt_text, item->label);
+
+    if (g_speech_active) {
+        speech_dma_stop();
+        marker("SCREENREADER_V2_SPEECH_INTERRUPT=PASS");
+    }
+    if (!speech_dma_begin(g_nav_speech_text, g_nav_speech_length)) return 0;
+
+    serial_puts("SCREENREADER_V2_SPEECH=");
+    serial_puts(g_nav_speech_text);
+    serial_puts("\r\n");
+    marker("SCREENREADER_V2_SPEECH_DMA=STARTED");
+    return 1;
+}
+
+static int sr_v2_poll_scheduler_audio(void) {
+    u8 progressed = 0u;
+    int audio_state;
+
+    if (!g_speech_active) return 1;
+    audio_state = speech_dma_poll(1000u, &progressed);
+    if (progressed) marker("SCREENREADER_V2_LPIB_PROGRESS=PASS");
+    if (audio_state < 0) return 0;
+    if (audio_state > 0) {
+        SrSpeechEvent next;
+        marker("SCREENREADER_V2_SPEECH_DMA=PASS");
+        if (sr_session_speech_complete(&g_sr_v2_session, &next)) {
+            return sr_v2_start_scheduler_speech();
+        }
+    }
+    return 1;
+}
+
+static void sr_v2_command_marker(SrFirmwareCommandKind kind) {
+    switch (kind) {
+        case SR_FW_CMD_NAVIGATE:
+            marker("SCREENREADER_V2_NAVIGATE=PASS");
+            break;
+        case SR_FW_CMD_REPEAT:
+            marker("SCREENREADER_V2_REPEAT=PASS");
+            break;
+        case SR_FW_CMD_CHOOSER_OPEN:
+            marker("SCREENREADER_V2_CHOOSER_OPEN=PASS");
+            break;
+        case SR_FW_CMD_CHOOSER_CANCEL:
+            marker("SCREENREADER_V2_CHOOSER_CANCEL=PASS");
+            break;
+        case SR_FW_CMD_CHOOSER_SELECT:
+            marker("SCREENREADER_V2_CHOOSER_SELECT=PASS");
+            break;
+        case SR_FW_CMD_CHOOSER_NEXT:
+            marker("SCREENREADER_V2_CHOOSER_NEXT=PASS");
+            break;
+        case SR_FW_CMD_CHOOSER_PREVIOUS:
+            marker("SCREENREADER_V2_CHOOSER_PREVIOUS=PASS");
+            break;
+        case SR_FW_CMD_CHOOSER_BACKSPACE:
+            marker("SCREENREADER_V2_CHOOSER_BACKSPACE=PASS");
+            break;
+        case SR_FW_CMD_CHOOSER_TYPE:
+            marker("SCREENREADER_V2_CHOOSER_FILTER=PASS");
+            break;
+        default:
+            break;
+    }
+}
+
+static int sr_v2_wait_navigation_keys(void *system_table) {
+    simple_text_input_protocol *conin;
+
+    if (!system_table || !g_sr_v2_active || !g_stall) return 0;
+    conin = *(simple_text_input_protocol **)((u8 *)system_table + 0x30);
+    if (!conin || !conin->read_key) return 0;
+
+    marker("SCREENREADER_V2_NAV_READY=PASS");
+    marker("SCREENREADER_V2_NAV_MODE=SESSION_SCHEDULER_HDA_DMA");
+
+    for (;;) {
+        efi_input_key key;
+        key.scan_code = 0u;
+        key.unicode_char = 0u;
+
+        if (conin->read_key(conin, &key) == 0u) {
+            SrFirmwareKey firmware_key;
+            SrFirmwareCommand command;
+            SrSpeechEvent before;
+            int before_active;
+            int exit_requested = 0;
+            int decoded;
+            int handled;
+
+            firmware_key.scan_code = key.scan_code;
+            firmware_key.unicode_char = key.unicode_char;
+            decoded = sr_legacy_key_decode(
+                firmware_key,
+                g_sr_v2_session.nav.chooser_open,
+                &command
+            );
+            if (decoded) {
+                before_active = g_sr_v2_session.speech.active != 0u;
+                before = g_sr_v2_session.speech.current;
+                handled = sr_legacy_session_handle_key(
+                    &g_sr_v2_session,
+                    firmware_key,
+                    &exit_requested
+                );
+                if (!handled) return 0;
+
+                if (exit_requested) {
+                    speech_dma_stop();
+                    sr_speech_cancel_all(&g_sr_v2_session.speech);
+                    marker("SCREENREADER_V2_EXIT=PASS");
+                    return 1;
+                }
+
+                sr_v2_command_marker(command.kind);
+                if (g_sr_v2_session.speech.active &&
+                    (command.kind == SR_FW_CMD_REPEAT ||
+                     !before_active ||
+                     !sr_v2_event_text_equal(
+                         &before,
+                         &g_sr_v2_session.speech.current
+                     ))) {
+                    if (!sr_v2_start_scheduler_speech()) return 0;
+                }
+            }
+        }
+
+        if (!sr_v2_poll_scheduler_audio()) return 0;
+        g_stall(1000u);
+    }
+}
+#endif
+
 static int wait_navigation_keys(void *system_table) {
+#ifdef QEV_SCREENREADER_V2
+    if (g_sr_v2_active) return sr_v2_wait_navigation_keys(system_table);
+#endif
     if (!system_table || g_nav_prompt_total < 2u) return 0;
     simple_text_input_protocol *conin =
         *(simple_text_input_protocol **)((u8 *)system_table + 0x30);
@@ -2103,7 +2266,12 @@ static int wait_navigation_keys(void *system_table) {
 
 __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     serial_init();
+#ifdef QEV_SCREENREADER_V2
+    marker("QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V2");
+    marker("SCREENREADER_V2=ENABLED");
+#else
     marker("QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V1");
+#endif
     marker("STATE=START");
     serial_puts("UEFI_SOURCE_BLOB=" QEV_SOURCE_BLOB "\r\n");
     marker("FRAMEWORK=NONE");
