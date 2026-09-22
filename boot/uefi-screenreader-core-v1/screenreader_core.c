@@ -454,6 +454,8 @@ SrSpeechDecision sr_speech_submit(SrSpeechScheduler *scheduler, const SrSpeechEv
 
     if (scheduler->current.interruptible &&
         (event->priority > scheduler->current.priority ||
+         (event->priority >= SR_SPEECH_FOCUS &&
+          scheduler->current.priority <= SR_SPEECH_VALUE) ||
          (event->key == scheduler->current.key &&
           event->priority >= scheduler->current.priority))) {
         sr_event_copy(&scheduler->current, event);
