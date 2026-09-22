@@ -107,6 +107,11 @@ jobs:
         working-directory: project
         run: |
           $ErrorActionPreference = 'Stop'
+          $knownLlvm = "C:\Program Files\LLVM\bin"
+          if (Test-Path "$knownLlvm\clang.exe" -and Test-Path "$knownLlvm\lld-link.exe") {
+            $env:Path = "$knownLlvm;$env:Path"
+          }
+
           $clangCmd = Get-Command clang.exe -ErrorAction SilentlyContinue
           $lldCmd = Get-Command lld-link.exe -ErrorAction SilentlyContinue
           $clang = if ($clangCmd) { $clangCmd.Source } else { $null }
@@ -116,14 +121,19 @@ jobs:
             $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
             if (-not $winget) { throw "LLVM missing and winget unavailable." }
             winget install --id LLVM.LLVM -e --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-            $env:Path = "C:\Program Files\LLVM\bin;$env:Path"
+            $wingetExit = $LASTEXITCODE
+            $env:Path = "$knownLlvm;$env:Path"
             $clangCmd = Get-Command clang.exe -ErrorAction SilentlyContinue
             $lldCmd = Get-Command lld-link.exe -ErrorAction SilentlyContinue
             $clang = if ($clangCmd) { $clangCmd.Source } else { $null }
             $lld = if ($lldCmd) { $lldCmd.Source } else { $null }
+            if ($wingetExit -ne 0 -and (-not $clang -or -not $lld)) {
+              throw "LLVM install/upgrade failed with exit code $wingetExit."
+            }
           }
 
           if (-not $clang -or -not $lld) { throw "LLVM unavailable." }
+          Write-Host "LLVM_EXISTING_INSTALL=PASS"
           "CLANG=$clang" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "LLDLINK=$lld" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
