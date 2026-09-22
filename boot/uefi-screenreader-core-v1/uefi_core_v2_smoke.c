@@ -37,11 +37,8 @@ static void serial_init(void) {
 }
 
 static void serial_putc(char ch) {
-    u32_guard:
-    {
-        unsigned int guard = 0u;
-        while ((inb(0x3fdu) & 0x20u) == 0u && guard < 1000000u) ++guard;
-    }
+    unsigned int guard = 0u;
+    while ((inb(0x3fdu) & 0x20u) == 0u && guard < 1000000u) ++guard;
     outb(0x3f8u, (u8)ch);
 }
 
