@@ -16,10 +16,13 @@ SrRole sr_hii_role_from_opcode(SrHiiOpcode opcode) {
         case SR_HII_OP_CHECKBOX: return SR_ROLE_TOGGLE;
         case SR_HII_OP_ONE_OF: return SR_ROLE_CHOICE;
         case SR_HII_OP_NUMERIC: return SR_ROLE_NUMERIC;
-        case SR_HII_OP_STRING: return SR_ROLE_TEXT;
+        case SR_HII_OP_STRING: return SR_ROLE_EDIT;
         case SR_HII_OP_PASSWORD: return SR_ROLE_PASSWORD;
         case SR_HII_OP_ACTION: return SR_ROLE_ACTION;
         case SR_HII_OP_REF: return SR_ROLE_SUBMENU;
+        case SR_HII_OP_DATE: return SR_ROLE_DATE;
+        case SR_HII_OP_TIME: return SR_ROLE_TIME;
+        case SR_HII_OP_ORDERED_LIST: return SR_ROLE_ORDERED_LIST;
         default: return SR_ROLE_UNKNOWN;
     }
 }
