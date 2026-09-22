@@ -114,6 +114,7 @@ int sr_chooser_type(SrNavigator *nav, char ch);
 int sr_chooser_backspace(SrNavigator *nav);
 int sr_chooser_next(SrNavigator *nav);
 int sr_chooser_previous(SrNavigator *nav);
+const SrItem *sr_chooser_current(const SrNavigator *nav);
 int sr_chooser_select(SrNavigator *nav);
 void sr_chooser_cancel(SrNavigator *nav);
 
@@ -122,6 +123,7 @@ const char *sr_role_name(SrRole role);
 
 size_t sr_format_focus(const SrNavigator *nav, char *out, size_t cap);
 size_t sr_format_hint(const SrNavigator *nav, char *out, size_t cap);
+size_t sr_format_chooser(const SrNavigator *nav, char *out, size_t cap);
 size_t sr_format_alert(const char *title, const char *detail, char *out, size_t cap);
 
 void sr_speech_init(SrSpeechScheduler *scheduler);
