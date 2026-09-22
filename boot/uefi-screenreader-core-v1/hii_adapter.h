@@ -16,7 +16,10 @@ typedef enum {
     SR_HII_OP_STRING,
     SR_HII_OP_PASSWORD,
     SR_HII_OP_ACTION,
-    SR_HII_OP_REF
+    SR_HII_OP_REF,
+    SR_HII_OP_DATE,
+    SR_HII_OP_TIME,
+    SR_HII_OP_ORDERED_LIST
 } SrHiiOpcode;
 
 enum {
