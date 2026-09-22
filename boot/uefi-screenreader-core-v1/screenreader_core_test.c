@@ -54,6 +54,30 @@ static void test_navigation(void) {
     assert(sr_nav_current(&nav)->id == 7);
 }
 
+static void test_focus_rebind(void) {
+    static const SrItem refreshed[] = {
+        {30, SR_ROLE_ACTION, 0, "Before", "", ""},
+        {4, SR_ROLE_CHOICE, SR_STATE_CHANGED, "Boot mode", "UEFI", ""},
+        {31, SR_ROLE_ACTION, 0, "After", "", ""}
+    };
+    static const SrItem removed[] = {
+        {30, SR_ROLE_ACTION, 0, "Before", "", ""},
+        {31, SR_ROLE_ACTION, 0, "After", "", ""}
+    };
+    SrNavigator nav;
+
+    sr_nav_init(&nav, items, sizeof(items) / sizeof(items[0]), 3);
+    while (sr_nav_current(&nav)->id != 4) {
+        assert(sr_nav_move(&nav, SR_NAV_NEXT, 0));
+    }
+    assert(sr_nav_rebind_by_id(&nav, refreshed, 3, 4));
+    assert(sr_nav_current(&nav)->id == 4);
+    assert(nav.page_size == 3);
+
+    assert(!sr_nav_rebind_by_id(&nav, removed, 2, 4));
+    assert(sr_nav_current(&nav)->id == 30);
+}
+
 static void test_rotor(void) {
     static const SrItem rotor_items[] = {
         {10, SR_ROLE_TOGGLE, 0, "A", "", ""},
@@ -132,7 +156,8 @@ static void test_focus_speech(void) {
 static void test_scheduler(void) {
     SrSpeechScheduler s;
     SrSpeechEvent focus1 = event(100, SR_SPEECH_FOCUS, 1, "Secure Boot, Enabled");
-    SrSpeechEvent focus2 = event(100, SR_SPEECH_FOCUS, 1, "Boot mode, UEFI");
+    SrSpeechEvent focus2 = event(101, SR_SPEECH_FOCUS, 1, "Boot mode, UEFI");
+    SrSpeechEvent focus3 = event(102, SR_SPEECH_FOCUS, 1, "Advanced");
     SrSpeechEvent hint = event(200, SR_SPEECH_HINT, 1, "Press Enter");
     SrSpeechEvent dialog = event(300, SR_SPEECH_DIALOG, 1, "Save changes dialog");
     SrSpeechEvent critical = event(400, SR_SPEECH_CRITICAL, 0, "Critical firmware error");
@@ -142,18 +167,25 @@ static void test_scheduler(void) {
     assert(sr_speech_submit(&s, &focus1) == SR_SPEECH_START);
     assert(sr_speech_submit(&s, &focus1) == SR_SPEECH_DROP_DUPLICATE);
     assert(sr_speech_submit(&s, &hint) == SR_SPEECH_QUEUE);
+    assert(s.pending_count == 1);
     assert(sr_speech_submit(&s, &focus2) == SR_SPEECH_PREEMPT);
     assert(strcmp(s.current.text, "Boot mode, UEFI") == 0);
+    assert(s.pending_count == 0);
+
     assert(sr_speech_submit(&s, &dialog) == SR_SPEECH_PREEMPT);
     assert(strcmp(s.current.text, "Save changes dialog") == 0);
-
     assert(sr_speech_submit(&s, &critical) == SR_SPEECH_PREEMPT);
     assert(strcmp(s.current.text, "Critical firmware error") == 0);
     assert(!s.current.interruptible);
 
+    assert(sr_speech_submit(&s, &hint) == SR_SPEECH_QUEUE);
+    assert(s.pending_count == 1);
+    assert(sr_speech_submit(&s, &focus3) == SR_SPEECH_QUEUE);
+    assert(s.pending_count == 1);
     assert(sr_speech_complete(&s, &next));
-    assert(next.priority == SR_SPEECH_HINT);
-    assert(strcmp(next.text, "Press Enter") == 0);
+    assert(next.priority == SR_SPEECH_FOCUS);
+    assert(strcmp(next.text, "Advanced") == 0);
+    assert(!sr_speech_complete(&s, &next));
 
     sr_speech_cancel_all(&s);
     assert(!s.active);
@@ -232,6 +264,7 @@ static void test_stress(void) {
 
 int main(void) {
     test_navigation();
+    test_focus_rebind();
     test_rotor();
     test_item_chooser();
     test_focus_speech();
