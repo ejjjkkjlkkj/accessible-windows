@@ -204,6 +204,34 @@ static void test_malformed_package_is_transactional(void) {
     assert(live.text_used == 0u);
 }
 
+static void test_missing_end_package_is_rejected(void) {
+    uint8_t package[160];
+    size_t bytes = build_package(package, sizeof(package), 0x10u);
+    SrLiveHiiSnapshot live;
+    TestContext ctx = {0,0,-1};
+
+    assert(bytes > 4u);
+    wr32(package + 16u, (uint32_t)(bytes - 4u));
+    assert(!sr_live_hii_build_package_list(
+        &live, package, bytes - 4u, resolve_string, resolve_value, &ctx
+    ));
+    assert(live.count == 0u);
+}
+
+static void test_duplicate_stable_id_is_rejected(void) {
+    uint8_t package[160];
+    size_t bytes = build_package(package, sizeof(package), 0x10u);
+    SrLiveHiiSnapshot live;
+    TestContext ctx = {0,0,-1};
+
+    package[64u] = 0x00u;
+    package[65u] = 0x01u;
+    assert(!sr_live_hii_build_package_list(
+        &live, package, bytes, resolve_string, resolve_value, &ctx
+    ));
+    assert(live.count == 0u);
+}
+
 static void test_value_failure_rejects_snapshot(void) {
     uint8_t package[160];
     size_t bytes = build_package(package, sizeof(package), 0x10u);
@@ -221,6 +249,8 @@ int main(void) {
     test_live_package_build();
     test_focus_survives_prompt_token_refresh();
     test_malformed_package_is_transactional();
+    test_missing_end_package_is_rejected();
+    test_duplicate_stable_id_is_rejected();
     test_value_failure_rejects_snapshot();
     puts("UEFI_LIVE_HII_ADAPTER_TESTS=PASS");
     return 0;
