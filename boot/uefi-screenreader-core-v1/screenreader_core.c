@@ -359,6 +359,10 @@ size_t sr_format_focus(const SrNavigator *nav, char *out, size_t cap) {
         pos = sr_append_sep(out, cap, pos);
         pos = sr_copy_text(out, cap, pos, "warning");
     }
+    if (item->state & SR_STATE_READ_ONLY) {
+        pos = sr_append_sep(out, cap, pos);
+        pos = sr_copy_text(out, cap, pos, "read only");
+    }
 
     for (i = 0; i < nav->count; ++i) {
         if (!sr_item_is_focusable(&nav->items[i])) continue;
