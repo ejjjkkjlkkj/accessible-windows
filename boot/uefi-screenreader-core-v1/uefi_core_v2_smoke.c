@@ -106,6 +106,10 @@ u64 efi_main(void *image_handle, void *system_table) {
 
     key.scan_code = 0u;
     key.unicode_char = (u16)'a';
+    if (!sr_legacy_session_handle_key(&g_session, key, &exit_requested)) return 1u;
+    key.unicode_char = (u16)'d';
+    if (!sr_legacy_session_handle_key(&g_session, key, &exit_requested)) return 1u;
+    key.unicode_char = (u16)'v';
     if (!check(
         sr_legacy_session_handle_key(&g_session, key, &exit_requested) &&
         g_session.nav.chooser_match_count == 1u &&
