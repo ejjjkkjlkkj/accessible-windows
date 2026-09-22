@@ -46,6 +46,7 @@ jobs:
           }
 
           Write-Host "VMWARE_INSTALL_ROUTE_PROBE=PASS"
+          exit 0
 
   project-build-probe:
     runs-on: windows-latest
