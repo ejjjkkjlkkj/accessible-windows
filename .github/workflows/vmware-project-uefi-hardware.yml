@@ -108,7 +108,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $knownLlvm = "C:\Program Files\LLVM\bin"
-          if (Test-Path "$knownLlvm\clang.exe" -and Test-Path "$knownLlvm\lld-link.exe") {
+          if ((Test-Path "$knownLlvm\clang.exe") -and (Test-Path "$knownLlvm\lld-link.exe")) {
             $env:Path = "$knownLlvm;$env:Path"
           }
 
