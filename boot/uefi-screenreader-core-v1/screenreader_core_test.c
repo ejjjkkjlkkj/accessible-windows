@@ -117,6 +117,14 @@ static void test_item_chooser(void) {
     assert(sr_chooser_backspace(&nav));
     assert(nav.chooser_query_len == 0);
     assert(sr_chooser_next(&nav));
+    {
+        char chooser_speech[SR_MAX_SPEECH_TEXT];
+        const SrItem *choice = sr_chooser_current(&nav);
+        assert(choice != NULL);
+        assert(sr_format_chooser(&nav, chooser_speech, sizeof(chooser_speech)) > 0u);
+        assert(strstr(chooser_speech, "Item chooser") != NULL);
+        assert(strstr(chooser_speech, "match ") != NULL);
+    }
     assert(sr_chooser_previous(&nav));
     sr_chooser_cancel(&nav);
     assert(!nav.chooser_open);
