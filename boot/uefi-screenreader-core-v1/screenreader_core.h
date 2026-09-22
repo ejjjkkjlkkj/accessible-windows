@@ -22,7 +22,11 @@ typedef enum {
     SR_ROLE_SUBMENU,
     SR_ROLE_DIALOG,
     SR_ROLE_ALERT,
-    SR_ROLE_SEPARATOR
+    SR_ROLE_SEPARATOR,
+    SR_ROLE_DATE,
+    SR_ROLE_TIME,
+    SR_ROLE_EDIT,
+    SR_ROLE_ORDERED_LIST
 } SrRole;
 
 enum {
