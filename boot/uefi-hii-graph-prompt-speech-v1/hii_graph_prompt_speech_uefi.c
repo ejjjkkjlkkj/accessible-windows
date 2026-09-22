@@ -172,6 +172,9 @@ static u8 g_nav_role_events;
 static u8 g_nav_first_letter_events;
 static u8 g_nav_chooser_open_events;
 static u8 g_nav_chooser_filter_events;
+static u8 g_nav_chooser_next_events;
+static u8 g_nav_chooser_previous_events;
+static u8 g_nav_chooser_backspace_events;
 static u8 g_nav_chooser_select_events;
 static u8 g_nav_chooser_cancel_events;
 #define NAV_SEEN_UP        0x01u
@@ -386,7 +389,10 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
          g_nav_role_events >= 2u &&
          g_nav_first_letter_events >= 1u &&
          g_nav_chooser_open_events >= 2u &&
-         g_nav_chooser_filter_events >= 1u &&
+         g_nav_chooser_filter_events >= 2u &&
+         g_nav_chooser_next_events >= 1u &&
+         g_nav_chooser_previous_events >= 1u &&
+         g_nav_chooser_backspace_events >= 1u &&
          g_nav_chooser_select_events >= 1u &&
          g_nav_chooser_cancel_events >= 1u) ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_EXIT=PASS\r\n");
@@ -407,7 +413,13 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_OPEN=");
     proof_puts(proof,sizeof(proof),&n,g_nav_chooser_open_events >= 2u ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_FILTER=");
-    proof_puts(proof,sizeof(proof),&n,g_nav_chooser_filter_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,g_nav_chooser_filter_events >= 2u ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_NEXT=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_chooser_next_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_PREVIOUS=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_chooser_previous_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_BACKSPACE=");
+    proof_puts(proof,sizeof(proof),&n,g_nav_chooser_backspace_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_SELECT=");
     proof_puts(proof,sizeof(proof),&n,g_nav_chooser_select_events ? "PASS\r\n" : "NOT_ESTABLISHED\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_CANCEL=");
@@ -417,6 +429,15 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_FILTER_EVENTS=0x");
     proof_hex8(proof,sizeof(proof),&n,g_nav_chooser_filter_events);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_NEXT_EVENTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_chooser_next_events);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_PREVIOUS_EVENTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_chooser_previous_events);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_ITEM_CHOOSER_BACKSPACE_EVENTS=0x");
+    proof_hex8(proof,sizeof(proof),&n,g_nav_chooser_backspace_events);
     proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HII_GRAPH_NAV_SPEECH_EVENTS=0x");
     proof_hex8(proof,sizeof(proof),&n,g_nav_speech_events);
@@ -1306,6 +1327,9 @@ static int resolve_hii_prompt(void *system_table) {
     g_nav_first_letter_events = 0;
     g_nav_chooser_open_events = 0;
     g_nav_chooser_filter_events = 0;
+    g_nav_chooser_next_events = 0;
+    g_nav_chooser_previous_events = 0;
+    g_nav_chooser_backspace_events = 0;
     g_nav_chooser_select_events = 0;
     g_nav_chooser_cancel_events = 0;
 #endif
@@ -1686,6 +1710,7 @@ static int wait_navigation_keys(void *system_table) {
                         : (u8)(chooser_count - 1u);
                     nav_prompt_load(chooser_matches[chooser_position]);
                     nav_build_chooser_speech(chooser_position, chooser_count);
+                    if (g_nav_chooser_previous_events != 0xffu) ++g_nav_chooser_previous_events;
                     marker("HII_GRAPH_NAV_ITEM_CHOOSER_PREVIOUS=PASS");
                     speak = 1;
                 } else if (key.scan_code == 0x0002u && chooser_count) {
@@ -1693,6 +1718,7 @@ static int wait_navigation_keys(void *system_table) {
                     if (chooser_position >= chooser_count) chooser_position = 0;
                     nav_prompt_load(chooser_matches[chooser_position]);
                     nav_build_chooser_speech(chooser_position, chooser_count);
+                    if (g_nav_chooser_next_events != 0xffu) ++g_nav_chooser_next_events;
                     marker("HII_GRAPH_NAV_ITEM_CHOOSER_NEXT=PASS");
                     speak = 1;
                 } else if (key.unicode_char == 0x0008u && chooser_query_len) {
@@ -1705,6 +1731,8 @@ static int wait_navigation_keys(void *system_table) {
                         nav_prompt_load(chooser_matches[0]);
                         nav_build_chooser_speech(0, chooser_count);
                         if (g_nav_chooser_filter_events != 0xffu) ++g_nav_chooser_filter_events;
+                        if (g_nav_chooser_backspace_events != 0xffu) ++g_nav_chooser_backspace_events;
+                        marker("HII_GRAPH_NAV_ITEM_CHOOSER_BACKSPACE=PASS");
                         marker("HII_GRAPH_NAV_ITEM_CHOOSER_FILTER=PASS");
                         speak = 1;
                     }
@@ -1762,11 +1790,14 @@ static int wait_navigation_keys(void *system_table) {
                 marker("HII_GRAPH_NAV_KEY=ESC");
                 speech_dma_stop();
                 if ((g_nav_event_mask & NAV_REQUIRED_MASK) != NAV_REQUIRED_MASK ||
-                    g_nav_speech_events < 15u ||
+                    g_nav_speech_events < 19u ||
                     g_nav_role_events < 2u ||
                     g_nav_first_letter_events < 1u ||
                     g_nav_chooser_open_events < 2u ||
-                    g_nav_chooser_filter_events < 1u ||
+                    g_nav_chooser_filter_events < 2u ||
+                    g_nav_chooser_next_events < 1u ||
+                    g_nav_chooser_previous_events < 1u ||
+                    g_nav_chooser_backspace_events < 1u ||
                     g_nav_chooser_select_events < 1u ||
                     g_nav_chooser_cancel_events < 1u) {
                     marker("HII_GRAPH_NAV_REQUIRED_EVENTS=PENDING");
@@ -2003,6 +2034,7 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     marker("HII_GRAPH_NAV_FIRST_LETTER_CAPABLE=PASS");
     marker("HII_GRAPH_NAV_ROLE_ROTOR_CAPABLE=PASS");
     marker("HII_GRAPH_NAV_ITEM_CHOOSER_CAPABLE=PASS");
+    marker("HII_GRAPH_NAV_ITEM_CHOOSER_FULL_NAV_CAPABLE=PASS");
 #endif
     if (g_controller_preferred && g_codec_vendor_id == 0x10ec0256u) {
         marker("PHYSICAL_ASUS_M1603QA_HDA_RUNTIME=PASS");
