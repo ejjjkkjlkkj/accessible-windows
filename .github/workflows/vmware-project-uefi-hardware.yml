@@ -36,19 +36,27 @@ jobs:
             throw "Required PsExec64.exe missing: $psexec"
           }
 
-          $sessionProbe = & $psexec -accepteula -nobanner -s powershell.exe -NoProfile -Command "(Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { `$_.SessionId -gt 0 } | Select-Object -First 1 -ExpandProperty SessionId)"
-          if ($LASTEXITCODE -ne 0) {
-            throw "PsExec session discovery failed with exit code $LASTEXITCODE"
+          # Use the Windows session that already hosts the manually opened
+          # self-hosted runner. explorer.exe is not a reliable session oracle.
+          $sessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+          if ($sessionId -le 0) {
+            throw "Runner is not attached to an interactive Windows session (SessionId=$sessionId)."
           }
 
-          $sessionId = @($sessionProbe | ForEach-Object { "$_".Trim() } | Where-Object { $_ -match '^\d+$' } | Select-Object -Last 1)
-          if (-not $sessionId) {
-            throw "No active Explorer desktop session found. Keep the adm Windows session logged in."
+          # Prove PsExec can enter that exact desktop session as LocalSystem.
+          $sessionProbe = & $psexec -accepteula -nobanner -s -h -i $sessionId powershell.exe -NoProfile -Command "[Console]::WriteLine(([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value) + '|' + [System.Diagnostics.Process]::GetCurrentProcess().SessionId)"
+          if ($LASTEXITCODE -ne 0) {
+            throw "PsExec interactive SYSTEM validation failed with exit code $LASTEXITCODE"
           }
-          $sessionId = [int]$sessionId
+          $expected = "S-1-5-18|$sessionId"
+          $probeLine = @($sessionProbe | ForEach-Object { "$_".Trim() } | Where-Object { $_ -eq $expected } | Select-Object -Last 1)
+          if (-not $probeLine) {
+            throw "PsExec did not enter runner session as LocalSystem. Expected $expected."
+          }
 
           Write-Host "PSEXEC_PATH=$psexec"
-          Write-Host "PSEXEC_INTERACTIVE_SESSION=$sessionId"
+          Write-Host "RUNNER_INTERACTIVE_SESSION=$sessionId"
+          Write-Host "PSEXEC_INTERACTIVE_SYSTEM=PASS"
 
           $workspace = (Resolve-Path -LiteralPath '.\project').Path
           $stage = Join-Path $workspace 'navigation\uefi\psexec_vmware_voice_test.ps1'
