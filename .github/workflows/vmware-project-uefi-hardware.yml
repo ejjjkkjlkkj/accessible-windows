@@ -99,6 +99,16 @@ jobs:
           )
           & $psexec @args
           if ($LASTEXITCODE -ne 0) {
+            $stageLog = 'C:\Windows\Temp\qev-psexec-pipeline-stage.txt'
+            $errorLog = 'C:\Windows\Temp\qev-psexec-pipeline-error.txt'
+            if (Test-Path -LiteralPath $stageLog) {
+              Write-Host '--- PSEXEC STAGE LOG ---'
+              Get-Content -LiteralPath $stageLog
+            }
+            if (Test-Path -LiteralPath $errorLog) {
+              Write-Host '--- PSEXEC ERROR LOG ---'
+              Get-Content -LiteralPath $errorLog
+            }
             throw "PsExec physical pipeline failed with exit code $LASTEXITCODE"
           }
 
