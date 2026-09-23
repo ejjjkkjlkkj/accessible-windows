@@ -38,29 +38,39 @@ jobs:
           if (-not (Test-Path -LiteralPath $psexec)) {
             throw "PsExec64.exe missing at required path: $psexec"
           }
+
           New-Item -ItemType Directory -Force project\build | Out-Null
-          $probeScript = "C:\Windows\Temp\qev-psexec-probe.cmd"
-          $identityFile = "C:\Windows\Temp\qev-psexec-whoami.txt"
-          Remove-Item -LiteralPath $identityFile -Force -ErrorAction SilentlyContinue
-          "@echo off`r`nwhoami > C:\Windows\Temp\qev-psexec-whoami.txt`r`nexit /b %errorlevel%`r`n" |
-            Set-Content -LiteralPath $probeScript -Encoding ascii
-          & $psexec -accepteula -nobanner -s -h C:\Windows\System32\cmd.exe /d /c $probeScript
+          $probePs1 = "C:\Windows\Temp\qev-psexec-probe.ps1"
+          $sidFile = "C:\Windows\Temp\qev-psexec-sid.txt"
+          Remove-Item -LiteralPath $sidFile -Force -ErrorAction SilentlyContinue
+
+          @'
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          Set-Content -LiteralPath 'C:\Windows\Temp\qev-psexec-sid.txt' -Value $sid -Encoding ascii
+          exit 0
+          '@ | Set-Content -LiteralPath $probePs1 -Encoding utf8
+
+          $systemPwsh = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+          & $psexec -accepteula -nobanner -s -h $systemPwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePs1
           $exit = $LASTEXITCODE
-          if ($exit -ne 0) { throw "PsExec SYSTEM probe failed with exit code $exit" }
-          if (-not (Test-Path -LiteralPath $identityFile)) {
-            throw "PsExec ran but did not create SYSTEM identity evidence."
+          if ($exit -ne 0) {
+            throw "PsExec SYSTEM SID probe failed with exit code $exit"
           }
-          $text = (Get-Content -Raw -LiteralPath $identityFile).Trim()
-          Write-Host "PSEXEC_IDENTITY=$text"
-          if ($text -notmatch '(?i)nt authority\\system') {
-            throw "PsExec did not obtain NT AUTHORITY\SYSTEM. Identity: $text"
+          if (-not (Test-Path -LiteralPath $sidFile)) {
+            throw "PsExec ran but did not create SYSTEM SID evidence."
           }
-          Copy-Item -LiteralPath $identityFile -Destination project\build\psexec-whoami.txt -Force
-          New-Item -ItemType Directory -Force project\build | Out-Null
+
+          $sid = (Get-Content -Raw -LiteralPath $sidFile).Trim()
+          Write-Host "PSEXEC_SID=$sid"
+          if ($sid -ne 'S-1-5-18') {
+            throw "PsExec did not obtain LocalSystem. SID=$sid"
+          }
+
+          Copy-Item -LiteralPath $sidFile -Destination project\build\psexec-sid.txt -Force
           @(
             "PSEXEC_PATH=$psexec"
             "PSEXEC_SYSTEM=PASS"
-            "PSEXEC_IDENTITY=$text"
+            "PSEXEC_SID=$sid"
           ) | Set-Content -Path project\build\psexec-evidence.txt -Encoding utf8
           Write-Host "PSEXEC_SYSTEM=PASS"
 
