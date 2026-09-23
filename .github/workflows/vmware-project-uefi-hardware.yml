@@ -44,14 +44,29 @@ jobs:
           }
 
           # Prove PsExec can enter that exact desktop session as LocalSystem.
-          $sessionProbe = & $psexec -accepteula -nobanner -s -h -i $sessionId powershell.exe -NoProfile -Command "[Console]::WriteLine(([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value) + '|' + [System.Diagnostics.Process]::GetCurrentProcess().SessionId)"
+          # Interactive PsExec does not reliably pipe child stdout back to the
+          # runner, so persist the proof to a local file and validate it here.
+          $probeScript = 'C:\Windows\Temp\qev-psexec-interactive-probe.ps1'
+          $probeFile = 'C:\Windows\Temp\qev-psexec-interactive-proof.txt'
+          Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue
+          @'
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+          Set-Content -LiteralPath 'C:\Windows\Temp\qev-psexec-interactive-proof.txt' -Value "$sid|$session" -Encoding ascii
+          exit 0
+          '@ | Set-Content -LiteralPath $probeScript -Encoding utf8
+
+          & $psexec -accepteula -nobanner -s -h -i $sessionId powershell.exe -NoProfile -ExecutionPolicy Bypass -File $probeScript
           if ($LASTEXITCODE -ne 0) {
             throw "PsExec interactive SYSTEM validation failed with exit code $LASTEXITCODE"
           }
+          if (-not (Test-Path -LiteralPath $probeFile)) {
+            throw "PsExec interactive proof file was not created."
+          }
           $expected = "S-1-5-18|$sessionId"
-          $probeLine = @($sessionProbe | ForEach-Object { "$_".Trim() } | Where-Object { $_ -eq $expected } | Select-Object -Last 1)
-          if (-not $probeLine) {
-            throw "PsExec did not enter runner session as LocalSystem. Expected $expected."
+          $probeLine = (Get-Content -Raw -LiteralPath $probeFile).Trim()
+          if ($probeLine -ne $expected) {
+            throw "PsExec did not enter runner session as LocalSystem. Expected $expected, got $probeLine."
           }
 
           Write-Host "PSEXEC_PATH=$psexec"
