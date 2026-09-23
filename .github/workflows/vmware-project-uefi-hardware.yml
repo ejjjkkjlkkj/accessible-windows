@@ -38,13 +38,20 @@ jobs:
           if (-not (Test-Path -LiteralPath $psexec)) {
             throw "PsExec64.exe missing at required path: $psexec"
           }
-          $output = & $psexec -accepteula -nobanner -s -h cmd.exe /d /c whoami 2>&1
+          New-Item -ItemType Directory -Force project\build | Out-Null
+          $identityFile = Join-Path (Resolve-Path project\build).Path "psexec-whoami.txt"
+          Remove-Item -LiteralPath $identityFile -Force -ErrorAction SilentlyContinue
+          $cmdLine = "whoami > `"$identityFile`""
+          & $psexec -accepteula -nobanner -s -h cmd.exe /d /c $cmdLine
           $exit = $LASTEXITCODE
-          $text = ($output | Out-String).Trim()
-          Write-Host $text
           if ($exit -ne 0) { throw "PsExec SYSTEM probe failed with exit code $exit" }
+          if (-not (Test-Path -LiteralPath $identityFile)) {
+            throw "PsExec ran but did not create SYSTEM identity evidence."
+          }
+          $text = (Get-Content -Raw -LiteralPath $identityFile).Trim()
+          Write-Host "PSEXEC_IDENTITY=$text"
           if ($text -notmatch '(?i)nt authority\\system') {
-            throw "PsExec did not obtain NT AUTHORITY\SYSTEM. Output: $text"
+            throw "PsExec did not obtain NT AUTHORITY\SYSTEM. Identity: $text"
           }
           New-Item -ItemType Directory -Force project\build | Out-Null
           @(
