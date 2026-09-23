@@ -1,17 +1,4 @@
-name: vmware-project-uefi-hardware
-# VOICE_V12_AUDIT_WAVS_20260923
-# VOICE_V12_NATIVE_FR_SYSTEM_20260923
-# VOICE_V12_CLEAN_SYSTEM_PCM_20260923
-# VOICE_V11_FULL_REAL_PHRASES_20260923
-# VOICE_V10_COMPACT_REAL_SPEECH_20260923
-# VOICE_V9_CLAIR_PHYSICAL_20260923
-# PSEXEC_SYSTEM_VOICE_V8_PERMANENT_20260923
-# PHYSICAL_RERUN_20260923_1040
-# VOICE_V7_PHYSICAL_TRIGGER_20260922
-# PHYSICAL_RERUN_20260923_PSEXEC
-# VOICE_V6_PHYSICAL_TRIGGER_20260922
-# VOICE_V5_PHYSICAL_TRIGGER_20260922
-# RUNNER_TRIGGER_20260922
+name: vmware-project-uefi-hardware-psexec
 
 on:
   push:
@@ -23,11 +10,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: vmware-project-uefi-hardware-psexec
+  cancel-in-progress: true
 
 jobs:
-  vmware-project-uefi:
+  physical-psexec-voice:
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout project under test
@@ -37,394 +27,81 @@ jobs:
           ref: main
           path: project
 
-      - name: Verify PsExec SYSTEM context
+      - name: Execute physical voice and VMware pipeline via required PsExec
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $psexec = "C:\Users\adm\Downloads\PsExec64.exe"
+          $psexec = 'C:\Users\adm\Downloads\PsExec64.exe'
           if (-not (Test-Path -LiteralPath $psexec)) {
-            throw "PsExec64.exe missing at required path: $psexec"
+            throw "Required PsExec64.exe missing: $psexec"
           }
 
-          New-Item -ItemType Directory -Force project\build | Out-Null
-          $probePs1 = "C:\Windows\Temp\qev-psexec-probe.ps1"
-          $sidFile = "C:\Windows\Temp\qev-psexec-sid.txt"
-          Remove-Item -LiteralPath $sidFile -Force -ErrorAction SilentlyContinue
-
-          @'
-          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-          Set-Content -LiteralPath 'C:\Windows\Temp\qev-psexec-sid.txt' -Value $sid -Encoding ascii
-          exit 0
-          '@ | Set-Content -LiteralPath $probePs1 -Encoding utf8
-
-          $systemPwsh = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-          & $psexec -accepteula -nobanner -s -h $systemPwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePs1
-          $exit = $LASTEXITCODE
-          if ($exit -ne 0) {
-            throw "PsExec SYSTEM SID probe failed with exit code $exit"
-          }
-          if (-not (Test-Path -LiteralPath $sidFile)) {
-            throw "PsExec ran but did not create SYSTEM SID evidence."
+          $sessionProbe = & $psexec -accepteula -nobanner -s powershell.exe -NoProfile -Command "(Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { `$_.SessionId -gt 0 } | Select-Object -First 1 -ExpandProperty SessionId)"
+          if ($LASTEXITCODE -ne 0) {
+            throw "PsExec session discovery failed with exit code $LASTEXITCODE"
           }
 
-          $sid = (Get-Content -Raw -LiteralPath $sidFile).Trim()
-          Write-Host "PSEXEC_SID=$sid"
-          if ($sid -ne 'S-1-5-18') {
-            throw "PsExec did not obtain LocalSystem. SID=$sid"
+          $sessionId = @($sessionProbe | ForEach-Object { "$_".Trim() } | Where-Object { $_ -match '^\d+$' } | Select-Object -Last 1)
+          if (-not $sessionId) {
+            throw "No active Explorer desktop session found. Keep the adm Windows session logged in."
+          }
+          $sessionId = [int]$sessionId
+
+          Write-Host "PSEXEC_PATH=$psexec"
+          Write-Host "PSEXEC_INTERACTIVE_SESSION=$sessionId"
+
+          $workspace = (Resolve-Path -LiteralPath '.\project').Path
+          $stage = Join-Path $workspace 'navigation\uefi\psexec_vmware_voice_test.ps1'
+          if (-not (Test-Path -LiteralPath $stage)) {
+            throw "Project PsExec stage missing: $stage"
           }
 
-          Copy-Item -LiteralPath $sidFile -Destination project\build\psexec-sid.txt -Force
-          @(
-            "PSEXEC_PATH=$psexec"
-            "PSEXEC_SYSTEM=PASS"
-            "PSEXEC_SID=$sid"
-          ) | Set-Content -Path project\build\psexec-evidence.txt -Encoding utf8
-          "PSEXEC_PATH=$psexec" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "PSEXEC_SYSTEM=PASS"
-
-      - name: Verify ASUS AMD physical runner
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not $IsWindows) { throw "This workflow requires the Windows self-hosted runner." }
-
-          $cs = Get-CimInstance Win32_ComputerSystem
-          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
-          $bios = Get-CimInstance Win32_BIOS
-          $os = Get-CimInstance Win32_OperatingSystem
-          $secureBoot = try { Confirm-SecureBootUEFI } catch { $null }
-          $deviceGuard = Get-CimInstance -Namespace root\Microsoft\Windows\DeviceGuard -ClassName Win32_DeviceGuard -ErrorAction SilentlyContinue
-
-          if ($cs.Model -notmatch 'M1603QA') {
-            throw "Wrong physical target: expected ASUS M1603QA, got '$($cs.Model)'."
-          }
-          if ($cpu.Name -notmatch 'Ryzen 7 5800H') {
-            throw "Wrong CPU target: expected Ryzen 7 5800H, got '$($cpu.Name)'."
-          }
-
-          New-Item -ItemType Directory -Force project\build | Out-Null
-          @(
-            "RUNNER_MACHINE=$env:COMPUTERNAME"
-            "HOST_MANUFACTURER=$($cs.Manufacturer)"
-            "HOST_MODEL=$($cs.Model)"
-            "HOST_CPU=$($cpu.Name)"
-            "HOST_CORES=$($cpu.NumberOfCores)"
-            "HOST_LOGICAL_PROCESSORS=$($cpu.NumberOfLogicalProcessors)"
-            "HOST_RAM_BYTES=$($cs.TotalPhysicalMemory)"
-            "HOST_BIOS_VERSION=$($bios.SMBIOSBIOSVersion)"
-            "HOST_BIOS_DATE=$($bios.ReleaseDate)"
-            "HOST_OS=$($os.Caption)"
-            "HOST_OS_VERSION=$($os.Version)"
-            "HOST_OS_BUILD=$($os.BuildNumber)"
-            "HOST_HYPERVISOR_PRESENT=$($cs.HypervisorPresent)"
-            "HOST_SECURE_BOOT=$secureBoot"
-            "HOST_VBS_STATUS=$($deviceGuard.VirtualizationBasedSecurityStatus)"
-            "HOST_SECURITY_SERVICES_RUNNING=$($deviceGuard.SecurityServicesRunning -join ',')"
-          ) | Set-Content -Path project\build\host-evidence.txt -Encoding utf8
-
-          Get-Content project\build\host-evidence.txt
-          Write-Host "RUNNER_WINDOWS=PASS"
-          Write-Host "HOST_ASUS_M1603QA=PASS"
-          Write-Host "HOST_RYZEN_5800H=PASS"
-
-      - name: Verify VMware Workstation
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          function Find-Vmrun {
-            $candidates = @(
-              "$env:ProgramFiles\VMware\VMware Workstation\vmrun.exe",
-              "${env:ProgramFiles(x86)}\VMware\VMware Workstation\vmrun.exe"
-            )
-            foreach ($p in $candidates) {
-              if ($p -and (Test-Path $p)) { return $p }
-            }
-            return $null
-          }
-
-          $vmrun = Find-Vmrun
-          if (-not $vmrun) {
-            throw "VMware Workstation is not installed on this trusted runner. Install it from the Broadcom Support Portal, then rerun this workflow."
-          }
-
-          $auth = Get-Service -Name VMAuthdService -ErrorAction SilentlyContinue
-          if ($auth -and $auth.Status -ne 'Running') { Start-Service VMAuthdService }
-
-          $version = (Get-Item $vmrun).VersionInfo.FileVersion
-          "VMRUN=$vmrun" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "VMWARE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "VMWARE_WORKSTATION=PASS"
-          Write-Host "VMWARE_VERSION=$version"
-          & $vmrun -T ws list
-
-      - name: Ensure LLVM
-        shell: pwsh
-        working-directory: project
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $knownLlvm = "C:\Program Files\LLVM\bin"
-          if ((Test-Path "$knownLlvm\clang.exe") -and (Test-Path "$knownLlvm\lld-link.exe")) {
-            $env:Path = "$knownLlvm;$env:Path"
-          }
-
-          $clangCmd = Get-Command clang.exe -ErrorAction SilentlyContinue
-          $lldCmd = Get-Command lld-link.exe -ErrorAction SilentlyContinue
-          $clang = if ($clangCmd) { $clangCmd.Source } else { $null }
-          $lld = if ($lldCmd) { $lldCmd.Source } else { $null }
-
-          if (-not $clang -or -not $lld) {
-            $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-            if (-not $winget) { throw "LLVM missing and winget unavailable." }
-            winget install --id LLVM.LLVM -e --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-            $wingetExit = $LASTEXITCODE
-            $env:Path = "$knownLlvm;$env:Path"
-            $clangCmd = Get-Command clang.exe -ErrorAction SilentlyContinue
-            $lldCmd = Get-Command lld-link.exe -ErrorAction SilentlyContinue
-            $clang = if ($clangCmd) { $clangCmd.Source } else { $null }
-            $lld = if ($lldCmd) { $lldCmd.Source } else { $null }
-            if ($wingetExit -ne 0 -and (-not $clang -or -not $lld)) {
-              throw "LLVM install/upgrade failed with exit code $wingetExit."
-            }
-          }
-
-          if (-not $clang -or -not $lld) { throw "LLVM unavailable." }
-          Write-Host "LLVM_EXISTING_INSTALL=PASS"
-          "CLANG=$clang" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "LLDLINK=$lld" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Generate real Windows speech assets under PsExec SYSTEM
-        shell: pwsh
-        working-directory: project
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $voiceDir = Join-Path $PWD 'build\system-voice'
-          New-Item -ItemType Directory -Force $voiceDir | Out-Null
-          $generator = Join-Path $PWD 'navigation\uefi\generate_system_voice_assets.ps1'
-          $systemPwsh = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
-
-          & $env:PSEXEC_PATH -accepteula -nobanner -s -h $systemPwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $generator -OutDir $voiceDir
-          if ($LASTEXITCODE) { throw "SYSTEM real-voice generation failed: $LASTEXITCODE" }
-
-          $evidence = Join-Path $voiceDir 'system-voice-evidence.txt'
-          if (-not (Test-Path $evidence)) { throw 'Missing system voice evidence.' }
-          $voiceInfo = Get-Content -Raw $evidence
-          if ($voiceInfo -notmatch 'REAL_VOICE_ASSET_COUNT=') { throw 'Real voice assets were not generated.' }
-          if ($voiceInfo -notmatch 'SYSTEM_SPEECH_OUTPUT_RATE=16000') { throw 'SYSTEM speech is not 16 kHz.' }
-          if ($voiceInfo -notmatch 'SYSTEM_SPEECH_OUTPUT_BITS=16') { throw 'SYSTEM speech is not 16-bit.' }
-          if ($voiceInfo -notmatch 'SYSTEM_SPEECH_OUTPUT_CHANNELS=1') { throw 'SYSTEM speech is not mono.' }
-          if ($voiceInfo -notmatch 'SYSTEM_SPEECH_OUTPUT_ENCODING=PCM') { throw 'SYSTEM speech is not PCM.' }
-          if ($voiceInfo -notmatch 'SYSTEM_SPEECH_FR_NATIVE=True') {
-            throw 'No native French System.Speech voice is visible under LocalSystem; refusing an unintelligible language fallback.'
-          }
-          Get-Content $evidence
-
-          "QEV_EXTERNAL_VOICE_DIR=$voiceDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host 'PSEXEC_SYSTEM_REAL_VOICE=PASS'
-          Write-Host 'SYSTEM_SPEECH_NATIVE_FR=PASS'
-
-      - name: Build NAVIGATION.EFI
-        shell: pwsh
-        working-directory: project
-        run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force build | Out-Null
-          python navigation/uefi/generate_units.py build/navigation_units.c build/navigation_units.txt
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $meta = Get-Content -Raw build/navigation_units.txt
-          if ($meta -notmatch 'speech-mode=hybrid-system-speech-clean-pcm16k-plus-voicecore-v4-uefi-v12') {
-            throw "Clean SYSTEM PCM UEFI v12 metadata missing."
-          }
-          if ($meta -notmatch 'real-voice-source=windows-system-speech') {
-            throw "Windows System.Speech bank was not embedded."
-          }
-          if ($meta -notmatch 'full-utterance-asset=true') {
-            throw "Full real-voice phrase assets were not embedded."
-          }
-          if ($meta -notmatch 'unit-encoding=g711-mulaw-u8') {
-            throw "mu-law unit encoding metadata missing."
-          }
-          if ($meta -notmatch 'voice-profile=clair') {
-            throw "UEFI clair voice profile metadata missing."
-          }
-          if ($meta -notmatch 'real-voice-units=phrase_0,phrase_1,phrase_2,phrase_3,phrase_4,phrase_5,phrase_6,phrase_7') {
-            throw "All eight real Windows speech phrases were not embedded."
-          }
-          Write-Host "VOICE_V12_CLEAN_SYSTEM_PCM=PASS"
-          Write-Host "VOICE_V11_FULL_REAL_PHRASES=PASS"
-          Write-Host "VOICE_V9_CLAIR_FALLBACK=PASS"
-          Write-Host "VOICE_V8_MULAW24K=PASS"
-
-          $flags = @(
-            '--target=x86_64-pc-windows-msvc',
-            '-DQEV_INTERACTIVE_NAV=1',
-            '-ffreestanding',
-            '-fshort-wchar',
-            '-fno-stack-protector',
-            '-fno-builtin',
-            '-mno-red-zone',
-            '-nostdlib',
-            '-O2',
-            '-Wall',
-            '-Wextra',
-            '-Werror'
+          $args = @(
+            '-accepteula',
+            '-nobanner',
+            '-s',
+            '-h',
+            '-i',
+            "$sessionId",
+            'powershell.exe',
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $stage,
+            '-Workspace',
+            $workspace,
+            '-RunId',
+            $env:GITHUB_RUN_ID
           )
-
-          & $env:CLANG @flags -c navigation/uefi/semantic_core.c -o build/semantic_core.obj
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & $env:CLANG @flags -c navigation/uefi/hii_graph_prompt_speech_uefi.c -o build/navigation.obj
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & $env:CLANG @flags -c build/navigation_units.c -o build/navigation_units.obj
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & $env:LLDLINK /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:build/NAVIGATION.EFI build/navigation.obj build/navigation_units.obj build/semantic_core.obj
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-
-          if (-not (Test-Path build/NAVIGATION.EFI)) { throw "NAVIGATION.EFI missing." }
-          Write-Host "NAVIGATION_EFI_BUILD=PASS"
-
-      - name: Create VMware UEFI boot media
-        shell: pwsh
-        working-directory: project
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $vmDir = Join-Path $PWD "build\vmware-smoke-$env:GITHUB_RUN_ID"
-          New-Item -ItemType Directory -Force $vmDir | Out-Null
-          $img = Join-Path $vmDir "uefi-floppy.img"
-
-          python navigation/uefi/create_fat12_boot_image.py build/NAVIGATION.EFI $img
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-
-          $vmx = Join-Path $vmDir "qevarynx-uefi.vmx"
-          @'
-          .encoding = "windows-1252"
-          config.version = "8"
-          virtualHW.version = "20"
-          displayName = "QEVARYNOX UEFI Hardware CI"
-          guestOS = "other-64"
-          firmware = "efi"
-          uefi.secureBoot.enabled = "FALSE"
-          memsize = "512"
-          numvcpus = "1"
-          cpuid.coresPerSocket = "1"
-          floppy0.present = "TRUE"
-          floppy0.fileType = "file"
-          floppy0.fileName = "uefi-floppy.img"
-          floppy0.startConnected = "TRUE"
-          bios.bootOrder = "floppy"
-          serial0.present = "TRUE"
-          serial0.fileType = "file"
-          serial0.fileName = "serial.log"
-          serial0.tryNoRxLoss = "FALSE"
-          sound.present = "TRUE"
-          sound.virtualDev = "hdaudio"
-          sound.autodetect = "TRUE"
-          ethernet0.present = "FALSE"
-          usb.present = "FALSE"
-          tools.syncTime = "FALSE"
-          '@ | Set-Content -Path $vmx -Encoding ascii
-
-          "VMWARE_TEST_DIR=$vmDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "VMX_PATH=$vmx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "VMWARE_MEDIA=PASS"
-
-      - name: Boot NAVIGATION.EFI in VMware UEFI
-        shell: pwsh
-        working-directory: project
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $serial = Join-Path $env:VMWARE_TEST_DIR "serial.log"
-
-          try {
-            $startScript = Join-Path $env:VMWARE_TEST_DIR "vmrun-system-start.ps1"
-            $startBody = "& `"$env:VMRUN`" -T ws start `"$env:VMX_PATH`" nogui`r`nexit `$LASTEXITCODE"
-            Set-Content -Path $startScript -Value $startBody -Encoding utf8
-            & $env:PSEXEC_PATH -accepteula -nobanner -s -h powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $startScript
-            if ($LASTEXITCODE) { throw "SYSTEM vmrun start failed: $LASTEXITCODE" }
-            Write-Host "VMWARE_SYSTEM_START=PASS"
-
-            $deadline = (Get-Date).AddSeconds(60)
-            while ((Get-Date) -lt $deadline) {
-              if (Test-Path $serial) {
-                $text = Get-Content -Raw -Path $serial -ErrorAction SilentlyContinue
-                if ($text -match 'HII_GRAPH_NAV_DISCOVERY_PROMPT=PASS' -or $text -match 'STATUS=BLOCKED') {
-                  break
-                }
-              }
-              Start-Sleep -Seconds 1
-            }
-
-            if (-not (Test-Path $serial)) {
-              throw "No serial log: VMware UEFI did not execute the EFI payload."
-            }
-
-            $text = Get-Content -Raw -Path $serial
-            $text | Set-Content -Path (Join-Path $env:VMWARE_TEST_DIR "serial-final.txt") -Encoding utf8
-
-            if ($text -notmatch 'QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V1') {
-              throw "EFI program signature missing."
-            }
-            if ($text -notmatch 'STATE=START') {
-              throw "EFI entry marker missing."
-            }
-            Write-Host "VMWARE_UEFI_BOOT=PASS"
-
-            if ($text -match 'HDA_CONTROLLER_CODEC=PASS') {
-              Write-Host "VMWARE_HDA_DISCOVERY=PASS"
-            } else {
-              Write-Host "VMWARE_HDA_DISCOVERY=NOT_ESTABLISHED"
-            }
-
-            if ($text -match 'HII_GRAPH_NAV_DISCOVERY_PROMPT=PASS') {
-              Write-Host "VMWARE_SCREENREADER_DISCOVERY=PASS"
-            } else {
-              $reason = [regex]::Match($text, 'REASON=([^\r\n]+)').Groups[1].Value
-              if (-not $reason) { $reason = 'DISCOVERY_PROMPT_NOT_REACHED' }
-              throw "Screen-reader runtime blocked before discovery prompt: $reason"
-            }
-
-            $vmwareLog = Join-Path $env:VMWARE_TEST_DIR "vmware.log"
-            $monitorMode = "NOT_REPORTED"
-            if (Test-Path $vmwareLog) {
-              $monitor = Select-String -Path $vmwareLog -Pattern 'Monitor Mode' -ErrorAction SilentlyContinue |
-                Select-Object -Last 1
-              if ($monitor) { $monitorMode = $monitor.Line.Trim() }
-            }
-            @(
-              "VMWARE_WORKSTATION=PASS"
-              "VMWARE_VERSION=$env:VMWARE_VERSION"
-              "VMWARE_UEFI_BOOT=PASS"
-              "VMWARE_HDA_DISCOVERY=$([bool]($text -match 'HDA_CONTROLLER_CODEC=PASS'))"
-              "VMWARE_SCREENREADER_DISCOVERY=PASS"
-              "VMWARE_MONITOR_MODE=$monitorMode"
-            ) | Set-Content -Path (Join-Path $env:VMWARE_TEST_DIR "vmware-runtime-evidence.txt") -Encoding utf8
-            Write-Host "VMWARE_MONITOR_MODE=$monitorMode"
-          }
-          finally {
-            $stopScript = Join-Path $env:VMWARE_TEST_DIR "vmrun-system-stop.ps1"
-            $stopBody = "& `"$env:VMRUN`" -T ws stop `"$env:VMX_PATH`" hard`r`nexit `$LASTEXITCODE"
-            Set-Content -Path $stopScript -Value $stopBody -Encoding utf8
-            & $env:PSEXEC_PATH -accepteula -nobanner -s -h powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $stopScript 2>$null
-            Write-Host "VMWARE_SYSTEM_STOP=PASS"
+          & $psexec @args
+          if ($LASTEXITCODE -ne 0) {
+            throw "PsExec physical pipeline failed with exit code $LASTEXITCODE"
           }
 
-      - name: Upload VMware evidence
+          $summary = Join-Path $workspace 'build\psexec-physical-summary.txt'
+          if (-not (Test-Path -LiteralPath $summary)) {
+            throw "Missing PsExec physical summary"
+          }
+          Get-Content -LiteralPath $summary
+          Write-Host 'WINDOWS_PROJECT_EXECUTION_VIA_PSEXEC=PASS'
+
+      - name: Upload physical evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vmware-project-uefi-evidence
+          name: psexec-project-uefi-physical-evidence
           path: |
             project/build/NAVIGATION.EFI
             project/build/navigation_units.txt
             project/build/host-evidence.txt
-            project/build/psexec-system-evidence.txt
-            project/build/psexec-evidence.txt
+            project/build/psexec-physical-summary.txt
             project/build/system-voice/system-voice-evidence.txt
-            project/build/system-voice/phrase_*.wav
-            project/build/system-voice/letter_*.wav
-            project/build/system-voice/digit_*.wav
+            project/build/system-voice/quality_reference.wav
+            project/build/quality-reference-firmware-roundtrip.wav
+            project/build/quality-reference-firmware-roundtrip.json
             project/build/vmware-smoke-*/serial.log
             project/build/vmware-smoke-*/serial-final.txt
-            project/build/vmware-smoke-*/vmware-runtime-evidence.txt
             project/build/vmware-smoke-*/vmware.log
             project/build/vmware-smoke-*/*.vmx
             project/build/vmware-smoke-*/uefi-floppy.img
