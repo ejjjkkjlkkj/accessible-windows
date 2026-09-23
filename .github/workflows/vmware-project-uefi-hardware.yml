@@ -1,4 +1,4 @@
-name: vmware-project-uefi-hardware
+name: vmware-project-uefi-voice-v8-psexec
 # PHYSICAL_RERUN_20260923_1040
 # VOICE_V7_PHYSICAL_TRIGGER_20260922
 # PHYSICAL_RERUN_20260923_PSEXEC
@@ -8,7 +8,7 @@ name: vmware-project-uefi-hardware
 
 on:
   push:
-    branches: [main]
+    branches: [voice-v8-psexec-physical-20260923]
     paths:
       - ".github/workflows/vmware-project-uefi-hardware.yml"
   workflow_dispatch:
@@ -27,8 +27,32 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ejjjkkjlkkj/project
-          ref: main
+          ref: voice-clarity-v8-20260923
           path: project
+
+      - name: Verify PsExec SYSTEM context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $psexec = "C:\Users\adm\Downloads\PsExec64.exe"
+          if (-not (Test-Path -LiteralPath $psexec)) {
+            throw "PsExec64.exe missing at required path: $psexec"
+          }
+          $output = & $psexec -accepteula -nobanner -s -h cmd.exe /d /c whoami 2>&1
+          $exit = $LASTEXITCODE
+          $text = ($output | Out-String).Trim()
+          Write-Host $text
+          if ($exit -ne 0) { throw "PsExec SYSTEM probe failed with exit code $exit" }
+          if ($text -notmatch '(?i)nt authority\\system') {
+            throw "PsExec did not obtain NT AUTHORITY\SYSTEM. Output: $text"
+          }
+          New-Item -ItemType Directory -Force project\build | Out-Null
+          @(
+            "PSEXEC_PATH=$psexec"
+            "PSEXEC_SYSTEM=PASS"
+            "PSEXEC_IDENTITY=$text"
+          ) | Set-Content -Path project\build\psexec-evidence.txt -Encoding utf8
+          Write-Host "PSEXEC_SYSTEM=PASS"
 
       - name: Verify ASUS AMD physical runner
         shell: pwsh
@@ -148,6 +172,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force build | Out-Null
           python navigation/uefi/generate_units.py build/navigation_units.c build/navigation_units.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $meta = Get-Content -Raw build/navigation_units.txt
+          if ($meta -notmatch 'speech-mode=whole-phrase-voicecore-v4-uefi-v8-mulaw24k') {
+            throw "Voice v8 metadata missing."
+          }
+          if ($meta -notmatch 'unit-encoding=g711-mulaw-u8') {
+            throw "mu-law unit encoding metadata missing."
+          }
+          Write-Host "VOICE_V8_MULAW24K=PASS"
 
           $flags = @(
             '--target=x86_64-pc-windows-msvc',
@@ -302,6 +335,7 @@ jobs:
             project/build/NAVIGATION.EFI
             project/build/navigation_units.txt
             project/build/host-evidence.txt
+            project/build/psexec-evidence.txt
             project/build/vmware-smoke-*/serial.log
             project/build/vmware-smoke-*/serial-final.txt
             project/build/vmware-smoke-*/vmware-runtime-evidence.txt
