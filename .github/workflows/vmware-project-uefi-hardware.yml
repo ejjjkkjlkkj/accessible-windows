@@ -284,10 +284,8 @@ jobs:
 
           try {
             $startScript = Join-Path $env:VMWARE_TEST_DIR "vmrun-system-start.ps1"
-            @"
-            & '$env:VMRUN' -T ws start '$env:VMX_PATH' nogui
-            exit `$LASTEXITCODE
-            "@ | Set-Content -Path $startScript -Encoding utf8
+            $startBody = "& `"$env:VMRUN`" -T ws start `"$env:VMX_PATH`" nogui`r`nexit `$LASTEXITCODE"
+            Set-Content -Path $startScript -Value $startBody -Encoding utf8
             & $env:PSEXEC -accepteula -nobanner -s -h powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $startScript
             if ($LASTEXITCODE) { throw "SYSTEM vmrun start failed: $LASTEXITCODE" }
             Write-Host "VMWARE_SYSTEM_START=PASS"
@@ -351,10 +349,8 @@ jobs:
           }
           finally {
             $stopScript = Join-Path $env:VMWARE_TEST_DIR "vmrun-system-stop.ps1"
-            @"
-            & '$env:VMRUN' -T ws stop '$env:VMX_PATH' hard
-            exit `$LASTEXITCODE
-            "@ | Set-Content -Path $stopScript -Encoding utf8
+            $stopBody = "& `"$env:VMRUN`" -T ws stop `"$env:VMX_PATH`" hard`r`nexit `$LASTEXITCODE"
+            Set-Content -Path $stopScript -Value $stopBody -Encoding utf8
             & $env:PSEXEC -accepteula -nobanner -s -h powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $stopScript 2>$null
             Write-Host "VMWARE_SYSTEM_STOP=PASS"
           }
