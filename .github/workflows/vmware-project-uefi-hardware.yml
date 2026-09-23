@@ -39,10 +39,12 @@ jobs:
             throw "PsExec64.exe missing at required path: $psexec"
           }
           New-Item -ItemType Directory -Force project\build | Out-Null
-          $identityFile = Join-Path (Resolve-Path project\build).Path "psexec-whoami.txt"
+          $probeScript = "C:\Windows\Temp\qev-psexec-probe.cmd"
+          $identityFile = "C:\Windows\Temp\qev-psexec-whoami.txt"
           Remove-Item -LiteralPath $identityFile -Force -ErrorAction SilentlyContinue
-          $cmdLine = "whoami > `"$identityFile`""
-          & $psexec -accepteula -nobanner -s -h cmd.exe /d /c $cmdLine
+          "@echo off`r`nwhoami > C:\Windows\Temp\qev-psexec-whoami.txt`r`nexit /b %errorlevel%`r`n" |
+            Set-Content -LiteralPath $probeScript -Encoding ascii
+          & $psexec -accepteula -nobanner -s -h C:\Windows\System32\cmd.exe /d /c $probeScript
           $exit = $LASTEXITCODE
           if ($exit -ne 0) { throw "PsExec SYSTEM probe failed with exit code $exit" }
           if (-not (Test-Path -LiteralPath $identityFile)) {
@@ -53,6 +55,7 @@ jobs:
           if ($text -notmatch '(?i)nt authority\\system') {
             throw "PsExec did not obtain NT AUTHORITY\SYSTEM. Identity: $text"
           }
+          Copy-Item -LiteralPath $identityFile -Destination project\build\psexec-whoami.txt -Force
           New-Item -ItemType Directory -Force project\build | Out-Null
           @(
             "PSEXEC_PATH=$psexec"
