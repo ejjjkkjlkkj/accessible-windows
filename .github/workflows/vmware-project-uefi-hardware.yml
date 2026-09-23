@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ejjjkkjlkkj/project
-          ref: f417e84c101b882bbb4d142d80ff7f5d62a50cc3
+          ref: 6eded9e26b11b29f9643e1bb8eb694798eafa1fd
           path: project
 
       - name: Execute physical voice and VMware pipeline via required PsExec
