@@ -188,6 +188,28 @@ jobs:
           "CLANG=$clang" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "LLDLINK=$lld" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: Generate real Windows speech assets under PsExec SYSTEM
+        shell: pwsh
+        working-directory: project
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $voiceDir = Join-Path $PWD 'build\system-voice'
+          New-Item -ItemType Directory -Force $voiceDir | Out-Null
+          $generator = Join-Path $PWD 'navigation\uefi\generate_system_voice_assets.ps1'
+          $systemPwsh = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+
+          & $env:PSEXEC_PATH -accepteula -nobanner -s -h $systemPwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $generator -OutDir $voiceDir
+          if ($LASTEXITCODE) { throw "SYSTEM real-voice generation failed: $LASTEXITCODE" }
+
+          $evidence = Join-Path $voiceDir 'system-voice-evidence.txt'
+          if (-not (Test-Path $evidence)) { throw 'Missing system voice evidence.' }
+          $voiceInfo = Get-Content -Raw $evidence
+          if ($voiceInfo -notmatch 'REAL_VOICE_ASSET_COUNT=') { throw 'Real voice assets were not generated.' }
+          Get-Content $evidence
+
+          "QEV_EXTERNAL_VOICE_DIR=$voiceDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host 'PSEXEC_SYSTEM_REAL_VOICE=PASS'
+
       - name: Build NAVIGATION.EFI
         shell: pwsh
         working-directory: project
@@ -197,8 +219,14 @@ jobs:
           python navigation/uefi/generate_units.py build/navigation_units.c build/navigation_units.txt
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $meta = Get-Content -Raw build/navigation_units.txt
-          if ($meta -notmatch 'speech-mode=whole-phrase-voicecore-v4-uefi-v8-mulaw24k') {
-            throw "Voice v8 metadata missing."
+          if ($meta -notmatch 'speech-mode=hybrid-system-speech-plus-voicecore-v4-uefi-v10') {
+            throw "Hybrid real-voice UEFI v10 metadata missing."
+          }
+          if ($meta -notmatch 'real-voice-source=windows-system-speech') {
+            throw "Windows System.Speech bank was not embedded."
+          }
+          if ($meta -notmatch 'full-utterance-asset=true') {
+            throw "Full real-voice phrase assets were not embedded."
           }
           if ($meta -notmatch 'unit-encoding=g711-mulaw-u8') {
             throw "mu-law unit encoding metadata missing."
@@ -206,7 +234,8 @@ jobs:
           if ($meta -notmatch 'voice-profile=clair') {
             throw "UEFI clair voice profile metadata missing."
           }
-          Write-Host "VOICE_V9_CLAIR=PASS"
+          Write-Host "VOICE_V10_REAL_WINDOWS=PASS"
+          Write-Host "VOICE_V9_CLAIR_FALLBACK=PASS"
           Write-Host "VOICE_V8_MULAW24K=PASS"
 
           $flags = @(
@@ -372,6 +401,7 @@ jobs:
             project/build/host-evidence.txt
             project/build/psexec-system-evidence.txt
             project/build/psexec-evidence.txt
+            project/build/system-voice/system-voice-evidence.txt
             project/build/vmware-smoke-*/serial.log
             project/build/vmware-smoke-*/serial-final.txt
             project/build/vmware-smoke-*/vmware-runtime-evidence.txt
