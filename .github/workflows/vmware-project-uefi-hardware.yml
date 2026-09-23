@@ -1,4 +1,5 @@
 name: vmware-project-uefi-hardware
+# PSEXEC_SYSTEM_VOICE_V8_PERMANENT_20260923
 # PHYSICAL_RERUN_20260923_1040
 # VOICE_V7_PHYSICAL_TRIGGER_20260922
 # PHYSICAL_RERUN_20260923_PSEXEC
@@ -29,6 +30,50 @@ jobs:
           repository: ejjjkkjlkkj/project
           ref: main
           path: project
+
+      - name: Verify PsExec SYSTEM context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $psexec = "C:\Users\adm\Downloads\PsExec64.exe"
+          if (-not (Test-Path -LiteralPath $psexec)) {
+            throw "PsExec64.exe missing at required path: $psexec"
+          }
+
+          New-Item -ItemType Directory -Force project\build | Out-Null
+          $probePs1 = "C:\Windows\Temp\qev-psexec-probe.ps1"
+          $sidFile = "C:\Windows\Temp\qev-psexec-sid.txt"
+          Remove-Item -LiteralPath $sidFile -Force -ErrorAction SilentlyContinue
+
+          @'
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          Set-Content -LiteralPath 'C:\Windows\Temp\qev-psexec-sid.txt' -Value $sid -Encoding ascii
+          exit 0
+          '@ | Set-Content -LiteralPath $probePs1 -Encoding utf8
+
+          $systemPwsh = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+          & $psexec -accepteula -nobanner -s -h $systemPwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePs1
+          $exit = $LASTEXITCODE
+          if ($exit -ne 0) {
+            throw "PsExec SYSTEM SID probe failed with exit code $exit"
+          }
+          if (-not (Test-Path -LiteralPath $sidFile)) {
+            throw "PsExec ran but did not create SYSTEM SID evidence."
+          }
+
+          $sid = (Get-Content -Raw -LiteralPath $sidFile).Trim()
+          Write-Host "PSEXEC_SID=$sid"
+          if ($sid -ne 'S-1-5-18') {
+            throw "PsExec did not obtain LocalSystem. SID=$sid"
+          }
+
+          Copy-Item -LiteralPath $sidFile -Destination project\build\psexec-sid.txt -Force
+          @(
+            "PSEXEC_PATH=$psexec"
+            "PSEXEC_SYSTEM=PASS"
+            "PSEXEC_SID=$sid"
+          ) | Set-Content -Path project\build\psexec-evidence.txt -Encoding utf8
+          Write-Host "PSEXEC_SYSTEM=PASS"
 
       - name: Verify ASUS AMD physical runner
         shell: pwsh
@@ -148,6 +193,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force build | Out-Null
           python navigation/uefi/generate_units.py build/navigation_units.c build/navigation_units.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $meta = Get-Content -Raw build/navigation_units.txt
+          if ($meta -notmatch 'speech-mode=whole-phrase-voicecore-v4-uefi-v8-mulaw24k') {
+            throw "Voice v8 metadata missing."
+          }
+          if ($meta -notmatch 'unit-encoding=g711-mulaw-u8') {
+            throw "mu-law unit encoding metadata missing."
+          }
+          Write-Host "VOICE_V8_MULAW24K=PASS"
 
           $flags = @(
             '--target=x86_64-pc-windows-msvc',
@@ -302,6 +356,7 @@ jobs:
             project/build/NAVIGATION.EFI
             project/build/navigation_units.txt
             project/build/host-evidence.txt
+            project/build/psexec-evidence.txt
             project/build/vmware-smoke-*/serial.log
             project/build/vmware-smoke-*/serial-final.txt
             project/build/vmware-smoke-*/vmware-runtime-evidence.txt
