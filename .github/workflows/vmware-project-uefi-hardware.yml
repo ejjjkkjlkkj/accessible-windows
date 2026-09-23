@@ -283,8 +283,14 @@ jobs:
           $serial = Join-Path $env:VMWARE_TEST_DIR "serial.log"
 
           try {
-            & $env:VMRUN -T ws start $env:VMX_PATH nogui
-            if ($LASTEXITCODE) { throw "vmrun start failed: $LASTEXITCODE" }
+            $startScript = Join-Path $env:VMWARE_TEST_DIR "vmrun-system-start.ps1"
+            @"
+            & '$env:VMRUN' -T ws start '$env:VMX_PATH' nogui
+            exit `$LASTEXITCODE
+            "@ | Set-Content -Path $startScript -Encoding utf8
+            & $env:PSEXEC -accepteula -nobanner -s -h powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $startScript
+            if ($LASTEXITCODE) { throw "SYSTEM vmrun start failed: $LASTEXITCODE" }
+            Write-Host "VMWARE_SYSTEM_START=PASS"
 
             $deadline = (Get-Date).AddSeconds(60)
             while ((Get-Date) -lt $deadline) {
@@ -344,7 +350,13 @@ jobs:
             Write-Host "VMWARE_MONITOR_MODE=$monitorMode"
           }
           finally {
-            & $env:VMRUN -T ws stop $env:VMX_PATH hard 2>$null
+            $stopScript = Join-Path $env:VMWARE_TEST_DIR "vmrun-system-stop.ps1"
+            @"
+            & '$env:VMRUN' -T ws stop '$env:VMX_PATH' hard
+            exit `$LASTEXITCODE
+            "@ | Set-Content -Path $stopScript -Encoding utf8
+            & $env:PSEXEC -accepteula -nobanner -s -h powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $stopScript 2>$null
+            Write-Host "VMWARE_SYSTEM_STOP=PASS"
           }
 
       - name: Upload VMware evidence
@@ -356,6 +368,7 @@ jobs:
             project/build/NAVIGATION.EFI
             project/build/navigation_units.txt
             project/build/host-evidence.txt
+            project/build/psexec-system-evidence.txt
             project/build/psexec-evidence.txt
             project/build/vmware-smoke-*/serial.log
             project/build/vmware-smoke-*/serial-final.txt
