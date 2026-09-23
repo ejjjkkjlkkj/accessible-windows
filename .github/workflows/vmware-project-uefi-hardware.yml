@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ejjjkkjlkkj/project
-          ref: main
+          ref: f417e84c101b882bbb4d142d80ff7f5d62a50cc3
           path: project
 
       - name: Execute physical voice and VMware pipeline via required PsExec
@@ -115,6 +115,23 @@ jobs:
           $summary = Join-Path $workspace 'build\psexec-physical-summary.txt'
           if (-not (Test-Path -LiteralPath $summary)) {
             throw "Missing PsExec physical summary"
+          }
+          $summaryText = Get-Content -Raw -LiteralPath $summary
+          foreach ($required in @(
+            'PSEXEC_REQUIRED=PASS',
+            'PSEXEC64_PATH=C:\Users\adm\Downloads\PsExec64.exe',
+            'IDENTITY_SID=S-1-5-18',
+            'REAL_WINDOWS_VOICE_BUILD=PASS',
+            'REAL_WINDOWS_VOICE_BANK_COMPLETE=PASS',
+            'VOICE_CODEC_ROUNDTRIP=PASS',
+            'NAVIGATION_EFI_REAL_VOICE_BUILD=PASS',
+            'VMWARE_UEFI_BOOT=PASS',
+            'VMWARE_SCREENREADER_DISCOVERY=PASS',
+            'SYSTEM_SPEECH_OUTPUT_RATE=24000'
+          )) {
+            if ($summaryText -notmatch [regex]::Escape($required)) {
+              throw "Missing required physical proof marker: $required"
+            }
           }
           Get-Content -LiteralPath $summary
           Write-Host 'WINDOWS_PROJECT_EXECUTION_VIA_PSEXEC=PASS'
