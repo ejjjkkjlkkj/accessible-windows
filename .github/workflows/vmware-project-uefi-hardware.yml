@@ -1,4 +1,5 @@
 name: vmware-project-uefi-hardware
+# VOICE_V11_FULL_REAL_PHRASES_20260923
 # VOICE_V10_COMPACT_REAL_SPEECH_20260923
 # VOICE_V9_CLAIR_PHYSICAL_20260923
 # PSEXEC_SYSTEM_VOICE_V8_PERMANENT_20260923
@@ -220,7 +221,7 @@ jobs:
           python navigation/uefi/generate_units.py build/navigation_units.c build/navigation_units.txt
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $meta = Get-Content -Raw build/navigation_units.txt
-          if ($meta -notmatch 'speech-mode=hybrid-system-speech-plus-voicecore-v4-uefi-v10') {
+          if ($meta -notmatch 'speech-mode=hybrid-system-speech-16k-plus-voicecore-v4-uefi-v11') {
             throw "Hybrid real-voice UEFI v10 metadata missing."
           }
           if ($meta -notmatch 'real-voice-source=windows-system-speech') {
@@ -235,7 +236,10 @@ jobs:
           if ($meta -notmatch 'voice-profile=clair') {
             throw "UEFI clair voice profile metadata missing."
           }
-          Write-Host "VOICE_V10_REAL_WINDOWS=PASS"
+          if ($meta -notmatch 'real-voice-units=phrase_0,phrase_1,phrase_2,phrase_3,phrase_4,phrase_5,phrase_6,phrase_7') {
+            throw "All eight real Windows speech phrases were not embedded."
+          }
+          Write-Host "VOICE_V11_FULL_REAL_PHRASES=PASS"
           Write-Host "VOICE_V9_CLAIR_FALLBACK=PASS"
           Write-Host "VOICE_V8_MULAW24K=PASS"
 
