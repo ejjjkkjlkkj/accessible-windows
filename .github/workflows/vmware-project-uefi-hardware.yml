@@ -74,6 +74,7 @@ jobs:
             "PSEXEC_SYSTEM=PASS"
             "PSEXEC_SID=$sid"
           ) | Set-Content -Path project\build\psexec-evidence.txt -Encoding utf8
+          "PSEXEC_PATH=$psexec" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "PSEXEC_SYSTEM=PASS"
 
       - name: Verify ASUS AMD physical runner
@@ -202,6 +203,10 @@ jobs:
           if ($meta -notmatch 'unit-encoding=g711-mulaw-u8') {
             throw "mu-law unit encoding metadata missing."
           }
+          if ($meta -notmatch 'voice-profile=clair') {
+            throw "UEFI clair voice profile metadata missing."
+          }
+          Write-Host "VOICE_V9_CLAIR=PASS"
           Write-Host "VOICE_V8_MULAW24K=PASS"
 
           $flags = @(
@@ -287,7 +292,7 @@ jobs:
             $startScript = Join-Path $env:VMWARE_TEST_DIR "vmrun-system-start.ps1"
             $startBody = "& `"$env:VMRUN`" -T ws start `"$env:VMX_PATH`" nogui`r`nexit `$LASTEXITCODE"
             Set-Content -Path $startScript -Value $startBody -Encoding utf8
-            & $env:PSEXEC -accepteula -nobanner -s -h powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $startScript
+            & $env:PSEXEC_PATH -accepteula -nobanner -s -h powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $startScript
             if ($LASTEXITCODE) { throw "SYSTEM vmrun start failed: $LASTEXITCODE" }
             Write-Host "VMWARE_SYSTEM_START=PASS"
 
@@ -352,7 +357,7 @@ jobs:
             $stopScript = Join-Path $env:VMWARE_TEST_DIR "vmrun-system-stop.ps1"
             $stopBody = "& `"$env:VMRUN`" -T ws stop `"$env:VMX_PATH`" hard`r`nexit `$LASTEXITCODE"
             Set-Content -Path $stopScript -Value $stopBody -Encoding utf8
-            & $env:PSEXEC -accepteula -nobanner -s -h powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $stopScript 2>$null
+            & $env:PSEXEC_PATH -accepteula -nobanner -s -h powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $stopScript 2>$null
             Write-Host "VMWARE_SYSTEM_STOP=PASS"
           }
 
