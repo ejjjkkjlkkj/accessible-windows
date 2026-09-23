@@ -1,4 +1,5 @@
 name: vmware-project-uefi-hardware
+# VOICE_V12_NATIVE_FR_SYSTEM_20260923
 # VOICE_V12_CLEAN_SYSTEM_PCM_20260923
 # VOICE_V11_FULL_REAL_PHRASES_20260923
 # VOICE_V10_COMPACT_REAL_SPEECH_20260923
@@ -212,10 +213,14 @@ jobs:
           if ($voiceInfo -notmatch 'SYSTEM_SPEECH_OUTPUT_BITS=16') { throw 'SYSTEM speech is not 16-bit.' }
           if ($voiceInfo -notmatch 'SYSTEM_SPEECH_OUTPUT_CHANNELS=1') { throw 'SYSTEM speech is not mono.' }
           if ($voiceInfo -notmatch 'SYSTEM_SPEECH_OUTPUT_ENCODING=PCM') { throw 'SYSTEM speech is not PCM.' }
+          if ($voiceInfo -notmatch 'SYSTEM_SPEECH_FR_NATIVE=True') {
+            throw 'No native French System.Speech voice is visible under LocalSystem; refusing an unintelligible language fallback.'
+          }
           Get-Content $evidence
 
           "QEV_EXTERNAL_VOICE_DIR=$voiceDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host 'PSEXEC_SYSTEM_REAL_VOICE=PASS'
+          Write-Host 'SYSTEM_SPEECH_NATIVE_FR=PASS'
 
       - name: Build NAVIGATION.EFI
         shell: pwsh
