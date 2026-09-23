@@ -1,4 +1,5 @@
 name: vmware-project-uefi-hardware
+# VOICE_V12_AUDIT_WAVS_20260923
 # VOICE_V12_NATIVE_FR_SYSTEM_20260923
 # VOICE_V12_CLEAN_SYSTEM_PCM_20260923
 # VOICE_V11_FULL_REAL_PHRASES_20260923
@@ -418,6 +419,9 @@ jobs:
             project/build/psexec-system-evidence.txt
             project/build/psexec-evidence.txt
             project/build/system-voice/system-voice-evidence.txt
+            project/build/system-voice/phrase_*.wav
+            project/build/system-voice/letter_*.wav
+            project/build/system-voice/digit_*.wav
             project/build/vmware-smoke-*/serial.log
             project/build/vmware-smoke-*/serial-final.txt
             project/build/vmware-smoke-*/vmware-runtime-evidence.txt
