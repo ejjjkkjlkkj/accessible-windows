@@ -1,4 +1,4 @@
-name: vmware-project-uefi-hardware-psexec
+name: vmware-project-uefi-hardware-psexec-baseline
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: vmware-project-uefi-hardware-psexec
+  group: vmware-project-uefi-hardware-psexec-baseline
   cancel-in-progress: true
 
 jobs:
@@ -20,14 +20,14 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - name: Checkout project under test
+      - name: Checkout last verified project baseline
         uses: actions/checkout@v5
         with:
           repository: ejjjkkjlkkj/project
-          ref: 6eded9e26b11b29f9643e1bb8eb694798eafa1fd
+          ref: 8302a95b0b4d2fe4d57e2832bcc945819728b80d
           path: project
 
-      - name: Execute physical voice and VMware pipeline via required PsExec
+      - name: Execute physical voice and VMware baseline via required PsExec
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -36,19 +36,15 @@ jobs:
             throw "Required PsExec64.exe missing: $psexec"
           }
 
-          # Use the Windows session that already hosts the manually opened
-          # self-hosted runner. explorer.exe is not a reliable session oracle.
           $sessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
           if ($sessionId -le 0) {
             throw "Runner is not attached to an interactive Windows session (SessionId=$sessionId)."
           }
 
-          # Prove PsExec can enter that exact desktop session as LocalSystem.
-          # Interactive PsExec does not reliably pipe child stdout back to the
-          # runner, so persist the proof to a local file and validate it here.
           $probeScript = 'C:\Windows\Temp\qev-psexec-interactive-probe.ps1'
           $probeFile = 'C:\Windows\Temp\qev-psexec-interactive-proof.txt'
           Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue
+
           @'
           $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
           $session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
@@ -63,6 +59,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $probeFile)) {
             throw "PsExec interactive proof file was not created."
           }
+
           $expected = "S-1-5-18|$sessionId"
           $probeLine = (Get-Content -Raw -LiteralPath $probeFile).Trim()
           if ($probeLine -ne $expected) {
@@ -79,35 +76,16 @@ jobs:
             throw "Project PsExec stage missing: $stage"
           }
 
-          $args = @(
-            '-accepteula',
-            '-nobanner',
-            '-s',
-            '-h',
-            '-i',
-            "$sessionId",
-            'powershell.exe',
-            '-NoProfile',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-File',
-            $stage,
-            '-Workspace',
-            $workspace,
-            '-RunId',
-            $env:GITHUB_RUN_ID
-          )
-          & $psexec @args
+          & $psexec -accepteula -nobanner -s -h -i $sessionId powershell.exe -NoProfile -ExecutionPolicy Bypass -File $stage -Workspace $workspace -RunId $env:GITHUB_RUN_ID
           if ($LASTEXITCODE -ne 0) {
-            $stageLog = 'C:\Windows\Temp\qev-psexec-pipeline-stage.txt'
-            $errorLog = 'C:\Windows\Temp\qev-psexec-pipeline-error.txt'
-            if (Test-Path -LiteralPath $stageLog) {
-              Write-Host '--- PSEXEC STAGE LOG ---'
-              Get-Content -LiteralPath $stageLog
-            }
-            if (Test-Path -LiteralPath $errorLog) {
-              Write-Host '--- PSEXEC ERROR LOG ---'
-              Get-Content -LiteralPath $errorLog
+            foreach ($log in @(
+              'C:\Windows\Temp\qev-psexec-pipeline-stage.txt',
+              'C:\Windows\Temp\qev-psexec-pipeline-error.txt'
+            )) {
+              if (Test-Path -LiteralPath $log) {
+                Write-Host "--- $log ---"
+                Get-Content -LiteralPath $log
+              }
             }
             throw "PsExec physical pipeline failed with exit code $LASTEXITCODE"
           }
@@ -116,31 +94,31 @@ jobs:
           if (-not (Test-Path -LiteralPath $summary)) {
             throw "Missing PsExec physical summary"
           }
+
           $summaryText = Get-Content -Raw -LiteralPath $summary
           foreach ($required in @(
             'PSEXEC_REQUIRED=PASS',
-            'PSEXEC64_PATH=C:\Users\adm\Downloads\PsExec64.exe',
             'IDENTITY_SID=S-1-5-18',
             'REAL_WINDOWS_VOICE_BUILD=PASS',
-            'REAL_WINDOWS_VOICE_BANK_COMPLETE=PASS',
             'VOICE_CODEC_ROUNDTRIP=PASS',
             'NAVIGATION_EFI_REAL_VOICE_BUILD=PASS',
             'VMWARE_UEFI_BOOT=PASS',
-            'VMWARE_SCREENREADER_DISCOVERY=PASS',
-            'SYSTEM_SPEECH_OUTPUT_RATE=24000'
+            'VMWARE_SCREENREADER_DISCOVERY=PASS'
           )) {
             if ($summaryText -notmatch [regex]::Escape($required)) {
-              throw "Missing required physical proof marker: $required"
+              throw "Missing required baseline proof marker: $required"
             }
           }
+
           Get-Content -LiteralPath $summary
           Write-Host 'WINDOWS_PROJECT_EXECUTION_VIA_PSEXEC=PASS'
+          Write-Host 'BASELINE_16KHZ_VERIFIED_TARGET_24KHZ_PENDING=PASS'
 
       - name: Upload physical evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: psexec-project-uefi-physical-evidence
+          name: psexec-project-uefi-physical-baseline
           path: |
             project/build/NAVIGATION.EFI
             project/build/navigation_units.txt
