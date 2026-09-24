@@ -1,17 +1,25 @@
-# Local build output
+# Build output
 /build/
 **/build/
+*.efi
+*.EFI
+*.img
+*.iso
+*.sha256
 
-# Python cache / local environments
+# Compiler/test output
+*.obj
+*.o
+*.pdb
+*_test
+*.serial
+*.fd
+
+# Python cache / environments
 __pycache__/
 *.py[cod]
 .venv/
 venv/
-
-# Native build intermediates
-*.obj
-*.o
-*.pdb
 
 # Logs and transient evidence
 *.log

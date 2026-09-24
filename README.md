@@ -1,49 +1,43 @@
-# Accessible Windows
+# Accessible Windows — UEFI Accessibility Preview
 
-Accessible Windows is an experimental low-level accessibility project focused on native UEFI and pre-OS screen-reader capabilities.
+Accessible Windows is an experimental, accessibility-first UEFI project. The current release line focuses on a native pre-OS screen-reader core that can discover HII/IFR controls, maintain semantic focus, format spoken state, and integrate with a UEFI HDA speech path.
 
-## Scope
+This repository is a research preview, not a production firmware replacement and not a claim of full Windows screen-reader parity.
 
-The repository contains the firmware-side accessibility work: HII/IFR discovery, semantic navigation, native speech/audio paths, keyboard interaction, QEMU/OVMF validation, VMware validation, and physical AMD/ASUS proof gates.
+## Release scope
 
-The project does **not** claim complete screen-reader parity yet. The remaining parity requirements are tracked in issue #4.
+The Microsoft review preview contains only the canonical implementation and validation material:
 
-## Canonical development line
+- `boot/uefi-screenreader-core-v1/` — bounded semantic screen-reader core and live HII adapter.
+- `boot/uefi-hii-graph-prompt-speech-v1/` — retained golden HII/HDA reference path.
+- `boot/uefi-hii-graph-prompt-speech-v2/` — V2 integration target.
+- `scripts/build-uefi-screenreader-usb-image.sh` — deterministic x86-64 UEFI USB image builder.
+- `.github/workflows/release-validation.yml` — exact-commit software validation and release artifact build.
+- `docs/` — status, release notes, security boundary and Microsoft review notes.
 
-The clean consolidation line is based on:
+Historical labs, superseded workflows and unrelated OS experiments are intentionally excluded from this release branch. They remain available in repository history and archival branches.
 
-- `uefi-screenreader-live-integration-v2-20260922`
-- base commit: `238c9dd4b22662c1b92314548a784a934504c45d`
+## Implemented capabilities
 
-This line is 18 commits ahead of the earlier `uefi-screenreader-core-v2-20260922` baseline and contains the live HII adapter plus HDA integration work.
+- bounded HII/IFR parsing with malformed-length rejection;
+- stable semantic control identity derived from firmware identifiers;
+- focus navigation, role navigation, paging and searchable item chooser;
+- state/value speech formatting with password-value redaction;
+- bounded speech queue with duplicate suppression, priority and preemption;
+- live HII snapshot refresh with transactional publication;
+- freestanding x86-64 UEFI build;
+- QEMU/OVMF runtime smoke validation for the core;
+- HDA V2 link validation;
+- deterministic USB image generation with SHA-256 output.
 
-Historical experiment branches are retained as evidence until their unique results are either integrated or explicitly archived.
+## Validation
 
-## Repository layout
+The release candidate is valid only if `release-validation` succeeds for the exact commit being reviewed. The workflow compiles with warnings-as-errors, runs ASan/UBSan behavior tests, runs Clang static analysis, boots the core under OVMF, links the HDA V2 firmware, builds the USB image and uploads the evidence bundle.
 
-- `boot/` — UEFI boot and screen-reader implementations.
-- `system/` — native system/accessibility experiments.
-- `lab*/` — staged low-level proofs and regressions.
-- `scripts/` — build and validation helpers.
-- `.github/workflows/` — CI, VM, firmware and hardware proof gates.
-- `docs/STATUS.md` — current verified state and unresolved gates.
+The most recent separately recorded physical Windows/VMware baseline is documented in `docs/STATUS.md`. Physical evidence is kept distinct from hosted software validation.
 
-## Validation policy
+## Known limitations
 
-A result is marked PASS only when its workflow or physical evidence contains the required proof markers. Software simulation, VMware execution and physical-hardware evidence are kept distinct.
+Full production parity is not claimed. Remaining work includes OEM-specific physical UEFI coverage, broader real-HII control semantics, human-confirmed speech quality on target hardware, safe state-changing actions, and additional recovery/pre-OS integration.
 
-For the Windows physical runner, privileged local execution must use:
-
-`C:\Users\adm\Downloads\PsExec64.exe`
-
-with LocalSystem identity validation (`S-1-5-18`) when required by the hardware pipeline.
-
-## Current physical baseline
-
-The last known green physical PsExec/VMware baseline used project commit:
-
-`8302a95b0b4d2fe4d57e2832bcc945819728b80d`
-
-That run proved the baseline voice build, codec round-trip, NAVIGATION.EFI build, VMware UEFI boot and screen-reader discovery. It produced speech at 16 kHz. The later 24 kHz voice target remains a separate unclosed gate.
-
-See `docs/STATUS.md` for exact evidence and blockers.
+See `docs/MICROSOFT_REVIEW.md` and `docs/STATUS.md`.

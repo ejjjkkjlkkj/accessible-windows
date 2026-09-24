@@ -1,26 +1,39 @@
-# Repository status
+# Status
 
 Updated: 2026-09-24
 
-## Consolidation state
+## Release candidate
 
 - Repository: `ejjjkkjlkkj/accessible-windows`
-- Clean source line: `uefi-screenreader-live-integration-v2-20260922`
-- Source head: `238c9dd4b22662c1b92314548a784a934504c45d`
-- Consolidation branch: `repo-clean-consolidation-20260924`
-- Earlier core line: `uefi-screenreader-core-v2-20260922`
-- Relationship: live integration is 18 commits ahead of the core-v2 line.
-- Legacy `main` is an unrelated orchestration history and is intentionally not force-rewritten during this cleanup pass.
+- Branch: `release/microsoft-preview-20260924`
+- Source line: `uefi-screenreader-live-integration-v2-20260922`
+- Consolidation source head: `238c9dd4b22662c1b92314548a784a934504c45d`
+- Release intent: Microsoft technical review preview
+- Production readiness: **not claimed**
 
-## Verified physical baseline
+This branch is intentionally curated. It excludes historical labs, superseded CI files and unrelated experiments from the published release tree.
 
-GitHub Actions run `35846636674` completed successfully on 2026-09-23 using the Windows self-hosted runner and PsExec LocalSystem execution.
+## Software validation contract
 
-Project commit used by that successful run:
+The exact release commit must pass `.github/workflows/release-validation.yml`.
 
-`8302a95b0b4d2fe4d57e2832bcc945819728b80d`
+Required evidence produced by that workflow:
 
-Verified markers from that run:
+- freestanding core compilation with `-Werror`;
+- AddressSanitizer and UndefinedBehaviorSanitizer behavior tests;
+- Clang static analysis;
+- x86-64 EFI link of the V2 core;
+- OVMF runtime smoke markers ending in `STATUS=PASS`;
+- HDA V2 speech-unit generation and EFI link;
+- deterministic 96 MiB GPT/FAT32 USB image creation;
+- SHA-256 manifests;
+- uploaded release-candidate artifact bundle.
+
+A failed, cancelled, skipped or stale run is not PASS.
+
+## Physical baseline kept separate
+
+GitHub Actions run `35846636674` completed successfully on 2026-09-23 on the Windows self-hosted runner. That run exercised a pinned external project payload at commit `8302a95b0b4d2fe4d57e2832bcc945819728b80d` and recorded:
 
 - `PSEXEC_INTERACTIVE_SYSTEM=PASS`
 - `PSEXEC_REQUIRED=PASS`
@@ -30,31 +43,10 @@ Verified markers from that run:
 - `NAVIGATION_EFI_REAL_VOICE_BUILD=PASS`
 - `VMWARE_UEFI_BOOT=PASS`
 - `VMWARE_SCREENREADER_DISCOVERY=PASS`
-- artifact upload completed successfully
 - `SYSTEM_SPEECH_OUTPUT_RATE=16000`
 
-## Regression isolated
+That evidence demonstrates the prior physical baseline only. It does not automatically validate a later release commit.
 
-The current legacy-main workflow was later changed to pin project commit:
+## Open technical closure
 
-`6eded9e26b11b29f9643e1bb8eb694798eafa1fd`
-
-Run `35848464855` failed in the physical PsExec stage immediately after:
-
-`STAGE=SYSTEM_VOICE_READY`
-
-The workflow also began requiring a 24 kHz marker and additional voice-bank markers that were not part of the last verified green baseline. Those requirements are therefore treated as targets, not as already-proven facts.
-
-## Open closure gate
-
-Issue #4, **UEFI screen reader core parity closure**, remains open. In particular, final parity still requires real HII control semantics, state/value speech, safe editing/activation, form hierarchy navigation, punctuation/value preservation, speech cancellation, larger prompt capacity, VM proofs and human-confirmed physical audible speech.
-
-No final parity PASS should be asserted before those conditions are closed.
-
-## Cleanup rules
-
-1. Do not delete historical evidence branches until their unique proof is integrated or archived.
-2. New consolidated work should be based on this clean source line rather than unrelated orphan histories.
-3. Pin external project revisions in hardware workflows.
-4. Keep baseline proof gates separate from new quality targets such as 24 kHz speech.
-5. Never convert an experimental target into PASS without matching evidence.
+The preview does not claim complete screen-reader parity. Open work includes broader HII control/action semantics, form hierarchy, safe editing/activation, stronger punctuation/value preservation, speech cancellation behavior, larger prompt capacity, more OEM hardware coverage, and human-confirmed intelligibility on the final target path.

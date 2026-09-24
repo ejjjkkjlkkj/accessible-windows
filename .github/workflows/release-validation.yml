@@ -1,0 +1,181 @@
+name: release-validation
+
+on:
+  push:
+    branches:
+      - release/microsoft-preview-20260924
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+
+      - name: Install validation toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld qemu-system-x86 ovmf gdisk mtools
+
+      - name: Verify golden firmware source is unchanged
+        run: |
+          set -euo pipefail
+          git diff --exit-code 9cd02dc7db3ab728aba024ecca2a2e5801014007..HEAD --             boot/uefi-hii-graph-prompt-speech-v1             scripts/build-uefi-screenreader-usb-image.sh
+          echo GOLDEN_FIRMWARE_SOURCE_UNCHANGED=PASS
+
+      - name: Compile freestanding core
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-core-v1
+          for src in screenreader_core hii_adapter screenreader_session legacy_bridge legacy_session_adapter ifr_collector live_hii_adapter; do
+            clang -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone               -O2 -Wall -Wextra -Werror -pedantic -c "$root/$src.c" -o "$root/$src.o"
+          done
+          echo FREESTANDING_CORE_BUILD=PASS
+
+      - name: Run behavior tests with sanitizers
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-core-v1
+          build_run() {
+            out="$1"; shift
+            clang -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic               -fsanitize=address,undefined -fno-omit-frame-pointer "$@" -o "$out"
+            ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$out"
+          }
+          build_run "$root/screenreader_core_test"             "$root/screenreader_core.c" "$root/screenreader_core_test.c"
+          build_run "$root/hii_adapter_test"             "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/hii_adapter_test.c"
+          build_run "$root/screenreader_session_test"             "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/screenreader_session.c" "$root/screenreader_session_test.c"
+          build_run "$root/legacy_bridge_test"             "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/legacy_bridge.c" "$root/legacy_bridge_test.c"
+          build_run "$root/legacy_session_adapter_test"             "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/screenreader_session.c"             "$root/legacy_bridge.c" "$root/legacy_session_adapter.c" "$root/legacy_session_adapter_test.c"
+          build_run "$root/ifr_collector_test"             "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/legacy_bridge.c"             "$root/ifr_collector.c" "$root/ifr_collector_test.c"
+          build_run "$root/live_hii_adapter_test"             "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/screenreader_session.c"             "$root/legacy_bridge.c" "$root/ifr_collector.c" "$root/live_hii_adapter.c" "$root/live_hii_adapter_test.c"
+          echo SANITIZER_TESTS=PASS
+
+      - name: Run Clang static analysis
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-core-v1
+          for src in screenreader_core hii_adapter screenreader_session legacy_bridge legacy_session_adapter ifr_collector live_hii_adapter; do
+            clang --analyze -std=c11 -Wall -Wextra -Werror "$root/$src.c"
+          done
+          echo STATIC_ANALYSIS=PASS
+
+      - name: Link core V2 EFI
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-core-v1
+          flags='--target=x86_64-pc-windows-msvc -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+          for src in screenreader_core hii_adapter screenreader_session legacy_bridge legacy_session_adapter ifr_collector live_hii_adapter uefi_core_v2_smoke; do
+            clang $flags -c "$root/$src.c" -o "$root/$src.efi.obj"
+          done
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0             /out:"$root/CORE-V2.EFI"             "$root/screenreader_core.efi.obj" "$root/hii_adapter.efi.obj" "$root/screenreader_session.efi.obj"             "$root/legacy_bridge.efi.obj" "$root/legacy_session_adapter.efi.obj" "$root/ifr_collector.efi.obj"             "$root/live_hii_adapter.efi.obj" "$root/uefi_core_v2_smoke.efi.obj"
+          test -s "$root/CORE-V2.EFI"
+          grep -aF 'UEFI_CORE_V2_RUNTIME=PASS' "$root/CORE-V2.EFI"
+          echo CORE_V2_LINK=PASS
+
+      - name: Boot core V2 under OVMF
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-core-v1
+          CODE=''; VARS=''
+          for pair in             '/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd'             '/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd'             '/usr/share/edk2/ovmf/OVMF_CODE.fd|/usr/share/edk2/ovmf/OVMF_VARS.fd'
+          do
+            IFS='|' read -r code vars <<< "$pair"
+            if test -f "$code" -a -f "$vars"; then CODE="$code"; VARS="$vars"; break; fi
+          done
+          test -n "$CODE" -a -n "$VARS"
+          cp "$VARS" "$root/core-v2-vars.fd"
+          rm -rf "$root/core-v2-esp"
+          mkdir -p "$root/core-v2-esp/EFI/BOOT"
+          cp "$root/CORE-V2.EFI" "$root/core-v2-esp/EFI/BOOT/BOOTX64.EFI"
+          rm -f "$root/core-v2.serial"
+          qemu-system-x86_64             -machine q35,accel=tcg -m 128M             -drive if=pflash,format=raw,readonly=on,file="$CODE"             -drive if=pflash,format=raw,file="$root/core-v2-vars.fd"             -drive format=raw,file=fat:rw:"$root/core-v2-esp"             -display none -monitor none -serial file:"$root/core-v2.serial"             -parallel none -net none -no-reboot -no-shutdown &
+          qpid=$!
+          trap 'kill $qpid 2>/dev/null || true' EXIT
+          ROOT="$root" python - <<'PY'
+          from pathlib import Path
+          import os, time
+          root = Path(os.environ["ROOT"])
+          p = root / "core-v2.serial"
+          required = [
+              b"UEFI_CORE_V2_BOOT=PASS\r\n",
+              b"UEFI_CORE_V2_LIVE_PACKAGE=PASS\r\n",
+              b"UEFI_CORE_V2_STABLE_QUESTION_ID=PASS\r\n",
+              b"UEFI_CORE_V2_HII_BUILD=PASS\r\n",
+              b"UEFI_CORE_V2_READ_ONLY_STATE=PASS\r\n",
+              b"UEFI_CORE_V2_INITIAL_FOCUS=PASS\r\n",
+              b"UEFI_CORE_V2_NAVIGATION=PASS\r\n",
+              b"UEFI_CORE_V2_CHOOSER_OPEN=PASS\r\n",
+              b"UEFI_CORE_V2_CHOOSER_FILTER=PASS\r\n",
+              b"UEFI_CORE_V2_CHOOSER_SELECT=PASS\r\n",
+              b"UEFI_CORE_V2_EXIT=PASS\r\n",
+              b"UEFI_CORE_V2_RUNTIME=PASS\r\n",
+              b"STATUS=PASS\r\n",
+          ]
+          end = time.time() + 45
+          while time.time() < end:
+              raw = p.read_bytes() if p.exists() else b""
+              if b"STATUS=BLOCKED\r\n" in raw:
+                  raise SystemExit("V2 firmware blocked: " + repr(raw[-12000:]))
+              if all(marker in raw for marker in required):
+                  print("CORE_V2_OVMF_RUNTIME=PASS")
+                  break
+              time.sleep(0.05)
+          else:
+              raise SystemExit("V2 OVMF timeout: " + repr((p.read_bytes() if p.exists() else b"")[-12000:]))
+          PY
+
+      - name: Link HDA V2 screen reader
+        run: |
+          set -euo pipefail
+          root=boot/uefi-hii-graph-prompt-speech-v2
+          core=boot/uefi-screenreader-core-v1
+          python -m py_compile "$root/generate_units.py"
+          python "$root/generate_units.py" "$root/v2-units.c" "$root/v2-units.txt"
+          grep -F 'speech-mode=clear-lettername-spelling-fr-v3' "$root/v2-units.txt"
+          grep -F 'voice-profile=hi-intelligibility-16khz-v4' "$root/v2-units.txt"
+          flags='--target=x86_64-pc-windows-msvc -DQEV_INTERACTIVE_NAV=1 -DQEV_SCREENREADER_V2=1 -ffreestanding -fshort-wchar -fno-stack-protector -fno-builtin -mno-red-zone -nostdlib -O2 -Wall -Wextra -Werror'
+          clang $flags -c "$root/hii_graph_prompt_speech_uefi.c" -o "$root/v2-main.obj"
+          clang $flags -c "$root/v2-units.c" -o "$root/v2-units.obj"
+          for src in screenreader_core hii_adapter screenreader_session legacy_bridge legacy_session_adapter ifr_collector live_hii_adapter; do
+            clang $flags -c "$core/$src.c" -o "$root/$src.obj"
+          done
+          lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0             /out:"$root/SCREENREADER-V2.EFI"             "$root/v2-main.obj" "$root/v2-units.obj" "$root/screenreader_core.obj" "$root/hii_adapter.obj"             "$root/screenreader_session.obj" "$root/legacy_bridge.obj" "$root/legacy_session_adapter.obj"             "$root/ifr_collector.obj" "$root/live_hii_adapter.obj"
+          test -s "$root/SCREENREADER-V2.EFI"
+          grep -aF 'SCREENREADER_V2_LIVE_HII=PASS' "$root/SCREENREADER-V2.EFI"
+          grep -aF 'SCREENREADER_V2_SPEECH_DMA=STARTED' "$root/SCREENREADER-V2.EFI"
+          echo HDA_V2_LINK=PASS
+
+      - name: Build deterministic USB image
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          scripts/build-uefi-screenreader-usb-image.sh             boot/uefi-hii-graph-prompt-speech-v2/SCREENREADER-V2.EFI             build/accessible-windows-uefi-screenreader-x86_64.img
+          sha256sum             boot/uefi-screenreader-core-v1/CORE-V2.EFI             boot/uefi-hii-graph-prompt-speech-v2/SCREENREADER-V2.EFI             build/accessible-windows-uefi-screenreader-x86_64.img             > build/SHA256SUMS.txt
+          cat build/SHA256SUMS.txt
+          echo RELEASE_ARTIFACT_BUILD=PASS
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: accessible-windows-microsoft-preview
+          path: |
+            boot/uefi-screenreader-core-v1/CORE-V2.EFI
+            boot/uefi-screenreader-core-v1/core-v2.serial
+            boot/uefi-hii-graph-prompt-speech-v2/SCREENREADER-V2.EFI
+            boot/uefi-hii-graph-prompt-speech-v2/v2-units.txt
+            build/accessible-windows-uefi-screenreader-x86_64.img
+            build/accessible-windows-uefi-screenreader-x86_64.img.sha256
+            build/SHA256SUMS.txt
+          if-no-files-found: error
