@@ -187,7 +187,6 @@ int sr_nav_move(SrNavigator *nav, SrNavCommand command, char first_letter) {
     size_t old, next, steps;
     if (!nav || nav->focus == SR_NO_INDEX || nav->count == 0) return 0;
     old = nav->focus;
-    next = old;
     switch (command) {
         case SR_NAV_NEXT:
             next = sr_step_focusable(nav, old, 1);
@@ -219,6 +218,7 @@ int sr_nav_move(SrNavigator *nav, SrNavCommand command, char first_letter) {
             next = sr_role_step(nav, old, -1);
             break;
         default:
+            next = old;
             break;
     }
     if (next == SR_NO_INDEX) next = old;
