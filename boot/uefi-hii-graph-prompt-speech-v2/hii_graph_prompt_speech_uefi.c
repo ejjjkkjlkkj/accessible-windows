@@ -4,6 +4,20 @@ typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef unsigned long long usize;
 
+/* Freestanding runtime shim: Clang may lower aggregate copies to memcpy even
+ * with no CRT linked. Volatile byte accesses keep this implementation local
+ * and prevent it from being folded back into an external memcpy call. */
+void *memcpy(void *destination, const void *source, usize count) {
+    volatile u8 *dst = (volatile u8 *)destination;
+    const volatile u8 *src = (const volatile u8 *)source;
+    void *original = destination;
+    while (count != 0u) {
+        *dst++ = *src++;
+        --count;
+    }
+    return original;
+}
+
 #ifdef QEV_SCREENREADER_V2
 #include "../uefi-screenreader-core-v1/live_hii_adapter.h"
 #include "../uefi-screenreader-core-v1/legacy_session_adapter.h"
