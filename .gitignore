@@ -1,0 +1,25 @@
+# Local build output
+/build/
+**/build/
+
+# Python cache / local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Native build intermediates
+*.obj
+*.o
+*.pdb
+
+# Logs and transient evidence
+*.log
+*.tmp
+*.temp
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

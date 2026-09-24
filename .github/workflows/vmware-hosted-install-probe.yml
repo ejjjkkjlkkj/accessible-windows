@@ -1,0 +1,123 @@
+name: vmware-hosted-install-probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/vmware-hosted-install-probe.yml"
+      - ".github/workflows/physical-psexec-vmware-baseline.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vmware-install-route-probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify VMware installation route
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          winget --version
+          winget source update
+
+          & winget show --id VMware.WorkstationPro -e --source winget --accept-source-agreements
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "VMWARE_WINGET_PACKAGE=AVAILABLE"
+          } else {
+            Write-Host "VMWARE_WINGET_PACKAGE=UNAVAILABLE"
+            Write-Host "VMWARE_INSTALL_ROUTE=BROADCOM_PORTAL_OR_PREINSTALLED_RUNNER"
+          }
+
+          $candidates = @(
+            "$env:ProgramFiles\VMware\VMware Workstation\vmrun.exe",
+            "${env:ProgramFiles(x86)}\VMware\VMware Workstation\vmrun.exe"
+          )
+          $vmrun = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if ($vmrun) {
+            $version = (Get-Item $vmrun).VersionInfo.FileVersion
+            Write-Host "VMWARE_PREINSTALLED=PASS"
+            Write-Host "VMWARE_VERSION=$version"
+            & $vmrun -T ws list
+            if ($LASTEXITCODE) { throw "Preinstalled vmrun CLI probe failed with exit code $LASTEXITCODE" }
+          } else {
+            Write-Host "VMWARE_PREINSTALLED=NO"
+          }
+
+          Write-Host "VMWARE_INSTALL_ROUTE_PROBE=PASS"
+
+  project-build-probe:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout known-good project baseline
+        uses: actions/checkout@v5
+        with:
+          repository: ejjjkkjlkkj/project
+          ref: 8302a95b0b4d2fe4d57e2832bcc945819728b80d
+
+      - name: Ensure LLVM
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $clang = (Get-Command clang.exe -ErrorAction SilentlyContinue).Source
+          $lld = (Get-Command lld-link.exe -ErrorAction SilentlyContinue).Source
+          if (-not $clang -or -not $lld) {
+            winget install --id LLVM.LLVM -e --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+            $env:Path = "C:\Program Files\LLVM\bin;$env:Path"
+            $clang = (Get-Command clang.exe -ErrorAction Stop).Source
+            $lld = (Get-Command lld-link.exe -ErrorAction Stop).Source
+          }
+          "CLANG=$clang" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "LLDLINK=$lld" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build NAVIGATION.EFI and VMware media
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force build | Out-Null
+          python navigation/uefi/generate_units.py build/navigation_units.c build/navigation_units.txt
+
+          $flags = @(
+            '--target=x86_64-pc-windows-msvc',
+            '-DQEV_INTERACTIVE_NAV=1',
+            '-ffreestanding',
+            '-fshort-wchar',
+            '-fno-stack-protector',
+            '-fno-builtin',
+            '-mno-red-zone',
+            '-nostdlib',
+            '-O2',
+            '-Wall',
+            '-Wextra',
+            '-Werror'
+          )
+
+          & $env:CLANG @flags -c navigation/uefi/semantic_core.c -o build/semantic_core.obj
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $env:CLANG @flags -c navigation/uefi/hii_graph_prompt_speech_uefi.c -o build/navigation.obj
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $env:CLANG @flags -c build/navigation_units.c -o build/navigation_units.obj
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $env:LLDLINK /subsystem:efi_application /entry:efi_main /nodefaultlib /machine:x64 /timestamp:0 /out:build/NAVIGATION.EFI build/navigation.obj build/navigation_units.obj build/semantic_core.obj
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+          python navigation/uefi/create_fat12_boot_image.py build/NAVIGATION.EFI build/uefi-floppy.img
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+          if (-not (Test-Path build/NAVIGATION.EFI)) { throw "NAVIGATION.EFI missing." }
+          if (-not (Test-Path build/uefi-floppy.img)) { throw "UEFI media missing." }
+
+          Write-Host "NAVIGATION_EFI_BUILD=PASS"
+          Write-Host "VMWARE_MEDIA_BUILD=PASS"
+
+      - name: Upload build probe evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmware-hosted-build-probe
+          path: |
+            build/NAVIGATION.EFI
+            build/navigation_units.txt
+            build/uefi-floppy.img
+          if-no-files-found: error
