@@ -11,6 +11,7 @@ The Microsoft review preview contains only the canonical implementation and vali
 - `boot/uefi-screenreader-core-v1/` — bounded semantic screen-reader core and live HII adapter.
 - `boot/uefi-hii-graph-prompt-speech-v1/` — retained golden HII/HDA reference path.
 - `boot/uefi-hii-graph-prompt-speech-v2/` — V2 integration target.
+- `boot/uefi-native-speech-v1/build_uefi_native_speech.py` — deterministic first-party speech-unit source required by the V2 generator.
 - `scripts/build-uefi-screenreader-usb-image.sh` — deterministic x86-64 UEFI USB image builder.
 - `.github/workflows/release-validation.yml` — exact-commit software validation and release artifact build.
 - `docs/` — status, release notes, security boundary and Microsoft review notes.
