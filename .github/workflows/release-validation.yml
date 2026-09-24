@@ -161,7 +161,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build
-          scripts/build-uefi-screenreader-usb-image.sh             boot/uefi-hii-graph-prompt-speech-v2/SCREENREADER-V2.EFI             build/accessible-windows-uefi-screenreader-x86_64.img
+          bash scripts/build-uefi-screenreader-usb-image.sh             boot/uefi-hii-graph-prompt-speech-v2/SCREENREADER-V2.EFI             build/accessible-windows-uefi-screenreader-x86_64.img
           sha256sum             boot/uefi-screenreader-core-v1/CORE-V2.EFI             boot/uefi-hii-graph-prompt-speech-v2/SCREENREADER-V2.EFI             build/accessible-windows-uefi-screenreader-x86_64.img             > build/SHA256SUMS.txt
           cat build/SHA256SUMS.txt
           echo RELEASE_ARTIFACT_BUILD=PASS
