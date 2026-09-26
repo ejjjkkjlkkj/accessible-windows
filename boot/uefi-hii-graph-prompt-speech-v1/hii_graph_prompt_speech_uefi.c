@@ -318,6 +318,10 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HDA_CODEC_VENDOR_DEVICE=0x");
     proof_hex32(proof,sizeof(proof),&n,g_codec_vendor_id);
     proof_puts(proof,sizeof(proof),&n,"\r\n");
+    /* Configuration Default of the pin actually driven (speaker expected on ALC256). */
+    proof_puts(proof,sizeof(proof),&n,"HDA_SELECTED_PIN_DEFAULT_CONFIG=0x");
+    proof_hex32(proof,sizeof(proof),&n,g_selected_pin_default_config);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_CODEC_SELECTION=");
     proof_puts(proof,sizeof(proof),&n,
         g_controller_preferred ? "REALTEK_10EC_0256\r\n" : "GENERIC_RUNTIME\r\n");
