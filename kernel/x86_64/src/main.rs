@@ -77,7 +77,7 @@ use core::panic::PanicInfo;
 const DEBUG_PORT: u16 = 0x00e9;
 const PCI_CONFIG_ADDRESS_PORT: u16 = 0x0cf8;
 const ECAM_BUS_BYTES: u64 = 1 << 20;
-const MAX_HANDOFF_MMIO_RANGES: usize = 5;
+const MAX_HANDOFF_MMIO_RANGES: usize = 8;
 const PCI_CONFIG_DATA_PORT: u16 = 0x0cfc;
 
 #[inline(always)]
@@ -485,6 +485,27 @@ fn activate_virtual_memory(handoff: &KernelHandoff) -> Option<virtual_memory::Ac
             mmio_ranges[mmio_count] = (region.base_address, end);
             mmio_count += 1;
         }
+    }
+
+    // xHCI BARs are commonly allocated above 4 GiB (QEMU uses 0xC000000000).
+    // Discover the controller while firmware page tables are still active, then
+    // carry a bounded RW+NX identity window into the kernel-owned page tables.
+    if let Some(controller) = xhci::find(handoff) {
+        if mmio_count >= mmio_ranges.len() {
+            debug_write("AW_VMM_FAIL reason=too_many_mmio_ranges\n");
+            return None;
+        }
+        let Some(end) = controller.bar0.checked_add(xhci::MMIO_WINDOW_BYTES) else {
+            debug_write("AW_VMM_FAIL reason=xhci_range_overflow\n");
+            return None;
+        };
+        mmio_ranges[mmio_count] = (controller.bar0, end);
+        mmio_count += 1;
+        debug_write("AW_VMM_XHCI_MMIO_RANGE base=");
+        debug_write_hex_u64(controller.bar0);
+        debug_write(" end=");
+        debug_write_hex_u64(end);
+        debug_write("\n");
     }
 
     // SAFETY: CPL0 single-core bootstrap after IDT/TSS install. Page-table
@@ -1700,7 +1721,7 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         xhci::prove_pci_discovery(handoff);
         // Read xHCI capability registers through the kernel-owned identity map.
         // Read-only: no reset, run/stop, doorbell or DMA programming yet.
-        xhci::prove_mmio_capabilities(handoff);
+        xhci::prove_mmio_capabilities(handoff, memory_ready);
 
         if paint_boot_marker(handoff) {
             debug_write("AW_NATIVE_FRAMEBUFFER_WRITE_OK\n");
