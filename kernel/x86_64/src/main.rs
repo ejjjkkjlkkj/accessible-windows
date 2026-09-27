@@ -13,12 +13,16 @@ extern crate alloc;
 mod acpi;
 mod ahci;
 mod apic_timer;
+mod boot_menu;
 mod braille;
 mod clock;
 mod device_irq;
 mod fat16;
+mod font;
 mod frame_allocator;
+mod framebuffer;
 mod gpt;
+mod ipc;
 mod hda;
 mod heap;
 #[cfg(feature = "disk-build-smoke-test")]
@@ -39,6 +43,8 @@ mod page_mapper;
 mod pci_config;
 mod percpu;
 mod pit;
+mod power;
+mod ps2_keyboard;
 mod ring3;
 mod rtc;
 mod scheduler;
@@ -1509,6 +1515,16 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // channel the dossier asks for early in boot (section 4).
         serial::prove();
 
+        // Bring up the framebuffer text console next, before anything that could
+        // hang, so a physical machine shows the kernel took over the instant it
+        // does - the debug port and COM1 that carry every marker do not exist on a
+        // laptop, and ConOut is gone after ExitBootServices. Inert if the firmware
+        // handed off no directly writable framebuffer. Prove it once it is up.
+        framebuffer::init(handoff);
+        framebuffer::write_line("Accessible Windows");
+        framebuffer::write_line("Kernel running (post-firmware). Bringing up the system...");
+        framebuffer::prove();
+
         // Take over paging from the firmware before anything else in the
         // normal boot path, so the remaining bring-up runs on kernel-owned,
         // W^X page tables. Identity-mapped, so a failure here is non-fatal:
@@ -1550,6 +1566,12 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
             debug_write("AW_RING3_PREEMPT_SKIPPED reason=timer-or-memory-not-ready\n");
         }
         prove_device_interrupt_routing(handoff);
+        // Bring up the PS/2 keyboard and prove real IRQ1 delivery + decode, so the
+        // machine can be driven by keyboard - the input half of an accessible boot.
+        // Runs after the device-IRQ routing proof (I/O APIC reachable) and before
+        // SMP, while only IRQ1 is unmasked, so delivery is unambiguous.
+        // SAFETY: CPL0 on the bootstrap processor; IDT installed, x2APIC enabled.
+        unsafe { ps2_keyboard::prove(handoff) };
         // SMP reads x2APIC MSRs and shares the kernel-owned page tables.
         if timer_ready && memory_ready {
             bring_up_secondary_processors(handoff);
@@ -1585,6 +1607,10 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
                 // SAFETY: same preconditions; runs before any AP is online.
                 if memory_ready && timer_ready {
                     unsafe { ring3::prove_user_init(&device) };
+                    // Then two programs that talk through a kernel channel reached
+                    // only by handles, and the refusals of the handle model.
+                    // SAFETY: same preconditions as the init proof.
+                    unsafe { ring3::prove_user_ipc(&device) };
                 } else {
                     debug_write("AW_USER_INIT_SKIPPED reason=timer-or-memory-not-ready\n");
                 }
@@ -1641,6 +1667,10 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // CORB/RIRB (read-only, safe on any machine; the foundation for spoken
         // screen-reader output). Reports unavailable when no controller is present.
         hda::prove();
+        // Prove spoken output: play one real speech clip (the menu's own voice)
+        // through the HDA codec and require the audio DMA to advance. Reports
+        // unavailable (not a failure) on a machine with no HDA controller.
+        hda::prove_speech(boot_menu::title_clip());
         // Create a file on a FAT16 scratch disk and read it back (installer
         // foundation). Scratch disk only: it modifies the filesystem, so it is
         // gated out of the normal boot path and never touches a real disk.
@@ -1668,8 +1698,37 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
             debug_write("AW_NATIVE_FRAMEBUFFER_WRITE_SKIP\n");
         }
 
+        // Prove the accessible boot menu's navigation and selection logic (the
+        // keyboard's real IRQ path is proved separately above).
+        // Read the ACPI power controls (FADT + \_S5) the menu's Reboot and Power off use.
+        // SAFETY: identity map active; the RSDP comes from the validated handoff.
+        unsafe { power::init(handoff.acpi_rsdp) };
+
+        boot_menu::prove();
+
         debug_write("AW_NATIVE_KERNEL_IDLE\n");
-        halt_forever()
+
+        // Test-only: prove ACPI S5 power off (QEMU must exit on its own) or a reset
+        // (a second boot must follow). Never enabled in a shipping image.
+        #[cfg(feature = "acpi-poweroff-test")]
+        // SAFETY: CPL0; the last action of this boot.
+        unsafe {
+            power::prove_power_off()
+        }
+        #[cfg(feature = "acpi-reset-test")]
+        // SAFETY: CPL0; resets on the first boot, reports on the second.
+        unsafe {
+            power::prove_reset()
+        };
+
+        // Hand off to the interactive accessible menu, driven by the real
+        // keyboard. Under headless boot no key ever arrives, so it parks under
+        // `hlt`; the idle marker above has already satisfied the boot proof, so
+        // the harness passes and then times out and stops the machine. On real
+        // hardware this is where the user takes over.
+        // SAFETY: CPL0 on the bootstrap processor; the keyboard was routed and
+        // proved by `ps2_keyboard::prove`, so arming it for input is sound.
+        unsafe { boot_menu::run_interactive() }
     }
 }
 

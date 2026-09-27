@@ -36,7 +36,10 @@ param(
     # Optional deterministic QEMU HMP keyboard script. Each entry is
     # <debug marker>|||<monitor command>. A command is sent only after a NEW
     # occurrence of its marker appears in debug.log.
-    [string[]]$MonitorScript = @()
+    [string[]]$MonitorScript = @(),
+
+    # Let a guest reset reboot the VM instead of ending QEMU (reset proofs).
+    [switch]$AllowReboot
 )
 
 Set-StrictMode -Version Latest
@@ -112,18 +115,20 @@ try {
     $baseArgs = @(
         '-machine', 'q35', '-accel', 'tcg', '-cpu', 'max', '-m', '256M',
         '-display', 'none', '-serial', $Serial, '-monitor', $monitorBackend,
-        '-no-reboot', '-net', 'none',
+        '-net', 'none',
         '-debugcon', "file:$log",
         '-drive', "if=pflash,format=raw,readonly=on,file=$code",
         '-drive', "if=pflash,format=raw,file=$vars",
         '-drive', "format=raw,snapshot=on,file=fat:ro:$esp"
     )
+    if (-not $AllowReboot) { $baseArgs += '-no-reboot' }
     foreach ($argument in ($baseArgs + $QemuArgs)) { $start.ArgumentList.Add($argument) }
 
     $process = [System.Diagnostics.Process]::Start($start)
     $stderrTask = $process.StandardError.ReadToEndAsync()
     $stdoutTask = if ($useMonitorScript) { $process.StandardOutput.ReadToEndAsync() } else { $null }
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+    $exitedOnItsOwn = $false
 
     try {
         if ($useMonitorScript) {
@@ -165,7 +170,8 @@ try {
 
         $remainingMs = [int]($deadline - [DateTimeOffset]::UtcNow).TotalMilliseconds
         if ($remainingMs -lt 1) { $remainingMs = 1 }
-        if (-not $process.WaitForExit($remainingMs)) {
+        $exitedOnItsOwn = $process.WaitForExit($remainingMs)
+        if (-not $exitedOnItsOwn) {
             $process.Kill()
             $process.WaitForExit()
         }
@@ -188,6 +194,9 @@ try {
         Name    = $Name
         Log     = $log
         Text    = $text
+        # True when QEMU stopped by itself (guest power off, or a reset under
+        # -no-reboot) before the timeout, rather than being killed.
+        ExitedOnItsOwn = $exitedOnItsOwn
         Markers = @($text -split "`r?`n" | Where-Object { $_ -match '^AW_' })
     }
 } finally {

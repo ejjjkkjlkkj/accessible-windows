@@ -95,14 +95,24 @@ fn yield_now() {
     SWITCHES.fetch_add(1, Ordering::Relaxed);
     // SAFETY: both stack pointers belong to live threads set up by init_thread;
     // the switch saves this thread's context and restores the next thread's.
-    unsafe { aw_context_switch(THREAD_RSP[current].as_ptr(), THREAD_RSP[next].load(Ordering::Relaxed)) };
+    unsafe {
+        aw_context_switch(
+            THREAD_RSP[current].as_ptr(),
+            THREAD_RSP[next].load(Ordering::Relaxed),
+        )
+    };
 }
 
 /// Return control to the kernel that called [`run`].
 fn exit_to_main() -> ! {
     let current = CURRENT.load(Ordering::Relaxed);
     // SAFETY: save this (now finished) thread's pointer and load the kernel's.
-    unsafe { aw_context_switch(THREAD_RSP[current].as_ptr(), MAIN_RSP.load(Ordering::Relaxed)) };
+    unsafe {
+        aw_context_switch(
+            THREAD_RSP[current].as_ptr(),
+            MAIN_RSP.load(Ordering::Relaxed),
+        )
+    };
     // The kernel never switches back to this thread.
     loop {
         core::hint::spin_loop();
@@ -337,6 +347,12 @@ unsafe fn run_preemption() {
 pub unsafe fn run_user_preemption(limit: u32) -> (u32, bool) {
     // SAFETY: forwarded to the caller's contract.
     unsafe { run_preemption_over(&[1], limit) }
+}
+
+/// The preemption slot currently running (0 = kernel). A syscall from CPL3 runs
+/// with interrupts masked, so this is the slot of the thread that trapped.
+pub fn current_slot() -> usize {
+    PREEMPT_CURRENT.load(Ordering::Relaxed)
 }
 
 /// Install slot 1's initial saved-frame RSP (a CPL3 interrupt frame the caller

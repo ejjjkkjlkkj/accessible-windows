@@ -73,7 +73,9 @@ crates/
 docs/
   ARCHITECTURE.md
   ACCESSIBILITY.md
-  KERNEL-BOOT-PROOFS.md What counts as evidence, and what is proved today
+  KERNEL-BOOT-PROOFS.md         What counts as evidence, and what is proved today
+  FIRMWARE-ACCESSIBILITY-ROADMAP.md  Firmware-stage screen reader: what ships, and the gaps
+  PRIOR-ART-AND-SIGNIFICANCE.md What existed before, the standards, and what is new here
   ROADMAP.md
   LEGAL.md
   REAL-HARDWARE-TEST.md

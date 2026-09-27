@@ -16,10 +16,16 @@
 //!    firmware actually reported through GOP, not a placeholder, so what is spoken
 //!    matches what is there.
 //! 3. **Is operable by keyboard, with no pointer.** After reading the boot screen
-//!    top to bottom, it waits: the up and down arrows (or Tab) re-read the screen a
-//!    line at a time, and Enter continues to the operating system. If nobody is
-//!    there - an unattended or automated boot - it continues on its own after a
-//!    short window, so the machine never hangs waiting for a key that will not come.
+//!    top to bottom it presents an accessible boot menu - Start Accessible Windows,
+//!    Reboot, Shut down - spoken through the same engine: the up and down arrows (or
+//!    Tab) move between items and speak each landing with its position, Enter selects
+//!    it, and Escape takes the safe default of starting the operating system. The
+//!    keyboard here is the firmware's own, so a USB keyboard works before any kernel
+//!    USB stack exists - the one interaction guaranteed on every machine. If nobody
+//!    is there - an unattended or automated boot - a countdown starts the operating
+//!    system on its own after a short window, so the machine never hangs waiting for
+//!    a key that will not come; once a key is pressed the countdown stops and the
+//!    menu waits for a deliberate choice.
 //!
 //! Every utterance comes from the one allocation-free announcement engine the
 //! kernel and installer use ([`aw_screen_reader`]) over the same validated
@@ -31,34 +37,15 @@ extern crate alloc;
 
 use alloc::string::String;
 
-use core::time::Duration;
-
-use aw_accessibility::{validate_node, NodeId, Rect, Role, SemanticNode, State};
-use aw_screen_reader::{announce_focus, FocusContext};
-use uefi::boot;
-use uefi::proto::console::text::{Key, ScanCode};
+use aw_accessibility::{NodeId, Rect, Role, SemanticNode, State, validate_node};
+use aw_screen_reader::{FocusContext, announce_focus};
 use uefi::system;
 
+use crate::audio;
+use crate::aw_mark;
 use crate::hda;
-use crate::setup_speech::{self, Clip};
+use crate::serial;
 use crate::sound;
-
-/// Pitch of the audible cue when the reading cursor moves during review.
-const CUE_MOVE_HZ: u32 = 740;
-/// Pitch of the audible cue confirming the boot is continuing.
-const CUE_CONTINUE_HZ: u32 = 523;
-/// Pitch of the audible cue when the boot screen is waiting for the user.
-const CUE_READY_HZ: u32 = 880;
-
-/// How long an unattended boot waits for a key before it continues on its own.
-/// Kept short: it is pure latency on every boot where nobody reviews, and it is in
-/// the critical path of timed boot tests. A user who wants to review just presses a
-/// key inside this window; missing it only means the boot proceeds to the (equally
-/// accessible) installer. The QEMU proof harness presses no key, so it always waits
-/// this out - which is why the automated boot proof must never depend on a keystroke.
-const REVIEW_WINDOW: Duration = Duration::from_secs(2);
-/// How often the review window polls for a keystroke.
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Build one node of the firmware boot screen. Every node hangs off an implicit
 /// root (id 0), the way the kernel proof frames its dialog.
@@ -107,11 +94,11 @@ fn show(text: &str) {
 /// Play a line's pre-recorded speech clip through the HDA codec, when audio is
 /// available and the line has one (the dynamic display line does not). This is
 /// what a blind user actually hears - the words, on the machine's real speakers.
-fn play_clip(clip: Option<&'static [u8]>, speaker: &mut Option<hda::Speaker>) {
+fn play_clip(clip: Option<&'static [u8]>, speaker: &mut Option<audio::Speaker>) {
     if let (Some(sp), Some(data)) = (speaker.as_mut(), clip)
         && sp.speak(data)
     {
-        log::info!("AW_UEFI_HDA_SPEAK bytes={}", data.len());
+        aw_mark!("AW_UEFI_AUDIO_SPEAK bytes={}", data.len());
     }
 }
 
@@ -121,129 +108,16 @@ fn play_clip(clip: Option<&'static [u8]>, speaker: &mut Option<hda::Speaker>) {
 fn speak(
     node: &SemanticNode<'_>,
     clip: Option<&'static [u8]>,
-    speaker: &mut Option<hda::Speaker>,
+    speaker: &mut Option<audio::Speaker>,
 ) -> bool {
     let mut buffer = [0u8; 128];
     let Some(text) = utterance(node, &mut buffer) else {
         return false;
     };
     show(text);
-    log::info!("AW_UEFI_SR_SPEAK \"{text}\"");
+    aw_mark!("AW_UEFI_SR_SPEAK \"{text}\"");
     play_clip(clip, speaker);
     true
-}
-
-/// Re-read one node during keyboard review: shown again, marked `AW_UEFI_SR_REVIEW`
-/// (distinct from the first reading), and said aloud again through HDA.
-fn review(
-    node: &SemanticNode<'_>,
-    clip: Option<&'static [u8]>,
-    speaker: &mut Option<hda::Speaker>,
-) {
-    let mut buffer = [0u8; 128];
-    if let Some(text) = utterance(node, &mut buffer) {
-        show(text);
-        log::info!("AW_UEFI_SR_REVIEW \"{text}\"");
-        play_clip(clip, speaker);
-    }
-}
-
-/// Poll the UEFI console input once, without blocking. Any read error is treated
-/// as "no key", so a flaky console cannot wedge the boot.
-fn poll_key() -> Option<Key> {
-    system::with_stdin(|stdin| stdin.read_key().unwrap_or(None))
-}
-
-/// What a reviewed keystroke asks for.
-enum Command {
-    /// Move the reading cursor forward (down arrow / Tab).
-    Next,
-    /// Move the reading cursor backward (up arrow).
-    Previous,
-    /// Leave the boot screen and continue to the operating system.
-    Continue(&'static str),
-    /// A key with no binding here; ignored.
-    Ignore,
-}
-
-/// Map a keystroke to a boot-screen command.
-fn classify(key: Key) -> Command {
-    match key {
-        Key::Special(ScanCode::DOWN) => Command::Next,
-        Key::Special(ScanCode::UP) => Command::Previous,
-        Key::Special(ScanCode::ESCAPE) => Command::Continue("escape"),
-        Key::Printable(character) => match char::from(character) {
-            '\r' => Command::Continue("enter"),
-            '\t' => Command::Next,
-            _ => Command::Ignore,
-        },
-        Key::Special(_) => Command::Ignore,
-    }
-}
-
-/// Let the user review the boot screen by keyboard and choose when to continue.
-///
-/// `lines` is the boot screen already read aloud once; the cursor starts on its
-/// last line. Up/Down (or Tab) re-read a line, Enter or Escape continues. Until
-/// the first keystroke a countdown runs, and if it expires the boot continues on
-/// its own; once the user has pressed anything, the countdown stops and the boot
-/// waits for them - a person reading takes as long as they take.
-fn review_and_continue(
-    lines: &[SemanticNode<'_>],
-    clips: &[Option<&'static [u8]>],
-    speaker: &mut Option<hda::Speaker>,
-) {
-    log::info!("AW_UEFI_SR_READY");
-    uefi::println!();
-    uefi::println!("  Up/Down: review a line.  Enter: continue.  Continuing in 2 seconds.");
-    // An audible "waiting for you" cue, so a blind user knows input is expected.
-    sound::cue(CUE_READY_HZ, Duration::from_millis(90));
-
-    if lines.is_empty() {
-        log::info!("AW_UEFI_SR_CONTINUE reason=empty");
-        return;
-    }
-
-    let last = lines.len() - 1;
-    let mut cursor = last;
-    let mut interacted = false;
-    let mut waited = Duration::ZERO;
-
-    loop {
-        if let Some(key) = poll_key() {
-            interacted = true;
-            match classify(key) {
-                Command::Next => {
-                    cursor = (cursor + 1).min(last);
-                    sound::cue(CUE_MOVE_HZ, Duration::from_millis(35));
-                    review(&lines[cursor], clips[cursor], speaker);
-                }
-                Command::Previous => {
-                    cursor = cursor.saturating_sub(1);
-                    sound::cue(CUE_MOVE_HZ, Duration::from_millis(35));
-                    review(&lines[cursor], clips[cursor], speaker);
-                }
-                Command::Continue(reason) => {
-                    sound::cue(CUE_CONTINUE_HZ, Duration::from_millis(150));
-                    log::info!("AW_UEFI_SR_CONTINUE reason={reason}");
-                    return;
-                }
-                Command::Ignore => {}
-            }
-            continue;
-        }
-
-        // No key waiting. An unattended boot counts down and then continues; once
-        // someone has interacted, the countdown is abandoned and we simply wait.
-        if !interacted {
-            if waited >= REVIEW_WINDOW {
-                log::info!("AW_UEFI_SR_CONTINUE reason=timeout");
-                return;
-            }
-            waited += POLL_INTERVAL;
-        }
-        boot::stall(POLL_INTERVAL);
-    }
 }
 
 /// Voice the firmware boot screen through the native screen reader, on the visible
@@ -256,16 +130,29 @@ fn review_and_continue(
 /// invariant violation it emits `AW_UEFI_SR_FAIL` and withholds the proof marker
 /// rather than claiming success, but it still lets the machine boot - stranding a
 /// user at a dead firmware screen would be the worse failure.
-pub fn run(width: usize, height: usize) -> Option<hda::Speaker> {
-    log::info!("AW_UEFI_SR_BEGIN");
+pub fn run(width: usize, height: usize) {
+    // Arm the COM1 mirror before the first marker, so the whole firmware-stage
+    // screen reader is captured on machines with no 0xE9 debug port (VMware,
+    // physical hardware). A no-op where COM1 is absent, so the QEMU proofs are
+    // unaffected.
+    serial::init();
+
+    aw_mark!("AW_UEFI_SR_BEGIN");
 
     // Bring up the machine's real audio (HDA) once: each line is then spoken aloud
     // through it. On a thin laptop with no PC-speaker buzzer this codec is the only
     // thing that will actually sound; when there is no HDA controller, the PC
     // speaker plays a chime so at least the boot is audibly confirmed.
-    let mut speaker = hda::bring_up();
-    if speaker.is_none() {
-        sound::startup_chime();
+    let mut speaker = audio::bring_up();
+    match &speaker {
+        // A real codec (HDA or AC'97) came up: announce which backend is speaking, so the
+        // boot proof and a field log record the active audio channel.
+        Some(sp) => aw_mark!("AW_UEFI_AUDIO_BACKEND channel={}", sp.backend()),
+        // No codec at all: the PC speaker is the universal fallback.
+        None => {
+            aw_mark!("AW_UEFI_AUDIO_BACKEND channel=pc_speaker");
+            sound::startup_chime();
+        }
     }
 
     // A clean surface for the spoken screen: the boot log lives on the debug
@@ -283,13 +170,18 @@ pub fn run(width: usize, height: usize) -> Option<hda::Speaker> {
     // display mode, and narrates the one thing this stage does - load the OS.
     let screen = [
         node(1, Role::Window, "Accessible Windows"),
-        node(2, Role::StaticText, "Screen reader active at firmware stage"),
+        node(
+            2,
+            Role::StaticText,
+            "Screen reader active at firmware stage",
+        ),
         node(3, Role::StaticText, "Starting Accessible Windows"),
         node(4, Role::StaticText, &display),
         node(5, Role::StaticText, "Loading the operating system"),
     ];
     // Pre-recorded speech for each line, in order; the dynamic display line has no
-    // clip and is spoken only on the console (until a runtime synthesizer lands).
+    // clip and is spoken on the console (the runtime formant synthesizer in
+    // `synth.rs` now voices dynamic values inside the setup that follows).
     let clips: [Option<&'static [u8]>; 5] = [
         Some(hda::CLIP_WELCOME),
         Some(hda::CLIP_ACTIVE),
@@ -298,23 +190,20 @@ pub fn run(width: usize, height: usize) -> Option<hda::Speaker> {
         Some(hda::CLIP_LOADING),
     ];
 
-    for (index, (line, clip)) in screen.iter().zip(clips.iter()).enumerate() {
+    for (line, clip) in screen.iter().zip(clips.iter()) {
         if !speak(line, *clip, &mut speaker) {
             // A constant node failed to validate: a bug, not a runtime condition.
             // Report it and skip the success marker, but keep booting.
-            return speaker;
-        }
-        if index == 3 {
-            // The display value is dynamic and cannot have one fixed recording.
-            // Spell it through the same HDA path so it is never visual-only.
-            setup_speech::say(Clip::DisplayInformation, &mut speaker);
-            setup_speech::spell(&display, &mut speaker);
-            log::info!("AW_UEFI_SR_DYNAMIC_SPEECH field=display");
+            return;
         }
     }
 
-    review_and_continue(&screen, &clips, &mut speaker);
+    // The boot screen has been read aloud; now present the complete accessible
+    // firmware setup the user actually operates - a tabbed Setup Utility (Main,
+    // Advanced, Boot, Security, Save and Exit) modeled on AMI Aptio and the ASUS
+    // UEFI BIOS Utility, but spoken and driven from the firmware's own keyboard, so
+    // it works on every machine before any kernel USB stack exists.
+    crate::setup::run(width, height, &mut speaker);
 
-    log::info!("AW_UEFI_SR_PROOF_OK");
-    speaker
+    aw_mark!("AW_UEFI_SR_PROOF_OK");
 }

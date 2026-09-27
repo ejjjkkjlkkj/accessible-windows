@@ -49,6 +49,11 @@ if ($LASTEXITCODE -ne 0) { throw 'building the userland test ELF failed' }
 if ($LASTEXITCODE -ne 0) { throw 'building userland spinner A failed' }
 & $python.Source (Join-Path $PSScriptRoot 'make-user-elf.py') (Join-Path $fatStage 'USERB.ELF') '--spinner' '--base' '0x600000000'
 if ($LASTEXITCODE -ne 0) { throw 'building userland spinner B failed' }
+# Two IPC programs (USERIPCA/USERIPCB) for the channel + handle-model proof.
+& $python.Source (Join-Path $PSScriptRoot 'make-user-elf.py') (Join-Path $fatStage 'USERIPCA.ELF') '--ipc-sender' '--base' '0x700000000'
+if ($LASTEXITCODE -ne 0) { throw 'building the IPC sender failed' }
+& $python.Source (Join-Path $PSScriptRoot 'make-user-elf.py') (Join-Path $fatStage 'USERIPCB.ELF') '--ipc-receiver' '--base' '0x800000000'
+if ($LASTEXITCODE -ne 0) { throw 'building the IPC receiver failed' }
 & $python.Source (Join-Path $PSScriptRoot 'build_bootable_image.py') '--fat-only' $vblkDisk $fatStage
 if ($LASTEXITCODE -ne 0) { throw 'building the FAT16 test disk failed' }
 # A full GPT disk (protective MBR + GPT + FAT16 ESP) for the GPT parser proof.
@@ -59,6 +64,9 @@ if ($LASTEXITCODE -ne 0) { throw 'building the GPT test disk failed' }
 # A blank scratch disk for the AHCI write proof: it overwrites LBA 0, so it must
 # never be a data disk. Recreated blank each run.
 $ahciScratch = Join-Path $repoRoot 'target/ahci-scratch.img'
+# A blank scratch disk for the NVMe write proof (it overwrites LBA 2).
+$nvmeScratch = Join-Path $repoRoot 'target/nvme-scratch.img'
+[System.IO.File]::WriteAllBytes($nvmeScratch, (New-Object byte[] (1024 * 1024)))
 [System.IO.File]::WriteAllBytes($ahciScratch, (New-Object byte[] (1024 * 1024)))
 
 # A dedicated FAT16 scratch disk for the filesystem-write proof: a fresh, valid
@@ -124,13 +132,21 @@ $configurations = @(
             'AW_UEFI_SR_SPEAK "Starting Accessible Windows"'
             'AW_UEFI_SR_SPEAK "Loading the operating system"'
             'AW_UEFI_SR_READY'
+            # The firmware-stage accessible Setup Utility (AMI/ASUS-style tabs: Main,
+            # Advanced, Boot, Security, Save and Exit), operated on the firmware's own
+            # keyboard (so a USB keyboard works on every machine, before any kernel USB
+            # stack) and voiced through HDA. Real boot entries are enumerated from the
+            # firmware's BootOrder/Boot#### variables; the Boot tab opens on the safe
+            # default. The setup defaults to French (a Language item switches to English),
+            # so the default item is "Demarrer normalement"; the tab title is "Demarrage".
+            # The engine's role words ("tab", "menu item") stay English in the markers. The
+            # 1-of count varies with the number of boot entries, so assert only the prefix.
+            'AW_UEFI_SETUP_TAB "Démarrage, tab,'
+            'AW_UEFI_BOOT_ENUM count='
+            'AW_UEFI_MENU_ITEM "Démarrer normalement, menu item, 1 of'
+            # With no key pressed the countdown boots normally on its own.
             'AW_UEFI_SR_CONTINUE reason=timeout'
             'AW_UEFI_SR_PROOF_OK'
-            'AW_UEFI_SETUP_BEGIN'
-            'AW_UEFI_SETUP_READY'
-            'AW_UEFI_MENU_ITEM page=Root index=0 selected=true label="Main"'
-            'AW_UEFI_SETUP_ACTION action=boot_normally reason=timeout'
-            'AW_UEFI_SETUP_PROOF_OK'
             'AW_KERNEL_FILE_READ_OK'
             'AW_KERNEL_IMAGE_HEADER_OK base=0x200000'
             'AW_NATIVE_KERNEL_LOAD_OK address=0x200000'
@@ -281,11 +297,44 @@ $configurations = @(
             'AW_CPU_NX_OK'
             'AW_PAGING_BASELINE_OK'
             'AW_NATIVE_FRAMEBUFFER_WRITE_OK'
+            # The framebuffer text console: it renders a known glyph into the
+            # handed-off linear framebuffer and reads every pixel of it back in the
+            # framebuffer's own colour order, matching the scaled 8x8 font bitmap -
+            # the first post-firmware output that survives on real hardware.
+            'AW_FBCON_READY width=1280 height=800'
+            'AW_FBCON_GLYPH_READBACK_OK char=A'
+            'AW_FBCON_PROOF_OK'
+            # PS/2 keyboard: real IRQ1 delivery and set-1 decode, proved by the
+            # 8042's own 0xD2 injection (the exact path a keypress takes), plus a
+            # mask/resume negative test. The input half of an accessible boot.
+            'AW_KBD_CONTROLLER_OK'
+            'AW_KBD_KEY name=space'
+            'AW_KBD_KEY name=enter'
+            'AW_KBD_KEY name=up'
+            'AW_KBD_KEY name=down'
+            'AW_KBD_MASKED_STOPPED'
+            'AW_KBD_UNMASKED_RESUMED'
+            'AW_KBD_PROOF_OK'
+            # Accessible boot menu: keyboard-driven navigation and selection, the
+            # same handler the live menu uses, voiced through the screen-reader
+            # engine and rendered to the framebuffer with a visible focus bar.
+            'AW_MENU_FOCUS index=1 name="System information"'
+            'AW_MENU_SPEAK "System information, menu item, 2 of 4"'
+            # ACPI power controls read from the FADT and the DSDT's \_S5 package.
+            'AW_ACPI_POWER_CONTROL pm1a='
+            'AW_MENU_SELECT name="System information"'
+            'AW_MENU_WRAP_OK'
+            'AW_MENU_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
+            'AW_FBCON_FAIL'
+            'AW_FBCON_UNAVAILABLE'
+            'AW_KBD_FAIL'
+            'AW_KBD_UNAVAILABLE'
+            'AW_MENU_FAIL'
             'AW_MEMORY_PROTECTION_FAIL'
             'AW_MEMORY_PROTECTION_SKIPPED'
             'AW_VMM_FAIL'
@@ -299,7 +348,7 @@ $configurations = @(
             'AW_CLOCK_FAIL'
             'AW_RTC_FAIL'
             'AW_UEFI_SR_FAIL'
-            'AW_UEFI_SETUP_FAIL'
+            'AW_UEFI_MENU_FAIL'
             'AW_UEFI_SND_FAIL'
             'AW_SR_FAIL'
             'AW_BRAILLE_FAIL'
@@ -388,7 +437,7 @@ $configurations = @(
         QemuArgs = @('-device', 'edu')
         Required = @(
             'AW_MSI_DEVICE_FOUND'
-            'AW_MSI_PROGRAMMED vector=0x0000000000000051 address=0x00000000fee00000 data=0x0000000000000051'
+            'AW_MSI_PROGRAMMED vector=0x0000000000000052 address=0x00000000fee00000 data=0x0000000000000052'
             'AW_MSI_FIRED'
             'AW_MSI_MONOTONIC_OK'
             'AW_MSI_MASKED_STOPPED'
@@ -437,6 +486,11 @@ $configurations = @(
             # Then two userland spinners loaded from the same disk, preemptively
             # scheduled at CPL3 - both counters advance under timer switching.
             'AW_USER_INIT_PROOF_OK'
+            # Channel IPC between those programs through handles only, and the five
+            # refusals of the handle model (foreign, forged, rights, kernel pointer,
+            # use after close).
+            'AW_HANDLE_SECURITY_PROOF_OK'
+            'AW_IPC_PROOF_OK messages=32'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
@@ -505,10 +559,16 @@ $configurations = @(
             'AW_NVME_ENABLED depth='
             'AW_NVME_IDENTIFY_OK model=QEMU NVMe Ctrl'
             'AW_NVME_PROOF_OK'
+            # Block I/O: namespace geometry, an I/O queue pair, and LBA 0 read by DMA
+            # and recognised as the test disk's FAT16 boot sector.
+            'AW_NVME_NAMESPACE blocks='
+            'AW_NVME_IO_QUEUES_OK depth='
+            'AW_NVME_READ_PROOF_OK fs=FAT16'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
             'AW_NVME_UNAVAILABLE'
+            'AW_NVME_IO_FAIL'
             'AW_NVME_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
@@ -542,7 +602,7 @@ $configurations = @(
             # the codec answering and the clips streaming (link position advanced).
             'AW_UEFI_HDA_CODEC_ID vendor_device='
             'AW_UEFI_HDA_READY dac='
-            'AW_UEFI_HDA_SPEAK bytes='
+            'AW_UEFI_AUDIO_SPEAK bytes='
             # Then the kernel brings the same controller up again for the installer.
             'AW_HDA_FOUND'
             'AW_HDA_RESET_OK'
@@ -557,6 +617,13 @@ $configurations = @(
             'AW_HDA_STREAM_RUN'
             'AW_HDA_DMA_ADVANCED position='
             'AW_HDA_PLAYBACK_PROOF_OK'
+            # Then real spoken output: the codec is set to the 24 kHz mono speech
+            # format and one pre-recorded menu clip is streamed by DMA, the link
+            # position advancing just like the tone - the accessible menu's voice,
+            # proven to reach the codec (audibility on hardware is separate).
+            'AW_HDA_SPEECH_READY'
+            'AW_HDA_SPEECH_DMA_ADVANCED position='
+            'AW_HDA_SPEECH_PROOF_OK'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
@@ -564,6 +631,37 @@ $configurations = @(
             'AW_UEFI_HDA_FAIL'
             'AW_HDA_UNAVAILABLE'
             'AW_HDA_FAIL'
+            'AW_HDA_SPEECH_FAIL'
+            'AW_HDA_SPEECH_UNAVAILABLE'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
+        # AC'97 audio: a second self-built firmware-stage backend, so the spoken screen
+        # reader works on machines whose codec is AC'97 rather than Intel HDA (and what
+        # several virtual machines expose). No HDA device is present here, so the audio
+        # layer falls through HDA to AC'97: it finds the controller on PCI, brings up its
+        # NAM/NABM I/O windows, and streams the boot-screen speech clips by bus-master DMA
+        # over a Buffer Descriptor List. The `none` audiodev discards the sound, but the bus
+        # master still runs the descriptor list, which is all the DMA path needs to prove.
+        Name           = 'ac97'
+        Features       = @()
+        QemuArgs       = @(
+            '-audiodev', 'none,id=snd0'
+            '-device', 'AC97,audiodev=snd0'
+        )
+        # The UEFI stage streams several seconds of pre-recorded speech through AC'97 before
+        # the kernel loads, so this configuration needs more than the default budget.
+        TimeoutSeconds = 150
+        Required       = @(
+            'AW_UEFI_AC97_READY nam='
+            'AW_UEFI_AUDIO_BACKEND channel=ac97'
+            'AW_UEFI_AUDIO_SPEAK bytes='
+            'AW_UEFI_SR_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden      = @(
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
         )
@@ -854,6 +952,50 @@ $configurations = @(
 
 $failures = @()
 
+# ACPI power control (roadmap Phase 3). Power off: the kernel reads the FADT and
+# \_S5, enters S5, and QEMU must then exit by itself - only a real soft-off
+# transition ends the VM before the timeout. Reset: the kernel resets through the
+# FADT reset register; the VM reboots (no -no-reboot) and the second boot, finding
+# the CMOS flag the first one left, reports - two idle markers, one proof.
+$configurations += @(
+    @{
+        # NVMe write: a pattern to LBA 2 of a blank scratch disk, read back by DMA
+        # into a different buffer. Never a data disk.
+        Name     = 'nvme-write'
+        Features = @('nvme-write-smoke-test')
+        QemuArgs = @(
+            '-drive', "file=$nvmeScratch,if=none,id=nvm,format=raw"
+            '-device', 'nvme,drive=nvm,serial=AWNVME02'
+        )
+        Required = @('AW_NVME_IO_QUEUES_OK depth=', 'AW_NVME_WRITE_PROOF_OK lba=2', 'AW_NATIVE_KERNEL_IDLE')
+        Forbidden = @('AW_NVME_IO_FAIL', 'AW_NVME_FAIL', 'AW_NATIVE_EXCEPTION')
+    }
+    @{
+        Name           = 'acpi-poweroff'
+        Features       = @('acpi-poweroff-test')
+        ExpectSelfExit = $true
+        Required       = @(
+            'AW_ACPI_POWER_CONTROL pm1a='
+            'AW_NATIVE_KERNEL_IDLE'
+            'AW_ACPI_POWEROFF_ISSUED'
+        )
+        Forbidden      = @('AW_ACPI_POWEROFF_FAIL', 'AW_ACPI_POWER_CONTROL_UNAVAILABLE', 'AW_NATIVE_EXCEPTION')
+    }
+    @{
+        Name           = 'acpi-reset'
+        Features       = @('acpi-reset-test')
+        AllowReboot    = $true
+        TimeoutSeconds = 150
+        Required       = @(
+            'AW_ACPI_POWER_CONTROL pm1a='
+            'AW_ACPI_RESET_ISSUED'
+            'AW_POWER_RESET_PATH fadt_io'
+            'AW_ACPI_RESET_PROOF_OK second_boot=1'
+        )
+        RequiredCount  = @{ 'AW_NATIVE_KERNEL_IDLE' = 2 }
+        Forbidden      = @('AW_POWER_RESET_PATH i8042', 'AW_ACPI_POWER_CONTROL_UNAVAILABLE', 'AW_NATIVE_EXCEPTION')
+    }
+)
 if ($Only.Count -gt 0) {
     $configurations = @($configurations | Where-Object { $Only -contains $_.Name })
     if ($configurations.Count -eq 0) { throw "no configuration matched -Only: $($Only -join ', ')" }
@@ -879,11 +1021,23 @@ foreach ($configuration in $configurations) {
     if ($configuration.ContainsKey('TimeoutSeconds')) {
         $cfgTimeout = [math]::Max($TimeoutSeconds, [int]$configuration.TimeoutSeconds)
     }
+    $allowReboot = $configuration.ContainsKey('AllowReboot') -and $configuration.AllowReboot
     $result = & $boot -Name $configuration.Name -Features $configuration.Features `
-        -QemuArgs $qemuArgs -Serial $serial -Qemu $Qemu -TimeoutSeconds $cfgTimeout
+        -QemuArgs $qemuArgs -Serial $serial -Qemu $Qemu -TimeoutSeconds $cfgTimeout -AllowReboot:$allowReboot
 
     $missing = @($configuration.Required | Where-Object { -not $result.Text.Contains($_) })
     $present = @($configuration.Forbidden | Where-Object { $result.Text.Contains($_) })
+    # Power off is proved by the VM ending itself, not by a marker alone.
+    if ($configuration.ContainsKey('ExpectSelfExit') -and $configuration.ExpectSelfExit -and -not $result.ExitedOnItsOwn) {
+        $missing += 'qemu-exited-on-its-own'
+    }
+    # Some proofs need a marker several times (a reset shows two boots).
+    if ($configuration.ContainsKey('RequiredCount')) {
+        foreach ($entry in $configuration.RequiredCount.GetEnumerator()) {
+            $count = ([regex]::Matches($result.Text, [regex]::Escape($entry.Key))).Count
+            if ($count -lt $entry.Value) { $missing += "$($entry.Key) x$($entry.Value) (saw $count)" }
+        }
+    }
 
     # A config may also assert on the host-side serial log: output the guest
     # actually pushed out of COM1, not just a debug-console marker.

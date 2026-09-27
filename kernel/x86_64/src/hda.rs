@@ -17,6 +17,9 @@
 //! path; a machine with no HDA controller reports `AW_HDA_UNAVAILABLE` and the
 //! proof is skipped, never failed.
 
+use core::cell::UnsafeCell;
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use aw_x86_paging::PageTableFlags;
 
 use crate::page_mapper::map_page;
@@ -223,6 +226,35 @@ const AUDIO_BYTES: usize = 98304;
 struct AudioBuffer([u8; AUDIO_BYTES]);
 
 static mut AUDIO: AudioBuffer = AudioBuffer([0; AUDIO_BYTES]);
+
+/// 24 kHz, 16-bit, mono: base 48 kHz, /2, 16-bit, 1 channel - the format the
+/// pre-recorded menu speech clips (scripts/gen-menu-speech.ps1) are synthesized
+/// in, and what the codec is set to for spoken output.
+const SPEECH_FORMAT: u16 = 0x0110;
+
+/// The buffer the accessible menu's speech clips stream from by DMA. Sized for
+/// the longest menu utterance (~4.3 s at 24 kHz mono 16-bit is ~205 KiB);
+/// page-aligned and identity-mapped like the other DMA statics.
+const SPEECH_BYTES: usize = 256 * 1024;
+
+#[repr(C, align(4096))]
+struct SpeechBuffer([u8; SPEECH_BYTES]);
+
+static mut SPEECH: SpeechBuffer = SpeechBuffer([0; SPEECH_BYTES]);
+
+/// Output stream 0's MMIO block, retained after bring-up so the menu can play
+/// clips without re-walking the codec each time.
+struct SpeechEngine {
+    stream_base: u64,
+}
+
+struct SpeechCell(UnsafeCell<Option<SpeechEngine>>);
+// SAFETY: written once during single-core bring-up, read afterwards on the BSP.
+unsafe impl Sync for SpeechCell {}
+static SPEECH_ENGINE: SpeechCell = SpeechCell(UnsafeCell::new(None));
+
+/// Set once the codec is configured for speech and the engine is stored.
+static SPEECH_READY: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy)]
 struct PciLocation {
@@ -651,17 +683,182 @@ fn start_stream(controller: &Controller) {
     }
 }
 
+/// Copy a speech clip into the identity-mapped speech buffer, truncated to it and
+/// aligned to the 2-byte mono frame. Returns the number of PCM bytes staged.
+fn stage_clip(clip: &[u8]) -> usize {
+    let len = clip.len().min(SPEECH_BYTES) & !1;
+    let dst = core::ptr::addr_of_mut!(SPEECH) as *mut u8;
+    // SAFETY: SPEECH is the identity-mapped PCM static; len <= SPEECH_BYTES.
+    unsafe {
+        for (i, &byte) in clip[..len].iter().enumerate() {
+            dst.add(i).write_volatile(byte);
+        }
+    }
+    len
+}
+
+/// Program output stream 0 with a one-entry BDL over `len` bytes of the speech
+/// buffer at the speech format, and start it running. The DAC's converter format
+/// is set to `SPEECH_FORMAT` once, in [`configure_speech`].
+fn start_speech_stream(stream_base: u64, len: usize) {
+    let bdl_phys = core::ptr::addr_of!(BDL) as u64;
+    let speech_phys = core::ptr::addr_of!(SPEECH) as u64;
+    let bdl = core::ptr::addr_of_mut!(BDL) as *mut u32;
+    // SAFETY: BDL is the identity-mapped descriptor static; four dwords fit.
+    unsafe {
+        bdl.add(0).write_volatile(speech_phys as u32);
+        bdl.add(1).write_volatile((speech_phys >> 32) as u32);
+        bdl.add(2).write_volatile(len as u32);
+        bdl.add(3).write_volatile(1); // interrupt on completion
+    }
+    // SAFETY: stream_base is inside the identity-mapped BAR0 register file.
+    unsafe {
+        mmio_write8(stream_base, SD_CTL, SDCTL_SRST);
+        let mut budget = 1_000_000u32;
+        while mmio_read8(stream_base, SD_CTL) & SDCTL_SRST == 0 && budget > 0 {
+            budget -= 1;
+            core::hint::spin_loop();
+        }
+        mmio_write8(stream_base, SD_CTL, 0);
+        let mut budget = 1_000_000u32;
+        while mmio_read8(stream_base, SD_CTL) & SDCTL_SRST != 0 && budget > 0 {
+            budget -= 1;
+            core::hint::spin_loop();
+        }
+        mmio_write32(stream_base, SD_CBL, len as u32);
+        mmio_write16(stream_base, SD_LVI, 0);
+        mmio_write16(stream_base, SD_FMT, SPEECH_FORMAT);
+        mmio_write32(stream_base, SD_BDPL, bdl_phys as u32);
+        mmio_write32(stream_base, SD_BDPU, (bdl_phys >> 32) as u32);
+        mmio_write8(stream_base, SD_CTL + 2, STREAM_TAG << 4);
+        mmio_write8(stream_base, SD_CTL, mmio_read8(stream_base, SD_CTL) | SDCTL_RUN);
+    }
+}
+
+/// Clear the RUN bit on output stream 0.
+fn stop_output_stream(stream_base: u64) {
+    // SAFETY: clearing RUN on our own stream descriptor.
+    unsafe {
+        mmio_write8(stream_base, SD_CTL, mmio_read8(stream_base, SD_CTL) & !SDCTL_RUN);
+    }
+}
+
+/// The retained output stream base, or `None` until speech is set up.
+fn speech_stream_base() -> Option<u64> {
+    if !SPEECH_READY.load(Ordering::Acquire) {
+        return None;
+    }
+    // SAFETY: single-core; the engine is stored before the ready flag is set.
+    unsafe { (*SPEECH_ENGINE.0.get()).as_ref().map(|e| e.stream_base) }
+}
+
+/// Set the codec's DAC converter format to the speech format and retain output
+/// stream 0 so the menu can play clips. Called at the end of [`prove`], once the
+/// tone proof has found and configured the output path.
+fn configure_speech(controller: &mut Controller, path: &OutputPath) -> bool {
+    if controller
+        .command16(path.dac, VERB4_SET_FORMAT, SPEECH_FORMAT)
+        .is_err()
+    {
+        debug_write("AW_HDA_SPEECH_UNAVAILABLE reason=set_format\n");
+        return false;
+    }
+    // SAFETY: single-core bring-up on the BSP.
+    unsafe {
+        *SPEECH_ENGINE.0.get() = Some(SpeechEngine {
+            stream_base: controller.output_stream_base(),
+        });
+    }
+    SPEECH_READY.store(true, Ordering::Release);
+    debug_write("AW_HDA_SPEECH_READY\n");
+    true
+}
+
+/// Speak one PCM clip through the codec, blocking until it has played once (or a
+/// bounded budget elapses), then stopping the stream so the cyclic buffer does
+/// not loop it. A no-op when the machine has no HDA output. Used by the menu.
+pub fn speak(clip: &[u8]) {
+    let Some(stream) = speech_stream_base() else {
+        return;
+    };
+    let len = stage_clip(clip);
+    if len == 0 {
+        return;
+    }
+    start_speech_stream(stream, len);
+    // One pass: the link position climbs to the buffer end, then the cyclic
+    // stream wraps back to zero - stop at the first end-or-wrap so the clip plays
+    // exactly once rather than repeating.
+    let target = len as u32;
+    let mut prev = 0u32;
+    let mut budget = 400_000_000u32;
+    loop {
+        // SAFETY: reading the stream's LPIB register is side-effect-free.
+        let pos = unsafe { mmio_read32(stream, SD_LPIB) };
+        if pos + 128 >= target || (prev != 0 && pos < prev) {
+            break;
+        }
+        prev = pos;
+        budget -= 1;
+        if budget == 0 {
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    stop_output_stream(stream);
+}
+
+/// Prove spoken output: play one clip and require the link position to advance,
+/// which only happens when the controller is fetching PCM from memory and
+/// clocking it to the codec - the same evidence the tone proof uses, now for real
+/// speech. Prints an explicit marker and returns when speech never came up.
+pub fn prove_speech(clip: &[u8]) {
+    debug_write("AW_HDA_SPEECH_BEGIN\n");
+    let Some(stream) = speech_stream_base() else {
+        debug_write("AW_HDA_SPEECH_UNAVAILABLE reason=not_ready\n");
+        return;
+    };
+    let len = stage_clip(clip);
+    if len == 0 {
+        debug_write("AW_HDA_SPEECH_FAIL reason=empty_clip\n");
+        return;
+    }
+    start_speech_stream(stream, len);
+    let mut moved = 0u32;
+    let mut budget = 50_000_000u32;
+    while budget > 0 {
+        // SAFETY: reading LPIB is side-effect-free.
+        moved = unsafe { mmio_read32(stream, SD_LPIB) };
+        if moved > 0 {
+            break;
+        }
+        budget -= 1;
+        core::hint::spin_loop();
+    }
+    stop_output_stream(stream);
+    if moved == 0 {
+        debug_write("AW_HDA_SPEECH_FAIL reason=no_dma_progress\n");
+        return;
+    }
+    debug_write("AW_HDA_SPEECH_DMA_ADVANCED position=");
+    debug_write_u64(u64::from(moved));
+    debug_write("\n");
+    debug_write("AW_HDA_SPEECH_PROOF_OK\n");
+}
+
 /// Play a tone through the codec and prove the audio DMA runs: after the stream
 /// starts, the link position (SD_LPIB) must advance past zero, which only happens
 /// when the controller is fetching PCM from memory and clocking it to the codec.
-fn prove_playback(controller: &mut Controller) {
+/// Returns the discovered output path on success, so the caller can reuse it to
+/// set up spoken output without walking the codec again.
+fn prove_playback(controller: &mut Controller) -> Option<OutputPath> {
     let path = match find_output(controller) {
         Ok(path) => path,
         Err(reason) => {
             debug_write("AW_HDA_FAIL reason=");
             debug_write(reason);
             debug_write("\n");
-            return;
+            return None;
         }
     };
     debug_write("AW_HDA_OUTPUT dac=");
@@ -674,7 +871,7 @@ fn prove_playback(controller: &mut Controller) {
         debug_write("AW_HDA_FAIL reason=");
         debug_write(reason);
         debug_write("\n");
-        return;
+        return None;
     }
 
     fill_tone();
@@ -697,7 +894,7 @@ fn prove_playback(controller: &mut Controller) {
 
     if moved == 0 {
         debug_write("AW_HDA_FAIL reason=no_dma_progress\n");
-        return;
+        return None;
     }
     debug_write("AW_HDA_DMA_ADVANCED position=");
     debug_write_u64(u64::from(moved));
@@ -709,6 +906,7 @@ fn prove_playback(controller: &mut Controller) {
         mmio_write8(stream, SD_CTL, mmio_read8(stream, SD_CTL) & !SDCTL_RUN);
     }
     debug_write("AW_HDA_PLAYBACK_PROOF_OK\n");
+    Some(path)
 }
 
 /// Prove the HDA audio path: find the controller, bring it out of reset, stand up
@@ -742,6 +940,10 @@ pub fn prove() {
 
     debug_write("AW_HDA_PROOF_OK\n");
 
-    // With the command path proved, play a tone and prove the audio DMA runs.
-    prove_playback(&mut controller);
+    // With the command path proved, play a tone and prove the audio DMA runs,
+    // then reuse the same output path to set the codec up for spoken output so the
+    // accessible menu has a voice.
+    if let Some(path) = prove_playback(&mut controller) {
+        configure_speech(&mut controller, &path);
+    }
 }

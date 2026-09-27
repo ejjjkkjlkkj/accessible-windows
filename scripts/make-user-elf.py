@@ -52,6 +52,176 @@ def spinner_code(base):
     )
 
 
+# ---- IPC proof programs ------------------------------------------------------
+# Must match ipc.rs: syscall numbers, error codes and the work-page layout the
+# kernel fills with the initial handles before the programs start.
+SYS_CHANNEL_SEND = 16
+SYS_CHANNEL_RECV = 17
+SYS_HANDLE_CLOSE = 18
+IPC_MESSAGES = 32          # messages A sends; B must receive all, in order
+IPC_MAGIC = 0xA11CE        # second qword of every message
+W_PROGRESS = 0x00          # incremented by each program's idle loop
+W_HANDLE = 0x08            # A: send end / B: receive end (written by the kernel)
+W_FOREIGN = 0x10           # A: a handle value that is only valid in B's table
+W_FORGED = 0x18            # A: its own handle with a wrong generation
+W_TEMP = 0x20              # A: a spare handle it closes, then reuses
+W_RESULTS = 0x40           # A: five negative-test return codes
+W_COUNT = 0x80             # A: messages sent / B: messages received
+W_SUM = 0x90               # B: sum of received sequence numbers
+W_BAD_ORDER = 0x98         # B: messages received out of order or damaged
+W_BUF = 0x100              # A: outgoing message / B: receive buffer
+KERNEL_ADDR = 0xFFFF_8000_0000_1000  # never a user address: must fault (E_FAULT)
+
+RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI = range(8)
+
+
+class Asm:
+    """Just enough x86-64 for the IPC programs; rbx always holds the work page."""
+
+    def __init__(self):
+        self.code = bytearray()
+        self.labels = {}
+        self.fixups = []
+
+    def mov_imm(self, reg, value):          # mov r64, imm64
+        self.code += bytes([0x48, 0xB8 + reg]) + struct.pack("<Q", value & (2**64 - 1))
+
+    def load(self, reg, disp):              # mov r64, [rbx+disp32]
+        self.code += bytes([0x48, 0x8B, 0x80 | (reg << 3) | RBX]) + struct.pack("<i", disp)
+
+    def store(self, disp, reg):             # mov [rbx+disp32], r64
+        self.code += bytes([0x48, 0x89, 0x80 | (reg << 3) | RBX]) + struct.pack("<i", disp)
+
+    def store_imm(self, disp, value):       # mov qword [rbx+disp32], imm32
+        self.code += bytes([0x48, 0xC7, 0x80 | RBX]) + struct.pack("<ii", disp, value)
+
+    def inc(self, disp):                    # inc qword [rbx+disp32]
+        self.code += bytes([0x48, 0xFF, 0x80 | RBX]) + struct.pack("<i", disp)
+
+    def add_mem(self, disp, reg):           # add [rbx+disp32], r64
+        self.code += bytes([0x48, 0x01, 0x80 | (reg << 3) | RBX]) + struct.pack("<i", disp)
+
+    def lea(self, reg, disp):               # lea r64, [rbx+disp32]
+        self.code += bytes([0x48, 0x8D, 0x80 | (reg << 3) | RBX]) + struct.pack("<i", disp)
+
+    def cmp_imm(self, value):               # cmp rax, imm32
+        self.code += bytes([0x48, 0x3D]) + struct.pack("<i", value)
+
+    def cmp_reg(self, a, b):                # cmp a, b
+        self.code += bytes([0x48, 0x39, 0xC0 | (b << 3) | a])
+
+    def inc_reg(self, reg):                 # inc r64
+        self.code += bytes([0x48, 0xFF, 0xC0 | reg])
+
+    def syscall(self):
+        self.code += b"\x0F\x05"
+
+    def label(self, name):
+        self.labels[name] = len(self.code)
+
+    def _jump(self, opcode, name):
+        self.code += opcode
+        self.fixups.append((len(self.code), name))
+        self.code += b"\0\0\0\0"
+
+    def jmp(self, name):
+        self._jump(b"\xE9", name)
+
+    def je(self, name):
+        self._jump(b"\x0F\x84", name)
+
+    def jne(self, name):
+        self._jump(b"\x0F\x85", name)
+
+    def jae(self, name):                    # unsigned >=: error codes are huge
+        self._jump(b"\x0F\x83", name)
+
+    def assemble(self):
+        for at, name in self.fixups:
+            struct.pack_into("<i", self.code, at, self.labels[name] - (at + 4))
+        return bytes(self.code)
+
+
+def sys3(a, number, arg0_reg_disp=None, arg0=None, arg1=None, arg2=None):
+    """rax=number; rdi=arg0 (from the work page or an immediate); rsi/rdx immediates or regs."""
+    a.mov_imm(RAX, number)
+    if arg0_reg_disp is not None:
+        a.load(RDI, arg0_reg_disp)
+    elif arg0 is not None:
+        a.mov_imm(RDI, arg0)
+    if arg1 is not None:
+        a.mov_imm(RSI, arg1)
+    if arg2 is not None:
+        a.mov_imm(RDX, arg2)
+    a.syscall()
+
+
+def ipc_sender_code(base):
+    work = base + WORK_OFFSET
+    a = Asm()
+    a.mov_imm(RBX, work)
+    buf = work + W_BUF
+    # Negative tests first; each return code is recorded for the kernel to check.
+    sys3(a, SYS_CHANNEL_SEND, arg0_reg_disp=W_FOREIGN, arg1=buf, arg2=16)      # foreign handle
+    a.store(W_RESULTS + 0, RAX)
+    sys3(a, SYS_CHANNEL_SEND, arg0_reg_disp=W_FORGED, arg1=buf, arg2=16)       # forged generation
+    a.store(W_RESULTS + 8, RAX)
+    sys3(a, SYS_CHANNEL_RECV, arg0_reg_disp=W_HANDLE, arg1=buf, arg2=64)       # send end lacks RECV
+    a.store(W_RESULTS + 16, RAX)
+    sys3(a, SYS_CHANNEL_SEND, arg0_reg_disp=W_HANDLE, arg1=KERNEL_ADDR, arg2=16)  # kernel pointer
+    a.store(W_RESULTS + 24, RAX)
+    sys3(a, SYS_HANDLE_CLOSE, arg0_reg_disp=W_TEMP)
+    sys3(a, SYS_CHANNEL_SEND, arg0_reg_disp=W_TEMP, arg1=buf, arg2=16)         # use after close
+    a.store(W_RESULTS + 32, RAX)
+    # Send IPC_MESSAGES messages [seq, IPC_MAGIC], retrying while the queue is full.
+    a.store_imm(W_BUF + 8, IPC_MAGIC)
+    a.label("next")
+    a.load(RAX, W_COUNT)
+    a.cmp_imm(IPC_MESSAGES)
+    a.je("idle")
+    a.inc_reg(RAX)
+    a.store(W_BUF, RAX)
+    a.label("retry")
+    sys3(a, SYS_CHANNEL_SEND, arg0_reg_disp=W_HANDLE, arg1=buf, arg2=16)
+    a.cmp_imm(16)
+    a.jne("retry")                           # E_FULL: the receiver has not drained yet
+    a.inc(W_COUNT)
+    a.jmp("next")
+    a.label("idle")
+    a.inc(W_PROGRESS)
+    a.jmp("idle")
+    return a.assemble()
+
+
+def ipc_receiver_code(base):
+    work = base + WORK_OFFSET
+    a = Asm()
+    a.mov_imm(RBX, work)
+    a.label("loop")
+    a.inc(W_PROGRESS)
+    sys3(a, SYS_CHANNEL_RECV, arg0_reg_disp=W_HANDLE, arg1=work + W_BUF, arg2=64)
+    a.cmp_imm(16)
+    a.jne("loop")                            # E_EMPTY (or anything else): try again
+    # Check order and payload: seq must be count+1 and the magic intact.
+    a.load(RAX, W_COUNT)
+    a.inc_reg(RAX)
+    a.load(RDX, W_BUF)
+    a.cmp_reg(RAX, RDX)
+    a.jne("bad")
+    a.load(RCX, W_BUF + 8)
+    a.mov_imm(RSI, IPC_MAGIC)
+    a.cmp_reg(RCX, RSI)
+    a.jne("bad")
+    a.label("good")
+    a.store(W_COUNT, RAX)
+    a.add_mem(W_SUM, RDX)
+    a.jmp("loop")
+    a.label("bad")
+    a.inc(W_BAD_ORDER)
+    a.jmp("loop")
+    return a.assemble()
+
+
 def main():
     out = sys.argv[1]
     args = sys.argv[2:]
@@ -60,7 +230,12 @@ def main():
     if "--base" in args:
         base = int(args[args.index("--base") + 1], 0)
 
-    code = spinner_code(base) if spinner else report_code()
+    if "--ipc-sender" in args:
+        code = ipc_sender_code(base)
+    elif "--ipc-receiver" in args:
+        code = ipc_receiver_code(base)
+    else:
+        code = spinner_code(base) if spinner else report_code()
     total = CODE_OFFSET + len(code)
     entry = base + CODE_OFFSET
 
@@ -79,7 +254,8 @@ def main():
     assert len(image) == total, (len(image), total)
     with open(out, "wb") as handle:
         handle.write(image)
-    kind = "spinner" if spinner else "report"
+    kind = ("ipc-sender" if "--ipc-sender" in args else "ipc-receiver" if "--ipc-receiver" in args
+            else "spinner" if spinner else "report")
     print(f"wrote {out}: {total} bytes ({kind}, base={base:#x}, entry={entry:#x})")
 
 

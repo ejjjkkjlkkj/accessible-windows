@@ -64,9 +64,9 @@
       APIC ID it read from its own local APIC and tables distinct from all
       others'
 - [ ] SMP validation on both AMD and Intel test profiles
-- [ ] Scheduler
-- [ ] User/kernel privilege separation
-- [ ] IPC and handle/object model
+- [x] Scheduler: cooperative and timer-preemptive, kernel and CPL3 threads (`AW_PREEMPT_PROOF_OK`, `AW_RING3_PREEMPT_PROOF_OK`)
+- [x] User/kernel privilege separation: CPL3, versioned `syscall`/`sysret` ABI, SMAP-checked copies, scratch registers cleared on return
+- [x] IPC and handle/object model: reference-counted channels reached only through per-process, generation-checked, rights-carrying handles (`AW_IPC_PROOF_OK`, `AW_HANDLE_SECURITY_PROOF_OK`)
 
 ## Phase 3 - Generic physical PC minimum
 
@@ -74,7 +74,7 @@
 - [ ] MADT/APIC topology parsing
 - [ ] PCI bridge-aware enumeration
 - [x] NVMe controller initialization and identify
-- [ ] NVMe read/write
+- [x] NVMe read/write: I/O queue pair, READ of a known sector, WRITE + read-back on a scratch disk
 - [ ] AHCI controller initialization
 - [ ] AHCI/SATA read/write
 - [ ] GPT parser/writer with safety checks
@@ -82,8 +82,8 @@
 - [ ] USB hub enumeration
 - [ ] USB HID keyboard
 - [ ] USB HID pointer baseline
-- [ ] Basic framebuffer console
-- [ ] ACPI power off/reboot
+- [x] Basic framebuffer console
+- [x] ACPI power off/reboot: FADT + `\_S5`, S5 soft-off and FADT reset register, each proved by the VM's own behaviour
 - [ ] Physical boot validation on at least one AMD x64 PC
 - [ ] Physical boot validation on at least one Intel x64 PC
 

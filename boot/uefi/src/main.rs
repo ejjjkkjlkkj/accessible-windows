@@ -7,7 +7,7 @@ use alloc::vec;
 use aw_acpi::{McfgError, RsdpError, RsdpInfo, SdtError};
 use aw_kernel_core::{
     AwknImageHeader, FramebufferHandoff, HandoffPixelFormat, KernelHandoff, KernelImageHandoff,
-    MemoryDescriptorHandoff, MemoryMapHandoff, PciEcamHandoff, MAX_PCIE_ECAM_REGIONS,
+    MAX_PCIE_ECAM_REGIONS, MemoryDescriptorHandoff, MemoryMapHandoff, PciEcamHandoff,
 };
 use uefi::boot::{self, AllocateType};
 use uefi::mem::memory_map::{MemoryMap, MemoryType};
@@ -16,13 +16,34 @@ use uefi::proto::console::gop::{GraphicsOutput, PixelFormat as UefiPixelFormat};
 use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::cfg::ConfigTableEntry;
-use uefi::{cstr16, system, Status};
+use uefi::{Status, cstr16, system};
 
+mod ac97;
+mod audio;
 mod hda;
+mod hii_ifr;
 mod screen_reader;
+mod serial;
 mod setup;
-mod setup_speech;
 mod sound;
+mod synth;
+mod usb;
+mod usb_audio;
+mod virtio_snd;
+mod word_bank;
+
+/// Emit an accessibility marker to both the 0xE9 debug console (via the `uefi`
+/// logger, which the QEMU proof suite asserts on) and the real COM1 line (which
+/// VMware and physical hardware capture instead). One call site, two channels, so
+/// the firmware-stage screen reader leaves the same machine-checkable trace on a
+/// machine with no 0xE9 port as it does under QEMU.
+macro_rules! aw_mark {
+    ($($arg:tt)*) => {{
+        log::info!($($arg)*);
+        $crate::serial::mirror(format_args!($($arg)*));
+    }};
+}
+pub(crate) use aw_mark;
 
 const UEFI_PAGE_SIZE: usize = 4096;
 const MAX_ACPI_SDT_LEN: usize = 1024 * 1024;
@@ -88,17 +109,15 @@ fn borrow_valid_sdt(address: u64) -> Result<&'static [u8], SdtError> {
     let header = unsafe {
         core::slice::from_raw_parts(address as usize as *const u8, aw_acpi::SDT_HEADER_LEN)
     };
-    let declared_length =
-        u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+    let declared_length = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
     if !(aw_acpi::SDT_HEADER_LEN..=MAX_ACPI_SDT_LEN).contains(&declared_length) {
         return Err(SdtError::InvalidLength);
     }
 
     // SAFETY: `declared_length` is bounded above. The pointer came from ACPI
     // firmware data reachable through a validated root table.
-    let full = unsafe {
-        core::slice::from_raw_parts(address as usize as *const u8, declared_length)
-    };
+    let full =
+        unsafe { core::slice::from_raw_parts(address as usize as *const u8, declared_length) };
     aw_acpi::validate_sdt(full)?;
     Ok(full)
 }
@@ -116,7 +135,10 @@ fn discover_pcie_ecam(rsdp: &RsdpInfo) -> EcamDiscovery {
     let root = match borrow_valid_sdt(root_address) {
         Ok(root) => root,
         Err(error) => {
-            log::warn!("AW_PCIE_ECAM_UNAVAILABLE reason=root_invalid error={:?}", error);
+            log::warn!(
+                "AW_PCIE_ECAM_UNAVAILABLE reason=root_invalid error={:?}",
+                error
+            );
             return EcamDiscovery::NONE;
         }
     };
@@ -178,10 +200,9 @@ fn discover_pcie_ecam(rsdp: &RsdpInfo) -> EcamDiscovery {
             Ok(mcfg) => mcfg,
             Err(error) => {
                 match error {
-                    McfgError::InvalidSdt(inner) => log::warn!(
-                        "AW_PCIE_ECAM_UNAVAILABLE reason=mcfg_sdt error={:?}",
-                        inner
-                    ),
+                    McfgError::InvalidSdt(inner) => {
+                        log::warn!("AW_PCIE_ECAM_UNAVAILABLE reason=mcfg_sdt error={:?}", inner)
+                    }
                     other => log::warn!(
                         "AW_PCIE_ECAM_UNAVAILABLE reason=mcfg_invalid error={:?}",
                         other
@@ -247,10 +268,7 @@ fn load_native_kernel() -> Result<LoadedKernel, Status> {
             file_system
         }
         Err(error) => {
-            log::warn!(
-                "AW_KERNEL_FS_FALLBACK image_status={:?}",
-                error.status()
-            );
+            log::warn!("AW_KERNEL_FS_FALLBACK image_status={:?}", error.status());
             let handle = boot::get_handle_for_protocol::<SimpleFileSystem>()
                 .map_err(|error| error.status())?;
             let file_system = boot::open_protocol_exclusive::<SimpleFileSystem>(handle)
@@ -283,17 +301,24 @@ fn load_native_kernel() -> Result<LoadedKernel, Status> {
 
     root.reset_entry_readout().map_err(|error| error.status())?;
     let kernel_handle = root
-        .open(cstr16!("KERNEL.BIN"), FileMode::Read, FileAttribute::empty())
+        .open(
+            cstr16!("KERNEL.BIN"),
+            FileMode::Read,
+            FileAttribute::empty(),
+        )
         .map_err(|error| {
             log::error!("AW_KERNEL_OPEN_FAIL status={:?}", error.status());
             error.status()
         })?;
-    let mut kernel_file = kernel_handle.into_regular_file().ok_or(Status::LOAD_ERROR)?;
+    let mut kernel_file = kernel_handle
+        .into_regular_file()
+        .ok_or(Status::LOAD_ERROR)?;
     let kernel_info = kernel_file.get_boxed_info::<FileInfo>().map_err(|error| {
         log::error!("AW_KERNEL_INFO_FAIL status={:?}", error.status());
         error.status()
     })?;
-    let kernel_size = usize::try_from(kernel_info.file_size()).map_err(|_| Status::BAD_BUFFER_SIZE)?;
+    let kernel_size =
+        usize::try_from(kernel_info.file_size()).map_err(|_| Status::BAD_BUFFER_SIZE)?;
     drop(kernel_info);
 
     if kernel_size == 0 {
@@ -303,10 +328,12 @@ fn load_native_kernel() -> Result<LoadedKernel, Status> {
     let mut kernel_image = vec![0_u8; kernel_size];
     let mut offset = 0_usize;
     while offset < kernel_image.len() {
-        let read = kernel_file.read(&mut kernel_image[offset..]).map_err(|error| {
-            log::error!("AW_KERNEL_READ_FAIL status={:?}", error.status());
-            error.status()
-        })?;
+        let read = kernel_file
+            .read(&mut kernel_image[offset..])
+            .map_err(|error| {
+                log::error!("AW_KERNEL_READ_FAIL status={:?}", error.status());
+                error.status()
+            })?;
         if read == 0 {
             break;
         }
@@ -556,12 +583,7 @@ fn main() -> Status {
     // lets the user review it and continue by keyboard, while boot services (and
     // so the console and its keyboard) are still available. Unattended, it reads
     // the screen and continues on its own.
-    let speaker = screen_reader::run(width, height);
-
-    // Accessible hierarchical firmware Setup. It reuses the already initialized
-    // HDA speaker, so speech remains continuous from first boot announcement
-    // through every menu and submenu without resetting the codec.
-    setup::run(width, height, speaker);
+    screen_reader::run(width, height);
 
     let normalized_memory_map_buffer = match boot::allocate_pages(
         AllocateType::AnyPages,
@@ -570,10 +592,7 @@ fn main() -> Status {
     ) {
         Ok(buffer) => buffer,
         Err(error) => {
-            log::error!(
-                "AW_MEMORY_MAP_BUFFER_FAIL status={:?}",
-                error.status()
-            );
+            log::error!("AW_MEMORY_MAP_BUFFER_FAIL status={:?}", error.status());
             return error.status();
         }
     };

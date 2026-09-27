@@ -564,9 +564,253 @@ pub fn validate_madt(bytes: &[u8]) -> Result<Madt<'_>, MadtError> {
     Ok(Madt { table })
 }
 
+// ---- FADT and the \_S5 sleep package (power off / reset) -------------------
+
+const FADT_SIGNATURE: [u8; 4] = *b"FACP";
+/// FADT flag: the RESET_REG / RESET_VALUE pair is supported.
+const FADT_RESET_REG_SUP: u32 = 1 << 10;
+
+/// ACPI Generic Address Structure: where a register lives.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GenericAddress {
+    /// 0 = system memory, 1 = system I/O, 2 = PCI configuration space.
+    pub space: u8,
+    pub bit_width: u8,
+    pub address: u64,
+}
+
+impl GenericAddress {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        let raw = bytes.get(..12)?;
+        let address = u64::from_le_bytes(raw[4..12].try_into().ok()?);
+        (address != 0).then_some(Self {
+            space: raw[0],
+            bit_width: raw[1],
+            address,
+        })
+    }
+}
+
+/// The parts of the FADT a kernel needs to power off and reset the machine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Fadt {
+    pub dsdt: u64,
+    pub smi_cmd: u32,
+    pub acpi_enable: u8,
+    /// PM1a control block I/O port (from X_PM1a_CNT_BLK when present).
+    pub pm1a_cnt: u32,
+    pub pm1b_cnt: u32,
+    /// The reset register and value, only when the FADT says they are supported.
+    pub reset: Option<(GenericAddress, u8)>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FadtError {
+    InvalidSdt(SdtError),
+    InvalidSignature,
+    TooShort,
+    NoPm1aControl,
+}
+
+fn le_u32(bytes: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
+}
+fn le_u64(bytes: &[u8], at: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(bytes.get(at..at + 8)?.try_into().ok()?))
+}
+
+/// Validate and decode a FADT. The 64-bit `X_` fields win over the legacy 32-bit
+/// ones whenever the table is long enough to carry them and they are non-zero.
+pub fn validate_fadt(bytes: &[u8]) -> Result<Fadt, FadtError> {
+    let header = validate_sdt(bytes).map_err(FadtError::InvalidSdt)?;
+    let table = &bytes[..header.length];
+    if header.signature != FADT_SIGNATURE {
+        return Err(FadtError::InvalidSignature);
+    }
+    if table.len() < 116 {
+        return Err(FadtError::TooShort);
+    }
+    let dsdt32 = u64::from(le_u32(table, 40).ok_or(FadtError::TooShort)?);
+    let dsdt = le_u64(table, 140).filter(|&x| x != 0).unwrap_or(dsdt32);
+    let smi_cmd = le_u32(table, 48).ok_or(FadtError::TooShort)?;
+    let acpi_enable = table[52];
+    let io_port = |legacy_at: usize, extended_at: usize| -> u32 {
+        table
+            .get(extended_at..)
+            .and_then(GenericAddress::parse)
+            .filter(|gas| gas.space == 1 && gas.address <= u64::from(u16::MAX))
+            .map_or_else(
+                || le_u32(table, legacy_at).unwrap_or(0),
+                |gas| gas.address as u32,
+            )
+    };
+    let pm1a_cnt = io_port(64, 172);
+    let pm1b_cnt = io_port(68, 184);
+    if pm1a_cnt == 0 {
+        return Err(FadtError::NoPm1aControl);
+    }
+    let flags = le_u32(table, 112).ok_or(FadtError::TooShort)?;
+    let reset = if flags & FADT_RESET_REG_SUP != 0 && table.len() >= 129 {
+        GenericAddress::parse(&table[116..128]).map(|gas| (gas, table[128]))
+    } else {
+        None
+    };
+    Ok(Fadt {
+        dsdt,
+        smi_cmd,
+        acpi_enable,
+        pm1a_cnt,
+        pm1b_cnt,
+        reset,
+    })
+}
+
+/// Decode an AML PkgLength; returns (length, bytes used).
+fn aml_pkg_length(bytes: &[u8]) -> Option<(usize, usize)> {
+    let lead = *bytes.first()?;
+    let follow = usize::from(lead >> 6);
+    if follow == 0 {
+        return Some((usize::from(lead & 0x3f), 1));
+    }
+    let mut length = usize::from(lead & 0x0f);
+    for i in 0..follow {
+        length |= usize::from(*bytes.get(1 + i)?) << (4 + 8 * i);
+    }
+    Some((length, 1 + follow))
+}
+
+/// One AML integer constant: ZeroOp, OneOp, BytePrefix, WordPrefix.
+fn aml_small_integer(bytes: &[u8]) -> Option<(u8, usize)> {
+    match *bytes.first()? {
+        0x00 => Some((0, 1)),
+        0x01 => Some((1, 1)),
+        0x0a => Some((*bytes.get(1)?, 2)),
+        0x0b => Some((*bytes.get(1)?, 3)), // SLP_TYP is 3 bits: low byte suffices
+        _ => None,
+    }
+}
+
+/// Find `Name(\_S5_, Package(){ SLP_TYPa, SLP_TYPb, ... })` in an AML table
+/// (DSDT or SSDT) and return (SLP_TYPa, SLP_TYPb). The object is looked up
+/// byte-wise, the usual approach before a full AML interpreter exists.
+pub fn find_s5(aml: &[u8]) -> Option<(u8, u8)> {
+    let mut at = 0;
+    while let Some(found) = aml.get(at..)?.windows(4).position(|w| w == b"_S5_") {
+        let name = at + found;
+        at = name + 4;
+        // NameOp directly before, or NameOp then a root prefix '\'.
+        let named = (name >= 1 && aml[name - 1] == 0x08)
+            || (name >= 2 && aml[name - 2] == 0x08 && aml[name - 1] == b'\\');
+        if !named || aml.get(name + 4) != Some(&0x12) {
+            continue;
+        }
+        let Some((_, used)) = aml_pkg_length(&aml[name + 5..]) else {
+            continue;
+        };
+        let mut p = name + 5 + used + 1; // skip NumElements
+        let Some((typa, n)) = aml.get(p..).and_then(aml_small_integer) else {
+            continue;
+        };
+        p += n;
+        let typb = aml
+            .get(p..)
+            .and_then(aml_small_integer)
+            .map_or(0, |(v, _)| v);
+        return Some((typa & 7, typb & 7));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fadt_bytes(length: usize, flags: u32) -> [u8; 276] {
+        let mut t = [0u8; 276];
+        t[0..4].copy_from_slice(b"FACP");
+        t[4..8].copy_from_slice(&(length as u32).to_le_bytes());
+        t[8] = 6;
+        t[40..44].copy_from_slice(&0x1111_0000u32.to_le_bytes()); // DSDT
+        t[48..52].copy_from_slice(&0xb2u32.to_le_bytes()); // SMI_CMD
+        t[52] = 0xf1; // ACPI_ENABLE
+        t[64..68].copy_from_slice(&0x604u32.to_le_bytes()); // PM1a_CNT_BLK
+        t[112..116].copy_from_slice(&flags.to_le_bytes());
+        t[116] = 1; // reset reg: system I/O
+        t[117] = 8;
+        t[120..128].copy_from_slice(&0xcf9u64.to_le_bytes());
+        t[128] = 0x06; // RESET_VALUE
+        t[9] = 0;
+        let sum = checksum(&t[..length]);
+        t[9] = 0u8.wrapping_sub(sum);
+        t
+    }
+
+    #[test]
+    fn fadt_legacy_and_reset() {
+        let t = fadt_bytes(244, 1 << 10);
+        let f = validate_fadt(&t[..244]).unwrap();
+        assert_eq!(f.dsdt, 0x1111_0000);
+        assert_eq!(f.pm1a_cnt, 0x604);
+        assert_eq!(f.smi_cmd, 0xb2);
+        assert_eq!(f.acpi_enable, 0xf1);
+        let (gas, value) = f.reset.unwrap();
+        assert_eq!((gas.space, gas.address, value), (1, 0xcf9, 6));
+    }
+
+    #[test]
+    fn fadt_reset_only_when_flagged_and_x_fields_win() {
+        let mut t = fadt_bytes(244, 0);
+        t[140..148].copy_from_slice(&0x2222_0000u64.to_le_bytes()); // X_DSDT
+        t[172] = 1; // X_PM1a_CNT_BLK: system I/O
+        t[176..184].copy_from_slice(&0x4004u64.to_le_bytes());
+        t[9] = 0;
+        let sum = checksum(&t[..244]);
+        t[9] = 0u8.wrapping_sub(sum);
+        let f = validate_fadt(&t[..244]).unwrap();
+        assert_eq!(f.reset, None);
+        assert_eq!(f.dsdt, 0x2222_0000);
+        assert_eq!(f.pm1a_cnt, 0x4004);
+    }
+
+    #[test]
+    fn fadt_rejects_bad_input() {
+        let mut t = fadt_bytes(244, 0);
+        t[0] = b'X';
+        t[9] = 0;
+        let sum = checksum(&t[..244]);
+        t[9] = 0u8.wrapping_sub(sum);
+        assert_eq!(validate_fadt(&t[..244]), Err(FadtError::InvalidSignature));
+        let t = fadt_bytes(100, 0);
+        assert_eq!(validate_fadt(&t[..100]), Err(FadtError::TooShort));
+    }
+
+    #[test]
+    fn s5_byte_prefix_package() {
+        // Name(_S5, Package(0x04){ 0x05, 0x05, Zero, Zero })  (QEMU q35 shape)
+        let aml = [
+            0x10, 0x08, b'_', b'S', b'5', b'_', 0x12, 0x0a, 0x04, 0x0a, 0x05, 0x0a, 0x05, 0x00,
+            0x00,
+        ];
+        assert_eq!(find_s5(&aml), Some((5, 5)));
+    }
+
+    #[test]
+    fn s5_root_prefix_zero_one_and_long_pkglength() {
+        let aml = [
+            0x08, b'\\', b'_', b'S', b'5', b'_', 0x12, 0x40, 0x01, 0x02, 0x00, 0x01,
+        ];
+        assert_eq!(find_s5(&aml), Some((0, 1)));
+    }
+
+    #[test]
+    fn s5_ignores_non_name_occurrences() {
+        let aml = [
+            b'_', b'S', b'5', b'_', 0x12, 0x06, 0x02, 0x0a, 0x07, 0x0a, 0x07,
+        ];
+        assert_eq!(find_s5(&aml), None);
+        assert_eq!(find_s5(&[]), None);
+        assert_eq!(find_s5(&[0x08, b'_', b'S', b'5', b'_', 0x12]), None);
+    }
 
     fn set_checksum(bytes: &mut [u8], checksum_offset: usize, length: usize) {
         bytes[checksum_offset] = 0;

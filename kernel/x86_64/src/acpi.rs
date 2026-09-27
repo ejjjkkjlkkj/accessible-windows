@@ -129,6 +129,56 @@ unsafe fn root_table(rsdp_address: u64) -> Result<RootTable, AcpiError> {
     })
 }
 
+/// What the kernel needs to power the machine off or reset it: the decoded
+/// FADT, and SLP_TYPa/SLP_TYPb of the `\_S5` sleep state if the firmware's AML
+/// declares it.
+#[derive(Clone, Copy, Debug)]
+pub struct PowerControl {
+    pub fadt: aw_acpi::Fadt,
+    pub s5: Option<(u8, u8)>,
+}
+
+/// Find the FADT, then `\_S5` in the DSDT (or, failing that, an SSDT).
+///
+/// # Safety
+///
+/// Same contract as [`find_madt`].
+pub unsafe fn find_power_control(rsdp_address: u64) -> Result<PowerControl, AcpiError> {
+    // SAFETY: delegated; the caller guarantees a firmware-provided RSDP.
+    let root = unsafe { root_table(rsdp_address) }?;
+    let mut fadt = None;
+    for address in root.pointers() {
+        // SAFETY: bounded read of firmware data; unreadable entries are skipped.
+        let Some(table) = (unsafe { read_table(address) }) else {
+            continue;
+        };
+        if table[..4] == *b"FACP" {
+            fadt = aw_acpi::validate_fadt(table).ok();
+            break;
+        }
+    }
+    let fadt = fadt.ok_or(AcpiError::NotFound)?;
+    // SAFETY: bounded read of the DSDT the FADT points at.
+    let mut s5 = unsafe { read_table(fadt.dsdt) }
+        .filter(|dsdt| aw_acpi::validate_sdt(dsdt).is_ok())
+        .and_then(|dsdt| aw_acpi::find_s5(&dsdt[SDT_HEADER_LEN..]));
+    if s5.is_none() {
+        for address in root.pointers() {
+            // SAFETY: as above.
+            let Some(table) = (unsafe { read_table(address) }) else {
+                continue;
+            };
+            if table[..4] == *b"SSDT" && aw_acpi::validate_sdt(table).is_ok() {
+                s5 = aw_acpi::find_s5(&table[SDT_HEADER_LEN..]);
+                if s5.is_some() {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(PowerControl { fadt, s5 })
+}
+
 /// Find and validate the MADT (`APIC`) table.
 ///
 /// # Safety

@@ -55,7 +55,10 @@ fn pci_address(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
 unsafe fn pci_read32(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
     // SAFETY: CF8/CFC are the architected PCI configuration ports.
     unsafe {
-        outl(PCI_CONFIG_ADDRESS, pci_address(bus, device, function, offset));
+        outl(
+            PCI_CONFIG_ADDRESS,
+            pci_address(bus, device, function, offset),
+        );
         inl(PCI_CONFIG_DATA)
     }
 }
@@ -63,7 +66,10 @@ unsafe fn pci_read32(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
 unsafe fn pci_write32(bus: u8, device: u8, function: u8, offset: u8, value: u32) {
     // SAFETY: CF8/CFC are the architected PCI configuration ports.
     unsafe {
-        outl(PCI_CONFIG_ADDRESS, pci_address(bus, device, function, offset));
+        outl(
+            PCI_CONFIG_ADDRESS,
+            pci_address(bus, device, function, offset),
+        );
         outl(PCI_CONFIG_DATA, value);
     }
 }
@@ -100,8 +106,6 @@ const CC_ENABLE: u32 = (4 << 20) | (6 << 16) | CC_EN;
 
 const OPCODE_IDENTIFY: u8 = 0x06;
 const IDENTIFY_CNS_CONTROLLER: u32 = 1;
-/// Command identifier for our one admin command; echoed in the completion.
-const IDENTIFY_CID: u16 = 1;
 
 /// Admin queue depth (entries). Small: the proof issues one command.
 const QUEUE_DEPTH: u32 = 64;
@@ -190,12 +194,8 @@ fn map_bar0(location: PciLocation) -> Option<u64> {
 /// Reset, configure the admin queue pair, and enable the controller.
 fn bring_up(base: u64) -> Option<Controller> {
     // SAFETY: BAR0 is the controller's identity-mapped MMIO window.
-    let (cap_low, cap_high) = unsafe {
-        (
-            mmio_read32(base, REG_CAP),
-            mmio_read32(base, REG_CAP + 4),
-        )
-    };
+    let (cap_low, cap_high) =
+        unsafe { (mmio_read32(base, REG_CAP), mmio_read32(base, REG_CAP + 4)) };
     let mqes = cap_low & 0xffff; // maximum queue entries, zero-based
     let doorbell_stride = 4u64 << (cap_high & 0xf); // CAP.DSTRD
     let depth = if mqes + 1 < QUEUE_DEPTH {
@@ -257,44 +257,72 @@ fn bring_up(base: u64) -> Option<Controller> {
     })
 }
 
-impl Controller {
-    /// Issue IDENTIFY CONTROLLER into the `IDENTIFY` page and await its
-    /// completion, returning the 15-bit status field (0 on success).
+/// One submission/completion queue pair and where the driver is in it. The
+/// completion queue starts zeroed, so the first pass through it expects phase 1;
+/// every wrap flips the expected phase.
+struct Queue {
+    sq: *mut u32,
+    cq: *const u32,
+    id: u64,
+    depth: u32,
+    tail: u32,
+    head: u32,
+    phase: u32,
+    next_cid: u16,
+}
+
+impl Queue {
+    const fn new(sq: *mut u32, cq: *const u32, id: u64, depth: u32) -> Self {
+        Self {
+            sq,
+            cq,
+            id,
+            depth,
+            tail: 0,
+            head: 0,
+            phase: 1,
+            next_cid: 1,
+        }
+    }
+
+    /// Submit one command (CDW0's opcode byte plus dwords 1..16) and wait for
+    /// its completion; returns the 15-bit status (0 = success).
     ///
     /// # Safety
-    /// CPL0; the controller is enabled and the DMA statics are identity-mapped.
-    unsafe fn identify_controller(&self) -> Result<u16, &'static str> {
-        let sq = core::ptr::addr_of_mut!(ADMIN_SQ) as *mut u32;
-        let cq = core::ptr::addr_of!(ADMIN_CQ) as *const u32;
-        let prp1 = core::ptr::addr_of!(IDENTIFY) as u64;
-
-        // SAFETY: build the 64-byte submission entry at slot 0.
+    /// CPL0; the controller is enabled and both queue rings plus every buffer the
+    /// command points at are identity-mapped and live for the whole call.
+    unsafe fn submit(
+        &mut self,
+        controller: &Controller,
+        opcode: u8,
+        dwords: [u32; 16],
+    ) -> Result<u16, &'static str> {
+        let cid = self.next_cid;
+        self.next_cid = self.next_cid.wrapping_add(1).max(1);
+        let entry = unsafe { self.sq.add(self.tail as usize * 16) };
+        // SAFETY: slot `tail` of the identity-mapped submission ring.
         unsafe {
-            for dword in 0..16 {
-                sq.add(dword).write_volatile(0);
+            for (index, value) in dwords.iter().enumerate() {
+                entry.add(index).write_volatile(*value);
             }
-            sq.add(0)
-                .write_volatile(u32::from(OPCODE_IDENTIFY) | (u32::from(IDENTIFY_CID) << 16)); // CDW0
-            sq.add(1).write_volatile(0); // NSID: none for identify controller
-            sq.add(6).write_volatile(prp1 as u32); // PRP1 low
-            sq.add(7).write_volatile((prp1 >> 32) as u32); // PRP1 high
-            sq.add(10).write_volatile(IDENTIFY_CNS_CONTROLLER); // CDW10: CNS
+            entry.write_volatile(u32::from(opcode) | (u32::from(cid) << 16));
         }
-
-        // SAFETY: publish tail=1 to the admin submission queue doorbell.
+        self.tail = (self.tail + 1) % self.depth;
+        // SAFETY: SQ tail doorbell of this queue.
         unsafe {
             core::arch::asm!("mfence", options(nostack, preserves_flags));
-            mmio_write32(self.base, DOORBELL_BASE, 1);
+            mmio_write32(
+                controller.base,
+                DOORBELL_BASE + 2 * self.id * controller.doorbell_stride,
+                self.tail,
+            );
         }
-
-        // Poll completion-queue entry 0 for the phase tag (the CQ was zeroed, so a
-        // fresh completion flips it to 1). CQE dword 3: [15:0] CID, [16] phase,
-        // [31:17] status.
+        // CQE dword 3: [15:0] CID, [16] phase, [31:17] status.
         let mut budget = 200_000_000u32;
         let dword3 = loop {
-            // SAFETY: reading CQE[0] dword 3 from the identity-mapped CQ.
-            let dword3 = unsafe { cq.add(3).read_volatile() };
-            if dword3 & (1 << 16) != 0 {
+            // SAFETY: completion entry `head` of the identity-mapped CQ.
+            let dword3 = unsafe { self.cq.add(self.head as usize * 4 + 3).read_volatile() };
+            if (dword3 >> 16) & 1 == self.phase {
                 break dword3;
             }
             budget -= 1;
@@ -303,15 +331,45 @@ impl Controller {
             }
             core::hint::spin_loop();
         };
-
-        // Advance the CQ head past the entry we consumed.
-        // SAFETY: ring the admin completion-queue head doorbell.
-        unsafe { mmio_write32(self.base, DOORBELL_BASE + self.doorbell_stride, 1) };
-
-        if dword3 & 0xffff != u32::from(IDENTIFY_CID) {
+        self.head += 1;
+        if self.head == self.depth {
+            self.head = 0;
+            self.phase ^= 1;
+        }
+        // SAFETY: CQ head doorbell of this queue.
+        unsafe {
+            mmio_write32(
+                controller.base,
+                DOORBELL_BASE + (2 * self.id + 1) * controller.doorbell_stride,
+                self.head,
+            );
+        }
+        if dword3 & 0xffff != u32::from(cid) {
             return Err("wrong_cid");
         }
         Ok(((dword3 >> 17) & 0x7fff) as u16)
+    }
+}
+
+fn prp_dwords(nsid: u32, prp1: u64) -> [u32; 16] {
+    let mut dwords = [0u32; 16];
+    dwords[1] = nsid;
+    dwords[6] = prp1 as u32;
+    dwords[7] = (prp1 >> 32) as u32;
+    dwords
+}
+
+impl Controller {
+    /// Issue IDENTIFY CONTROLLER into the `IDENTIFY` page, returning the 15-bit
+    /// status field (0 on success).
+    ///
+    /// # Safety
+    /// CPL0; the controller is enabled and the DMA statics are identity-mapped.
+    unsafe fn identify_controller(&self, admin: &mut Queue) -> Result<u16, &'static str> {
+        let mut dwords = prp_dwords(0, core::ptr::addr_of!(IDENTIFY) as u64);
+        dwords[10] = IDENTIFY_CNS_CONTROLLER;
+        // SAFETY: caller's contract.
+        unsafe { admin.submit(self, OPCODE_IDENTIFY, dwords) }
     }
 }
 
@@ -384,8 +442,14 @@ pub fn prove() {
     debug_write_u64(u64::from(controller.depth));
     debug_write("\n");
 
+    let mut admin = Queue::new(
+        core::ptr::addr_of_mut!(ADMIN_SQ) as *mut u32,
+        core::ptr::addr_of!(ADMIN_CQ) as *const u32,
+        0,
+        controller.depth,
+    );
     // SAFETY: CPL0; the controller is enabled and the DMA statics are live.
-    let status = match unsafe { controller.identify_controller() } {
+    let status = match unsafe { controller.identify_controller(&mut admin) } {
         Ok(status) => status,
         Err(reason) => {
             debug_write("AW_NVME_FAIL reason=");
@@ -416,5 +480,198 @@ pub fn prove() {
         debug_write("AW_NVME_PROOF_OK\n");
     } else {
         debug_write("AW_NVME_FAIL reason=empty_model\n");
+        return;
     }
+
+    // SAFETY: CPL0; same controller and DMA statics.
+    match unsafe { prove_block_io(&controller, &mut admin) } {
+        Ok(()) => {}
+        Err(reason) => {
+            debug_write("AW_NVME_IO_FAIL reason=");
+            debug_write(reason);
+            debug_write("\n");
+        }
+    }
+}
+
+// ---- Block I/O: namespace, I/O queue pair, READ and WRITE (roadmap Phase 3) ----
+
+const OPCODE_CREATE_IO_SQ: u8 = 0x01;
+const OPCODE_CREATE_IO_CQ: u8 = 0x05;
+// Only the scratch-disk proof writes; the normal boot path never does.
+#[cfg_attr(not(feature = "nvme-write-smoke-test"), allow(dead_code))]
+const OPCODE_WRITE: u8 = 0x01;
+const OPCODE_READ: u8 = 0x02;
+const IDENTIFY_CNS_NAMESPACE: u32 = 0;
+const NAMESPACE_ID: u32 = 1;
+const IO_QUEUE_ID: u64 = 1;
+
+static mut IO_SQ: Page = Page([0; 4096]);
+static mut IO_CQ: Page = Page([0; 4096]);
+static mut DATA: Page = Page([0; 4096]);
+#[cfg(feature = "nvme-write-smoke-test")]
+static mut DATA_BACK: Page = Page([0; 4096]);
+
+/// Namespace 1's geometry, from IDENTIFY NAMESPACE.
+struct Namespace {
+    blocks: u64,
+    block_size: u32,
+}
+
+/// # Safety
+/// CPL0; the controller is enabled and the DMA statics are identity-mapped.
+unsafe fn identify_namespace(
+    controller: &Controller,
+    admin: &mut Queue,
+) -> Result<Namespace, &'static str> {
+    let mut dwords = prp_dwords(NAMESPACE_ID, core::ptr::addr_of!(IDENTIFY) as u64);
+    dwords[10] = IDENTIFY_CNS_NAMESPACE;
+    // SAFETY: caller's contract.
+    if unsafe { admin.submit(controller, OPCODE_IDENTIFY, dwords) }? != 0 {
+        return Err("identify_namespace_status");
+    }
+    let page = core::ptr::addr_of!(IDENTIFY) as *const u8;
+    // SAFETY: the controller wrote the 4 KiB identify-namespace page.
+    let (blocks, format) = unsafe {
+        let blocks = (page as *const u64).read_volatile();
+        let flbas = page.add(26).read_volatile() & 0x0f;
+        let format = (page.add(128 + 4 * usize::from(flbas)) as *const u32).read_volatile();
+        (blocks, format)
+    };
+    let lbads = (format >> 16) & 0xff;
+    if blocks == 0 || !(9..=12).contains(&lbads) {
+        return Err("unsupported_namespace"); // one PRP page must hold one block
+    }
+    Ok(Namespace {
+        blocks,
+        block_size: 1 << lbads,
+    })
+}
+
+/// Create the I/O completion queue, then the submission queue bound to it.
+///
+/// # Safety
+/// CPL0; the controller is enabled and the ring statics are identity-mapped.
+unsafe fn create_io_queues(
+    controller: &Controller,
+    admin: &mut Queue,
+) -> Result<Queue, &'static str> {
+    let depth = controller.depth.min(64);
+    let mut cq = prp_dwords(0, core::ptr::addr_of!(IO_CQ) as u64);
+    cq[10] = ((depth - 1) << 16) | IO_QUEUE_ID as u32;
+    cq[11] = 1; // physically contiguous, interrupts off (polled)
+    // SAFETY: caller's contract.
+    if unsafe { admin.submit(controller, OPCODE_CREATE_IO_CQ, cq) }? != 0 {
+        return Err("create_io_cq_status");
+    }
+    let mut sq = prp_dwords(0, core::ptr::addr_of!(IO_SQ) as u64);
+    sq[10] = ((depth - 1) << 16) | IO_QUEUE_ID as u32;
+    sq[11] = ((IO_QUEUE_ID as u32) << 16) | 1; // bound to CQ 1, physically contiguous
+    // SAFETY: caller's contract.
+    if unsafe { admin.submit(controller, OPCODE_CREATE_IO_SQ, sq) }? != 0 {
+        return Err("create_io_sq_status");
+    }
+    Ok(Queue::new(
+        core::ptr::addr_of_mut!(IO_SQ) as *mut u32,
+        core::ptr::addr_of!(IO_CQ) as *const u32,
+        IO_QUEUE_ID,
+        depth,
+    ))
+}
+
+/// Read or write one block by DMA through `buffer`.
+///
+/// # Safety
+/// CPL0; `buffer` is an identity-mapped 4 KiB page, `lba` is inside the namespace.
+unsafe fn block_io(
+    controller: &Controller,
+    io: &mut Queue,
+    opcode: u8,
+    lba: u64,
+    buffer: u64,
+) -> Result<(), &'static str> {
+    let mut dwords = prp_dwords(NAMESPACE_ID, buffer);
+    dwords[10] = lba as u32;
+    dwords[11] = (lba >> 32) as u32;
+    dwords[12] = 0; // number of blocks, zero-based: one block
+    // SAFETY: caller's contract.
+    match unsafe { io.submit(controller, opcode, dwords) }? {
+        0 => Ok(()),
+        _ => Err("io_status"),
+    }
+}
+
+/// Read LBA 0 and check it is the FAT16 boot sector the test disk carries;
+/// with `nvme-write-smoke-test`, also write a pattern to a scratch block and
+/// read it back into a different buffer.
+///
+/// # Safety
+/// CPL0; the controller is enabled and the DMA statics are identity-mapped.
+unsafe fn prove_block_io(controller: &Controller, admin: &mut Queue) -> Result<(), &'static str> {
+    // SAFETY: caller's contract, forwarded.
+    let namespace = unsafe { identify_namespace(controller, admin) }?;
+    debug_write("AW_NVME_NAMESPACE blocks=");
+    debug_write_u64(namespace.blocks);
+    debug_write(" block_size=");
+    debug_write_u64(u64::from(namespace.block_size));
+    debug_write("\n");
+    // SAFETY: as above.
+    let mut io = unsafe { create_io_queues(controller, admin) }?;
+    debug_write("AW_NVME_IO_QUEUES_OK depth=");
+    debug_write_u64(u64::from(io.depth));
+    debug_write("\n");
+
+    let data = core::ptr::addr_of_mut!(DATA) as *mut u8;
+    // SAFETY: poison the buffer first, so stale bytes cannot pass for a read.
+    unsafe { core::ptr::write_bytes(data, 0xcc, 4096) };
+    // SAFETY: LBA 0 exists; DATA is identity-mapped.
+    unsafe { block_io(controller, &mut io, OPCODE_READ, 0, data as u64) }?;
+    // SAFETY: the controller wrote one block into DATA.
+    let (signature, fat16) = unsafe {
+        let signature = u16::from(data.add(510).read_volatile())
+            | (u16::from(data.add(511).read_volatile()) << 8);
+        let mut label = [0u8; 5];
+        for (i, byte) in label.iter_mut().enumerate() {
+            *byte = data.add(54 + i).read_volatile();
+        }
+        (signature, &label == b"FAT16")
+    };
+    debug_write("AW_NVME_READ_OK lba=0 signature=");
+    debug_write_hex_u64(u64::from(signature));
+    debug_write("\n");
+    if signature == 0xaa55 && fat16 {
+        debug_write("AW_NVME_READ_PROOF_OK fs=FAT16\n");
+    }
+
+    #[cfg(feature = "nvme-write-smoke-test")]
+    {
+        // Scratch disk only: LBA 2 is overwritten.
+        const SCRATCH_LBA: u64 = 2;
+        let back = core::ptr::addr_of_mut!(DATA_BACK) as *mut u8;
+        // SAFETY: fill DATA with a position-dependent pattern, poison DATA_BACK.
+        unsafe {
+            for i in 0..namespace.block_size as usize {
+                data.add(i)
+                    .write_volatile((i as u8) ^ 0x5a ^ ((i >> 8) as u8));
+            }
+            core::ptr::write_bytes(back, 0xcc, 4096);
+        }
+        if namespace.blocks <= SCRATCH_LBA {
+            return Err("scratch_too_small");
+        }
+        // SAFETY: scratch LBA inside the namespace; both buffers identity-mapped.
+        unsafe {
+            block_io(controller, &mut io, OPCODE_WRITE, SCRATCH_LBA, data as u64)?;
+            block_io(controller, &mut io, OPCODE_READ, SCRATCH_LBA, back as u64)?;
+        }
+        // SAFETY: both buffers hold at least one block.
+        let same = (0..namespace.block_size as usize)
+            .all(|i| unsafe { data.add(i).read_volatile() == back.add(i).read_volatile() });
+        if same {
+            debug_write("AW_NVME_WRITE_PROOF_OK lba=2\n");
+        } else {
+            return Err("readback_mismatch");
+        }
+    }
+    Ok(())
 }
