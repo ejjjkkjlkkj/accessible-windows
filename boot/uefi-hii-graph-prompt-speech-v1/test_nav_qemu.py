@@ -67,16 +67,21 @@ def audio_report(path: pathlib.Path) -> dict:
     x = struct.unpack(f"<{n * ch}h", raw[44:44 + n * ch * 2])[::ch]
     peak = max((abs(v) for v in x), default=0)
     clipped = sum(1 for v in x if abs(v) >= 32700)
+    # A click is a sample step far larger than the signal around it, on both
+    # sides: a centred window, so a sharp consonant attack after a quiet
+    # passage (whose following samples are just as busy) is not a click.
+    d = [abs(x[i] - x[i - 1]) for i in range(1, len(x))]
+    half = 32
+    prefix = [0]
+    for v in d:
+        prefix.append(prefix[-1] + v)
     clicks = 0
-    window = []
-    total = 0
-    for i in range(1, len(x)):
-        d = abs(x[i] - x[i - 1])
-        window.append(d)
-        total += d
-        if len(window) > 64:
-            total -= window.pop(0)
-        if d > 1600 and d > 12 * (total / len(window)) + 3:
+    for i, v in enumerate(d):
+        if v <= 1600:
+            continue
+        lo, hi = max(0, i - half), min(len(d), i + half)
+        local = (prefix[hi] - prefix[lo] - v) / max(1, hi - lo - 1)
+        if v > 12 * local + 3:
             clicks += 1
     return {"seconds": round(n / rate, 1), "peak": peak, "clipped": clipped, "clicks": clicks}
 
@@ -130,6 +135,9 @@ def navigation(a) -> bool:
         "audio_no_clicks": audio["clicks"] == 0,
     }
     print(json.dumps({"keys_seen": keys_seen, "audio": audio, "checks": checks}, indent=1))
+    if not checks["trace_persisted"]:
+        print("ESP contents:", sorted(str(p.relative_to(esp)) for p in esp.rglob("*")))
+        print("trace tail:", trace.strip().splitlines()[-3:] if trace.strip() else "(empty)")
     return all(checks.values())
 
 
