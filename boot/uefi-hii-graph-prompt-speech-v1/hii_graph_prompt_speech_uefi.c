@@ -70,13 +70,15 @@ static u8 g_selected_pin_is_internal_speaker;
 static stall_fn g_stall;
 static allocate_pages_fn g_allocate_pages;
 static u64 g_speech_dma_base;
-static u8 g_speech_dma_allocations;
+static __attribute__((unused)) u8 g_speech_dma_allocations;
 static u8 g_speech_stream_initialized;
 static u8 g_proof_overflow;
 static u32 g_bank_count;  /* phrase bank entries loaded (0 = letter spelling only) */
 static u32 g_bank_hits;
 static u32 g_bank_misses;
 static u8 g_speech_active;
+static volatile u8 *g_speech_pcm;   /* PCM of the utterance playing (fade-out on interrupt) */
+static u32 g_speech_payload;
 static u64 g_speech_timeout_us;
 static u64 g_speech_elapsed_us;
 
@@ -466,28 +468,27 @@ static int persist_trace(void *image_handle, void *boot_services) {
         !fs || !fs->open_volume) return 0;
     if (fs->open_volume(fs, &root) != 0 || !root || !root->open) return 0;
 
-    /* Same truncation rule as persist_boot_proof: delete, then create. */
-    const u64 rw_mode = 0x2ull | 0x1ull;
-    file_protocol *old_file = 0;
-    if (root->open(root, (void **)&old_file, filename, rw_mode, 0) == 0 && old_file) {
-        if (!old_file->delete_file || old_file->delete_file(old_file) != 0) {
-            if (!old_file->delete_file && old_file->close) old_file->close(old_file);
-            if (root->close) root->close(root);
-            return 0;
-        }
-    }
-    const u64 create_mode = 0x8000000000000000ull | rw_mode;
+    /*
+     * Called several times per boot (checkpoint, then exit). Deleting and
+     * re-creating the file proved unreliable, so the trace is always written
+     * as one fixed-size block from offset 0: the unused tail is newlines, and
+     * no stale bytes of an earlier, longer trace can survive.
+     */
+    typedef u64 (*trace_set_position_fn)(void *self, u64 position);
+    const u64 create_mode = 0x8000000000000000ull | 0x2ull | 0x1ull;
     if (root->open(root, (void **)&file, filename, create_mode, 0) != 0 ||
-        !file || !file->write) {
+        !file || !file->write || !file->set_position) {
         if (root->close) root->close(root);
         return 0;
     }
-    usize bytes = g_trace_n;
-    u64 st = file->write(file, &bytes, g_trace);
+    for (usize i = g_trace_n; i < sizeof(g_trace); ++i) g_trace[i] = '\n';
+    u64 st = ((trace_set_position_fn)file->set_position)(file, 0);
+    usize bytes = sizeof(g_trace);
+    if (st == 0) st = file->write(file, &bytes, g_trace);
     if (st == 0 && file->flush) st = file->flush(file);
     if (file->close) file->close(file);
     if (root->close) root->close(root);
-    return st == 0 && bytes == g_trace_n;
+    return st == 0 && bytes == sizeof(g_trace);
 }
 
 /*
@@ -974,6 +975,44 @@ static void speech_dma_stop(void) {
     g_speech_elapsed_us = 0;
 }
 
+/*
+ * Interrupting speech by stopping the stream mid-waveform jumps the DAC to 0:
+ * an audible click on every key press. Instead, rewrite the audio just ahead
+ * of the DMA position as a 10 ms fade to silence, let it play, then stop.
+ */
+static __attribute__((unused)) void speech_dma_fade_stop(void) {
+    volatile u8 *sd = speech_stream_descriptor();
+    if (!g_speech_active || !sd || !g_speech_pcm || !g_stall) {
+        speech_dma_stop();
+        return;
+    }
+    const u32 frame = 4u;                  /* s16 stereo */
+    const u32 guard = 480u * frame;        /* 10 ms: past what the controller has fetched */
+    const u32 fade = 480u * frame;         /* 10 ms fade */
+    const u32 hush = 960u * frame;         /* then 20 ms of silence */
+    u32 lpib = *(volatile u32 *)(sd + 0x04);
+    u32 start = ((lpib + guard) / frame) * frame;
+    if (start < g_speech_payload) {
+        volatile i16 *s = (volatile i16 *)(g_speech_pcm + start);
+        u32 room = (g_speech_payload - start) / 2u;   /* samples */
+        u32 fade_samples = fade / 2u, hush_end = (fade + hush) / 2u;
+        for (u32 i = 0; i < room && i < hush_end; ++i) {
+            if (i < fade_samples) {
+                i32 gain = (i32)(fade_samples - i);
+                s[i] = (i16)(((i32)s[i] * gain) / (i32)fade_samples);
+            } else {
+                s[i] = 0;
+            }
+        }
+        cache_writeback();
+        g_stall(40000);
+    }
+    speech_dma_stop();
+}
+
+static int speech_stream_start(u64 base, u32 pcm_off, u32 dma_bytes, u32 total_bytes,
+                               u32 max_bdl_bytes, u64 max_play_us);
+
 static int speech_dma_begin(const char *text, u32 text_count) {
     if (!g_allocate_pages || !g_stall || !text || !text_count || text_count > 32u) return 0;
     const u32 pcm_off = 0x1000u;
@@ -1001,7 +1040,6 @@ static int speech_dma_begin(const char *text, u32 text_count) {
         ++g_speech_dma_allocations;
     }
 
-    volatile u8 *bdl = (volatile u8 *)(usize)base;
     volatile u8 *pcm = (volatile u8 *)(usize)(base + pcm_off);
 
     /*
@@ -1076,15 +1114,27 @@ static int speech_dma_begin(const char *text, u32 text_count) {
     marker("HII_GRAPH_SPEECH_PACING=PASS");
     marker("HII_GRAPH_SPEECH_LONG_LABEL_CAPACITY=PASS");
 
+    return speech_stream_start(base, pcm_off, dma_bytes, total_bytes, 0x10000u, 30000000ull);
+}
+
+/*
+ * Describe PCM already written at base+pcm_off (48 kHz s16 stereo) with a BDL
+ * at base, write it back from the CPU cache and start the output stream.
+ */
+static int speech_stream_start(u64 base, u32 pcm_off, u32 dma_bytes, u32 total_bytes,
+                               u32 max_bdl_bytes, u64 max_play_us) {
+    volatile u8 *bdl = (volatile u8 *)(usize)base;
+    volatile u8 *pcm = (volatile u8 *)(usize)(base + pcm_off);
     u32 dma_payload = (total_bytes + 127u) & ~127u;
     if (dma_payload < total_bytes || dma_payload > dma_bytes - pcm_off) return 0;
     for (u32 i = total_bytes; i < dma_payload; ++i) pcm[i] = 0;
+    g_speech_pcm = pcm;
+    g_speech_payload = dma_payload;
 
-    const u32 max_bdl_bytes = 0x10000u;
     u32 entries = 0;
     u32 described = 0;
     while (described < dma_payload) {
-        if (entries >= 128u) return 0;
+        if (entries >= 256u) return 0;
         u32 len = dma_payload - described;
         if (len > max_bdl_bytes) len = max_bdl_bytes;
         volatile u8 *e = bdl + entries * 16u;
@@ -1135,7 +1185,7 @@ static int speech_dma_begin(const char *text, u32 text_count) {
        keyboard focus can cancel the current utterance immediately. */
     u64 play_us = (((u64)dma_payload * 125ull) + 23ull) / 24ull;
     play_us += 150000ull;
-    if (play_us > 30000000ull) {
+    if (play_us > max_play_us) {
         speech_dma_stop();
         return 0;
     }
@@ -1186,6 +1236,351 @@ static int run_speech_dma(const char *text, u32 text_count) {
         g_stall(1000);
     }
 }
+
+#ifdef QEV_INTERACTIVE_NAV
+/*
+ * Complete BIOS menu navigator (\EFI\OMNI\NAV.BIN, built by build_nav_bank.py
+ * from the firmware image with ST's neural voices). Every utterance is a
+ * pre-rendered natural-speech clip; the reader only moves through the tree,
+ * streams clips from the file and upsamples them to 48 kHz with the polyphase
+ * FIR stored in the file. Read-only: nothing here writes a BIOS setting.
+ */
+#define NAV_NONE 0xffffffffu
+#define NAV_ROLE_CONTAINER 0u
+#define NAV_ROLE_SUBTITLE 1u
+#define NAV_MAX_DEPTH 32u
+#define NAV_MAX_TABLE_BYTES (8u * 1024u * 1024u)
+#define NAV_MAX_CLIP_BYTES (4u * 1024u * 1024u)   /* 131 s at 16 kHz */
+#define NAV_DMA_PAGES 6144u                        /* 24 MiB: 131 s at 48 kHz stereo */
+#define NAV_MAX_FIR 128u
+enum { NAV_SYS_WELCOME, NAV_SYS_TOP, NAV_SYS_BOTTOM, NAV_SYS_NO_HELP, NAV_SYS_NOT_MENU,
+       NAV_SYS_NO_OPTIONS, NAV_SYS_QUIT_CONFIRM, NAV_SYS_GOODBYE, NAV_SYS_EMPTY, NAV_SYS_COUNT };
+
+typedef struct {
+    u32 speak, help, enter, target, child_first;
+    u16 child_count;
+    u8 role, flags;
+    u32 option_first;
+    u16 option_count, option_default;
+} nav_node;
+
+static file_protocol *g_nav_file;
+static u8 *g_nav_table;          /* file bytes [nodes_off, clip_data_off) */
+static const nav_node *g_nav_nodes;
+static const u32 *g_nav_links;
+static const u32 *g_nav_sys;
+static const i16 *g_nav_fir;
+static const u32 *g_nav_clip_index;
+static u32 g_nav_clip_count;
+static u32 g_nav_clip_data_off, g_nav_up, g_nav_taps;
+static i16 *g_nav_clip;
+static u64 g_nav_dma_base;
+static u32 g_nav_loaded;
+static u32 g_nav_log_budget = 160u;
+
+static u32 rd32h(const u8 *p) {
+    return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
+}
+
+static int nav_file_read(u64 position, void *buffer, usize bytes) {
+    if (!g_nav_file || !g_nav_file->set_position || !g_nav_file->read) return 0;
+    if (((file_set_position_fn)g_nav_file->set_position)(g_nav_file, position) != 0) return 0;
+    usize got = bytes;
+    return ((file_read_fn)g_nav_file->read)(g_nav_file, &got, buffer) == 0 && got == bytes;
+}
+
+static int nav_bank_open(void *image_handle, void *boot_services) {
+    static const u16 name[] = {
+        '\\','E','F','I','\\','O','M','N','I','\\','N','A','V','.','B','I','N',0
+    };
+    loaded_image_protocol_head *loaded = 0;
+    simple_fs_protocol *fs = 0;
+    file_protocol *root = 0;
+    u8 h[64];
+    if (!image_handle || !boot_services || !g_allocate_pages) return 0;
+    handle_protocol_fn handle_protocol = *(handle_protocol_fn *)((u8 *)boot_services + 0x98);
+    if (!handle_protocol ||
+        handle_protocol(image_handle, &g_loaded_image_guid, (void **)&loaded) != 0 || !loaded ||
+        !loaded->device_handle ||
+        handle_protocol(loaded->device_handle, &g_simple_fs_guid, (void **)&fs) != 0 || !fs ||
+        !fs->open_volume || fs->open_volume(fs, &root) != 0 || !root || !root->open) return 0;
+    if (root->open(root, (void **)&g_nav_file, name, 0x1ull, 0) != 0 || !g_nav_file) {
+        g_nav_file = 0;
+        marker("NAV_BANK=ABSENT");
+        return 0;
+    }
+    if (!nav_file_read(0, h, sizeof(h))) return 0;
+    static const char magic[8] = {'Q','E','V','N','A','V','0','1'};
+    for (u32 i = 0; i < 8u; ++i) if (h[i] != (u8)magic[i]) { marker("NAV_BANK=BAD_MAGIC"); return 0; }
+    u32 node_count = rd32h(h + 8), nodes_off = rd32h(h + 16), links_off = rd32h(h + 20);
+    u32 links_count = rd32h(h + 24), clip_count = rd32h(h + 28), index_off = rd32h(h + 32);
+    u32 data_off = rd32h(h + 36), rate = rd32h(h + 40), sys_count = rd32h(h + 44);
+    u32 sys_off = rd32h(h + 48), fir_off = rd32h(h + 52);
+    u32 up = (u32)h[56] | ((u32)h[57] << 8), taps = (u32)h[58] | ((u32)h[59] << 8);
+    /* The file is untrusted input: every size is checked in 64-bit arithmetic
+       so no product can wrap around, and every table must lie inside the
+       region [nodes_off, data_off) that is read into memory. */
+    if (!node_count || !clip_count || nodes_off != 64u ||
+        (u64)links_off != (u64)nodes_off + (u64)node_count * 32u ||
+        (u64)sys_off != (u64)links_off + (u64)links_count * 4u || sys_count < NAV_SYS_COUNT ||
+        (u64)fir_off != (u64)sys_off + (u64)sys_count * 4u || !up || !taps || up > 8u || taps > 64u ||
+        up * taps > NAV_MAX_FIR || (u64)index_off != (u64)fir_off + (u64)up * taps * 2u ||
+        (u64)data_off < (u64)index_off + (u64)clip_count * 8u ||
+        (u64)rate * up != 48000u || data_off > NAV_MAX_TABLE_BYTES) {
+        marker("NAV_BANK=BAD_HEADER");
+        return 0;
+    }
+    u64 table = 0xffffffffu, clip = 0xffffffffu;
+    if (g_allocate_pages(1, 4, (data_off + 4095u) / 4096u, &table) != 0 || !table) return 0;
+    if (g_allocate_pages(1, 4, NAV_MAX_CLIP_BYTES / 4096u, &clip) != 0 || !clip) return 0;
+    g_nav_table = (u8 *)(usize)table;
+    if (!nav_file_read(nodes_off, g_nav_table, data_off - nodes_off)) { marker("NAV_BANK=READ_FAILED"); return 0; }
+    g_nav_nodes = (const nav_node *)(void *)g_nav_table;
+    g_nav_links = (const u32 *)(void *)(g_nav_table + (links_off - nodes_off));
+    g_nav_sys = (const u32 *)(void *)(g_nav_table + (sys_off - nodes_off));
+    g_nav_fir = (const i16 *)(void *)(g_nav_table + (fir_off - nodes_off));
+    g_nav_clip_index = (const u32 *)(void *)(g_nav_table + (index_off - nodes_off));
+    g_nav_clip = (i16 *)(usize)clip;
+    g_nav_clip_count = clip_count;
+    g_nav_clip_data_off = data_off;
+    g_nav_up = up;
+    g_nav_taps = taps;
+    /* Structural check: every child link is a node, every target a container. */
+    for (u32 i = 0; i < node_count; ++i) {
+        const nav_node *n = &g_nav_nodes[i];
+        if ((u64)n->child_first + n->child_count > links_count ||
+            (u64)n->option_first + n->option_count > links_count) { marker("NAV_BANK=BAD_NODE"); return 0; }
+        for (u32 c = 0; c < n->child_count; ++c)
+            if (g_nav_links[n->child_first + c] >= node_count) { marker("NAV_BANK=BAD_LINK"); return 0; }
+        for (u32 o = 0; o < n->option_count; ++o)
+            if (g_nav_links[n->option_first + o] >= clip_count) { marker("NAV_BANK=BAD_OPTION"); return 0; }
+        if (n->target != NAV_NONE &&
+            (n->target >= node_count || g_nav_nodes[n->target].role != NAV_ROLE_CONTAINER)) {
+            marker("NAV_BANK=BAD_TARGET");
+            return 0;
+        }
+    }
+    for (u32 i = 0; i < NAV_SYS_COUNT; ++i)
+        if (g_nav_sys[i] >= clip_count) { marker("NAV_BANK=BAD_SYS"); return 0; }
+    if (g_nav_nodes[0].role != NAV_ROLE_CONTAINER) { marker("NAV_BANK=BAD_ROOT"); return 0; }
+    g_nav_loaded = 1;
+    serial_puts("NAV_BANK_NODES=0x"); serial_hex32(node_count); serial_puts("\r\n");
+    serial_puts("NAV_BANK_CLIPS=0x"); serial_hex32(clip_count); serial_puts("\r\n");
+    return 1;
+}
+
+/* Clip -> 48 kHz s16 stereo PCM through the polyphase FIR. Returns bytes or 0. */
+static u32 nav_expand(volatile u8 *dst, u32 room, const i16 *x, u32 n) {
+    const u32 up = g_nav_up, taps = g_nav_taps;
+    u64 frames = ((u64)n + taps - 1u) * up;
+    if (frames * 4u > room) return 0;
+    volatile i16 *d = (volatile i16 *)dst;
+    u32 o = 0;
+    for (u32 i = 0; i < n + taps - 1u; ++i) {
+        for (u32 p = 0; p < up; ++p) {
+            i32 acc = 0;
+            for (u32 k = 0; k < taps; ++k) {
+                if (k > i) break;
+                u32 j = i - k;
+                if (j < n) acc += (i32)g_nav_fir[p + up * k] * (i32)x[j];
+            }
+            acc = (acc + 16384) >> 15;
+            if (acc > 32767) acc = 32767;
+            if (acc < -32768) acc = -32768;
+            d[o++] = (i16)acc;
+            d[o++] = (i16)acc;
+        }
+    }
+    return o * 2u;
+}
+
+static int nav_play(u32 clip) {
+    if (!g_nav_loaded || clip >= g_nav_clip_count) return 0;
+    if (g_speech_active) speech_dma_fade_stop();
+    u32 off = g_nav_clip_index[clip * 2u], bytes = g_nav_clip_index[clip * 2u + 1u];
+    if (!bytes || (bytes & 1u) || bytes > NAV_MAX_CLIP_BYTES) return 0;
+    if (!nav_file_read((u64)g_nav_clip_data_off + off, g_nav_clip, bytes)) return 0;
+
+    const u32 pcm_off = 0x2000u;                  /* 256 BDL entries */
+    const u32 dma_bytes = NAV_DMA_PAGES * 4096u;
+    if (!g_nav_dma_base) {
+        u64 base = 0xffffffffu;
+        if (g_allocate_pages(1, 4, NAV_DMA_PAGES, &base) != 0 || !base || base > 0xffffffffu) return 0;
+        g_nav_dma_base = base;
+    }
+    volatile u8 *pcm = (volatile u8 *)(usize)(g_nav_dma_base + pcm_off);
+    /* The first start of the stream loses the audio just after a short lead-in
+       (seen as a missing fade-in under QEMU); give the codec 200 ms to settle
+       the first time, 30 ms afterwards. */
+    static u8 primed;
+    const u32 lead = (primed ? 30u : 200u) * 192u, tail = 60u * 192u;
+    primed = 1;
+    for (u32 i = 0; i < lead; ++i) pcm[i] = 0;
+    u32 body = nav_expand(pcm + lead, dma_bytes - pcm_off - lead - tail, g_nav_clip, bytes / 2u);
+    if (!body) return 0;
+    for (u32 i = 0; i < tail; ++i) pcm[lead + body + i] = 0;
+    return speech_stream_start(g_nav_dma_base, pcm_off, dma_bytes, lead + body + tail,
+                               0x20000u, 150000000ull);
+}
+
+static void nav_log(const char *what, u32 value) {
+    if (!g_nav_log_budget) return;
+    --g_nav_log_budget;
+    serial_puts(what);
+    serial_puts("=0x");
+    serial_hex32(value);
+    serial_puts("\r\n");
+}
+
+/* Up to two utterances: the second starts when the first has finished. */
+static u32 g_nav_next = NAV_NONE;
+static void nav_say(u32 clip, u32 then) {
+    g_nav_next = NAV_NONE;
+    if (clip == NAV_NONE) {
+        clip = then;
+        then = NAV_NONE;
+    }
+    if (clip == NAV_NONE) return;
+    if (!nav_play(clip)) {
+        nav_log("NAV_PLAY_FAILED", clip);
+        return;
+    }
+    g_nav_next = then;
+}
+
+static const nav_node *nav_child(const nav_node *container, u32 index) {
+    return &g_nav_nodes[g_nav_links[container->child_first + index]];
+}
+
+static int nav_run(void *system_table) {
+    simple_text_input_protocol *conin =
+        *(simple_text_input_protocol **)((u8 *)system_table + 0x30);
+    if (!conin || !conin->read_key || !g_stall || !g_nav_loaded) return 0;
+
+    u32 stack_node[NAV_MAX_DEPTH], stack_index[NAV_MAX_DEPTH];
+    u32 depth = 0, option = 0, option_node = NAV_NONE;
+    u8 quit_armed = 0, quitting = 0;
+    stack_node[0] = 0;
+    stack_index[0] = 0;
+
+    marker("NAV_READY=PASS");
+    persist_trace(g_trace_image_handle, g_trace_boot_services);
+    {
+        const nav_node *root = &g_nav_nodes[0];
+        g_nav_next = NAV_NONE;
+        nav_say(g_nav_sys[NAV_SYS_WELCOME], root->enter);
+    }
+
+    for (;;) {
+        const nav_node *c = &g_nav_nodes[stack_node[depth]];
+        u32 idx = stack_index[depth];
+        const nav_node *item = c->child_count ? nav_child(c, idx) : 0;
+
+        efi_input_key key;
+        key.scan_code = 0;
+        key.unicode_char = 0;
+        if (!quitting && conin->read_key(conin, &key) == 0) {
+            u16 sc = key.scan_code, uc = key.unicode_char;
+            u8 is_esc = (sc == 0x17u || uc == 0x1bu), is_back = (uc == 0x08u);
+            if (!is_esc) quit_armed = 0;
+            nav_log("NAV_KEY", ((u32)sc << 16) | uc);
+            if (sc == 0x01u || sc == 0x02u) {                 /* up / down */
+                if (!c->child_count) nav_say(g_nav_sys[NAV_SYS_EMPTY], NAV_NONE);
+                else if (sc == 0x01u && idx == 0) nav_say(g_nav_sys[NAV_SYS_TOP], item->speak);
+                else if (sc == 0x02u && idx + 1u >= c->child_count) nav_say(g_nav_sys[NAV_SYS_BOTTOM], item->speak);
+                else {
+                    stack_index[depth] = sc == 0x01u ? idx - 1u : idx + 1u;
+                    nav_say(nav_child(c, stack_index[depth])->speak, NAV_NONE);
+                }
+            } else if (sc == 0x05u || sc == 0x06u) {          /* home / end */
+                if (!c->child_count) nav_say(g_nav_sys[NAV_SYS_EMPTY], NAV_NONE);
+                else {
+                    stack_index[depth] = sc == 0x05u ? 0u : c->child_count - 1u;
+                    nav_say(nav_child(c, stack_index[depth])->speak, NAV_NONE);
+                }
+            } else if (sc == 0x09u || sc == 0x0au) {          /* page up / down: previous / next section */
+                if (c->child_count) {
+                    u32 j = idx, found = NAV_NONE;
+                    for (u32 step = 0; step < c->child_count; ++step) {
+                        if (sc == 0x09u) { if (!j) break; --j; } else { if (j + 1u >= c->child_count) break; ++j; }
+                        if (nav_child(c, j)->role == NAV_ROLE_SUBTITLE) { found = j; break; }
+                    }
+                    if (found == NAV_NONE) {
+                        if (sc == 0x09u) found = idx >= 10u ? idx - 10u : 0u;
+                        else found = idx + 10u < c->child_count ? idx + 10u : c->child_count - 1u;
+                    }
+                    stack_index[depth] = found;
+                    nav_say(nav_child(c, found)->speak, NAV_NONE);
+                }
+            } else if (uc == 0x0du) {                          /* enter: open sub-menu */
+                if (item && item->target != NAV_NONE && depth + 1u < NAV_MAX_DEPTH) {
+                    const nav_node *t = &g_nav_nodes[item->target];
+                    ++depth;
+                    stack_node[depth] = item->target;
+                    stack_index[depth] = 0;
+                    nav_say(t->enter, t->child_count ? nav_child(t, 0)->speak : NAV_NONE);
+                } else {
+                    nav_say(g_nav_sys[NAV_SYS_NOT_MENU], NAV_NONE);
+                }
+            } else if (is_esc || is_back) {                    /* back / quit */
+                if (depth) {
+                    --depth;
+                    const nav_node *pc = &g_nav_nodes[stack_node[depth]];
+                    nav_say(nav_child(pc, stack_index[depth])->speak, NAV_NONE);
+                } else if (is_esc && quit_armed) {
+                    nav_say(g_nav_sys[NAV_SYS_GOODBYE], NAV_NONE);
+                    quitting = 1;
+                } else {
+                    quit_armed = is_esc;
+                    nav_say(g_nav_sys[NAV_SYS_QUIT_CONFIRM], NAV_NONE);
+                }
+            } else if (sc == 0x03u || sc == 0x04u) {          /* right / left: listen to options */
+                if (item && item->option_count) {
+                    u32 id = g_nav_links[c->child_first + idx];
+                    if (option_node != id) {
+                        option_node = id;
+                        option = item->option_default < item->option_count ? item->option_default : 0u;
+                    } else if (sc == 0x03u) {
+                        option = option + 1u < item->option_count ? option + 1u : 0u;
+                    } else {
+                        option = option ? option - 1u : item->option_count - 1u;
+                    }
+                    nav_say(g_nav_links[item->option_first + option], NAV_NONE);
+                } else {
+                    nav_say(g_nav_sys[NAV_SYS_NO_OPTIONS], NAV_NONE);
+                }
+            } else if (uc == (u16)'h' || uc == (u16)'H' || sc == 0x0bu) {  /* help (H or F1) */
+                nav_say(item && item->help != NAV_NONE ? item->help : g_nav_sys[NAV_SYS_NO_HELP], NAV_NONE);
+            } else if (uc == (u16)'r' || uc == (u16)'R') {          /* repeat the item */
+                nav_say(item ? item->speak : g_nav_sys[NAV_SYS_EMPTY], NAV_NONE);
+            } else if (uc == (u16)' ') {                           /* where am I: page, then item */
+                nav_say(c->enter, item ? item->speak : NAV_NONE);
+            }
+        }
+
+        if (g_speech_active) {
+            u8 progressed = 0;
+            int state = speech_dma_poll(1000u, &progressed);
+            if (state != 0 && g_nav_next != NAV_NONE) {
+                u32 next = g_nav_next;
+                g_nav_next = NAV_NONE;
+                nav_say(next, NAV_NONE);
+            }
+        } else if (g_nav_next != NAV_NONE) {
+            u32 next = g_nav_next;
+            g_nav_next = NAV_NONE;
+            nav_say(next, NAV_NONE);
+        } else if (quitting) {
+            marker("NAV_EXIT=PASS");
+            return 1;
+        }
+        g_stall(1000);
+    }
+}
+#define g_nav_loaded_any() (g_nav_loaded != 0)
+#else
+#define g_nav_loaded_any() 0
+#endif
 
 static u16 rd16(const u8 *p) {
     return (u16)((u16)p[0] | ((u16)p[1] << 8));
@@ -1847,7 +2242,11 @@ static u64 screen_reader_main(void *image_handle, void *system_table) {
         g_bank_count = 0;
         marker("PHRASE_BANK=ABSENT_LETTER_SPELLING");
     }
-    if (!resolve_hii_prompt(system_table)) {
+#ifdef QEV_INTERACTIVE_NAV
+    if (nav_bank_open(image_handle, boot_services)) marker("NAV_BANK=LOADED");
+#endif
+    /* With the complete BIOS map the live HII prompts are optional. */
+    if (!resolve_hii_prompt(system_table) && !g_nav_loaded_any()) {
         marker("STATUS=BLOCKED");
         marker("REASON=HII_PROMPT_NOT_RESOLVED");
         return 1;
@@ -1897,6 +2296,18 @@ static u64 screen_reader_main(void *image_handle, void *system_table) {
         return 1;
     }
     marker("HDA_OUTPUT_PATH_CONFIGURATION=PASS");
+#ifdef QEV_INTERACTIVE_NAV
+    if (g_nav_loaded) {
+        marker("SYNTH=NEURAL_CLIPS_NAV_BIN_V1");
+        if (!nav_run(system_table)) {
+            marker("STATUS=BLOCKED");
+            marker("REASON=NAV_RUN_FAILED");
+            return 1;
+        }
+        marker("STATUS=PASS");
+        return 0;
+    }
+#endif
     marker("SYNTH=ALLOPHONE_BDL_RUNTIME_TEXT_V1");
     marker("SYNTH=GRAPHEME_ALLOPHONE_RUNTIME_TEXT_V2");
     marker("SYNTH=CLEAR_LETTERNAME_SPELLING_FR_V3");
