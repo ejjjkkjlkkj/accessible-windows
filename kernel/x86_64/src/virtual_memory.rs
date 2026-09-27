@@ -43,8 +43,8 @@ const TWO_MIB: u64 = 2 * 1024 * 1024;
 /// Root plus enough sparse child tables for the low bootstrap window and every
 /// framebuffer/PCIe ECAM range handed off by firmware. 32 tables cost 128 KiB of
 /// BSS and cover the worst case of four disjoint ECAM regions plus framebuffer
-/// ranges even when they cross PML4/PDPT boundaries.
-const PAGE_TABLE_CAPACITY: usize = 32;
+/// and xHCI MMIO ranges even when they cross PML4/PDPT boundaries.
+const PAGE_TABLE_CAPACITY: usize = 40;
 
 /// Number of 8-byte entries in one page table.
 const PAGE_TABLE_ENTRIES: usize = 512;
