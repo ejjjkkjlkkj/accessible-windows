@@ -61,6 +61,10 @@ acpi-reset-test = []
 # Writes a pattern to LBA 2 of the first NVMe namespace and reads it back into a
 # different buffer. Test-only, scratch disk only: it overwrites LBA 2.
 nvme-write-smoke-test = []
+# Takes ownership of the emulated xHCI controller, resets it, installs minimal
+# DMA rings, proves Run/Stop, then stops it again. QEMU-only and never enabled
+# in a normal or physical-hardware image.
+xhci-smoke-test = []
 
 
 [profile.dev]

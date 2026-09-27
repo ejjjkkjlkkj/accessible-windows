@@ -1727,6 +1727,8 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // Read xHCI capability registers through the kernel-owned identity map.
         // Read-only: no reset, run/stop, doorbell or DMA programming yet.
         xhci::prove_mmio_capabilities(handoff, memory_ready);
+        #[cfg(feature = "xhci-smoke-test")]
+        xhci::prove_controller_smoke(handoff, memory_ready);
 
         if paint_boot_marker(handoff) {
             debug_write("AW_NATIVE_FRAMEBUFFER_WRITE_OK\n");
