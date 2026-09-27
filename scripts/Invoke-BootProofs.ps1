@@ -971,6 +971,33 @@ $configurations += @(
         Forbidden = @('AW_NVME_IO_FAIL', 'AW_NVME_FAIL', 'AW_NATIVE_EXCEPTION')
     }
     @{
+        # Destructive xHCI controller ownership proof. QEMU-only: halt/reset the
+        # emulated controller, install bounded DMA structures, Run, Stop, and
+        # require every transition. No physical image enables this feature.
+        Name     = 'xhci-smoke'
+        Features = @('xhci-smoke-test')
+        QemuArgs = @(
+            '-device', 'qemu-xhci'
+        )
+        Required = @(
+            'AW_XHCI_PCI_DISCOVERY_PROOF_OK'
+            'AW_XHCI_MMIO_CAP_PROOF_OK'
+            'AW_XHCI_SMOKE_BEGIN'
+            'AW_XHCI_SMOKE_HALTED'
+            'AW_XHCI_SMOKE_RESET_OK'
+            'AW_XHCI_SMOKE_DMA_READY'
+            'AW_XHCI_SMOKE_RUNNING'
+            'AW_XHCI_SMOKE_STOPPED'
+            'AW_XHCI_SMOKE_PROOF_OK'
+            'AW_NATIVE_KERNEL_IDLE'
+        )
+        Forbidden = @(
+            'AW_XHCI_SMOKE_FAIL'
+            'AW_NATIVE_EXCEPTION'
+            'AW_NATIVE_KERNEL_PANIC'
+        )
+    }
+    @{
         Name           = 'acpi-poweroff'
         Features       = @('acpi-poweroff-test')
         ExpectSelfExit = $true
