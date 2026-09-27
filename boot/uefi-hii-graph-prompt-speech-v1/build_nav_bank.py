@@ -48,7 +48,7 @@ RENDER_THREADS = 2
 NONE = 0xFFFFFFFF
 
 ROLE_CONTAINER, ROLE_SUBTITLE, ROLE_TEXT, ROLE_CHOICE, ROLE_CHECKBOX, ROLE_NUMBER, ROLE_PASSWORD, \
-    ROLE_ACTION, ROLE_RESET, ROLE_MENU, ROLE_DATE, ROLE_TIME, ROLE_STRING, ROLE_ORDERED = range(14)
+    ROLE_ACTION, ROLE_RESET, ROLE_MENU, ROLE_DATE, ROLE_TIME, ROLE_STRING, ROLE_ORDERED, ROLE_LAUNCH = range(15)
 OP_ROLE = {0x02: ROLE_SUBTITLE, 0x03: ROLE_TEXT, 0x05: ROLE_CHOICE, 0x06: ROLE_CHECKBOX, 0x07: ROLE_NUMBER,
            0x08: ROLE_PASSWORD, 0x0C: ROLE_ACTION, 0x0D: ROLE_RESET, 0x0F: ROLE_MENU, 0x1A: ROLE_DATE,
            0x1B: ROLE_TIME, 0x1C: ROLE_STRING, 0x23: ROLE_ORDERED}
@@ -77,6 +77,8 @@ SYS = [
     ("quit_confirm", "Appuyez encore sur Échap pour quitter le lecteur d'écran."),
     ("goodbye", "Fermeture du lecteur d'écran."),
     ("empty", "Menu vide."),
+    ("launching", "Démarrage de l'environnement de récupération accessible. Le Narrateur parlera dans environ une minute."),
+    ("launch_missing", "Environnement de récupération accessible introuvable sur cette clé."),
 ]
 
 
@@ -327,6 +329,14 @@ def build_formset(fs: dict) -> tuple[str, dict[int, Node], list[int], set[int]]:
     return title, forms, order, referenced
 
 
+def launch_node() -> Node:
+    """First item of the main menu: hand over to the accessible Windows RE on the key."""
+    return Node(ROLE_LAUNCH, label="Démarrer l'environnement de récupération Windows accessible", lang="fr",
+                help="Démarre l'environnement de récupération de Windows avec le Narrateur et la voix ST. "
+                     "Pour démarrer Windows normalement, appuyez deux fois sur Échap au menu principal.",
+                help_lang="fr")
+
+
 def build_tree(formsets: list[dict]) -> Node:
     root = Node(ROLE_CONTAINER, title="Menus du BIOS")
     tops, containers = [], {}
@@ -354,7 +364,7 @@ def build_tree(formsets: list[dict]) -> Node:
             ROLE_MENU, label=title or "Formulaire sans titre", lang="en" if title else "fr",
             target=("formset", fs["guid"]), help=f"{plural(len(forms), 'page')}, {plural(questions, 'réglage')}.",
             help_lang="fr")))
-    root.children = [n for *_, n in sorted(tops, key=lambda t: t[:2])]
+    root.children = [launch_node()] + [n for *_, n in sorted(tops, key=lambda t: t[:2])]
     # Resolve targets to container objects; drop dangling references.
     seen = set()
 
@@ -660,7 +670,8 @@ def synthetic_tree() -> Node:
                     Node(ROLE_SUBTITLE, label="Storage"),
                     Node(ROLE_NUMBER, label="Timeout")]
     root = Node(ROLE_CONTAINER, title="Setup")
-    root.children = [Node(ROLE_TEXT, label="BIOS Version", value="308"),
+    root.children = [launch_node(),
+                     Node(ROLE_TEXT, label="BIOS Version", value="308"),
                      Node(ROLE_MENU, label="Advanced", target=sub),
                      Node(ROLE_ACTION, label="Save Changes")]
     return root

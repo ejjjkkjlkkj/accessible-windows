@@ -1248,13 +1248,107 @@ static int run_speech_dma(const char *text, u32 text_count) {
 #define NAV_NONE 0xffffffffu
 #define NAV_ROLE_CONTAINER 0u
 #define NAV_ROLE_SUBTITLE 1u
+#define NAV_ROLE_LAUNCH 14u     /* starts the accessible WinRE found on the key */
 #define NAV_MAX_DEPTH 32u
 #define NAV_MAX_TABLE_BYTES (8u * 1024u * 1024u)
 #define NAV_MAX_CLIP_BYTES (4u * 1024u * 1024u)   /* 131 s at 16 kHz */
 #define NAV_DMA_PAGES 6144u                        /* 24 MiB: 131 s at 48 kHz stereo */
 #define NAV_MAX_FIR 128u
 enum { NAV_SYS_WELCOME, NAV_SYS_TOP, NAV_SYS_BOTTOM, NAV_SYS_NO_HELP, NAV_SYS_NOT_MENU,
-       NAV_SYS_NO_OPTIONS, NAV_SYS_QUIT_CONFIRM, NAV_SYS_GOODBYE, NAV_SYS_EMPTY, NAV_SYS_COUNT };
+       NAV_SYS_NO_OPTIONS, NAV_SYS_QUIT_CONFIRM, NAV_SYS_GOODBYE, NAV_SYS_EMPTY,
+       NAV_SYS_LAUNCHING, NAV_SYS_LAUNCH_MISSING, NAV_SYS_COUNT };
+
+/*
+ * Chain-loading the accessible Windows RE of the key: the partition that holds
+ * both \EFI\Microsoft\Boot\bootmgfw.efi and \sources\winre.wim. The Windows
+ * boot manager is started from that partition so its BCD can use "boot".
+ */
+typedef u64 (*locate_handle_buffer_fn)(u32 search_type, const void *protocol, void *key,
+                                       usize *count, void ***buffer);
+typedef u64 (*free_pool_fn)(void *buffer);
+typedef u64 (*allocate_pool_fn)(u32 pool_type, usize size, void **buffer);
+typedef u64 (*load_image_fn)(u8 boot_policy, void *parent, void *device_path, void *source,
+                             usize source_size, void **image);
+typedef u64 (*start_image_fn)(void *image, usize *exit_data_size, u16 **exit_data);
+static const efi_guid g_device_path_guid =
+    {0x09576e91u,0x6d3fu,0x11d2u,{0x8e,0x39,0x00,0xa0,0xc9,0x69,0x72,0x3b}};
+static const u16 g_winre_loader[] = {
+    '\\','E','F','I','\\','M','i','c','r','o','s','o','f','t','\\','B','o','o','t','\\',
+    'b','o','o','t','m','g','f','w','.','e','f','i',0
+};
+static const u16 g_winre_wim[] = {
+    '\\','s','o','u','r','c','e','s','\\','w','i','n','r','e','.','w','i','m',0
+};
+static void *g_winre_device;
+
+static int volume_has(file_protocol *root, const u16 *path) {
+    file_protocol *f = 0;
+    if (root->open(root, (void **)&f, path, 0x1ull, 0) != 0 || !f) return 0;
+    if (f->close) f->close(f);
+    return 1;
+}
+
+/* Returns 1 and remembers the device when an accessible WinRE is present. */
+static int winre_locate(void *boot_services) {
+    g_winre_device = 0;
+    locate_handle_buffer_fn locate = *(locate_handle_buffer_fn *)((u8 *)boot_services + 0x138);
+    handle_protocol_fn handle_protocol = *(handle_protocol_fn *)((u8 *)boot_services + 0x98);
+    free_pool_fn free_pool = *(free_pool_fn *)((u8 *)boot_services + 0x48);
+    usize count = 0;
+    void **handles = 0;
+    if (!locate || !handle_protocol || locate(2, &g_simple_fs_guid, 0, &count, &handles) != 0 || !handles)
+        return 0;
+    for (usize i = 0; i < count && !g_winre_device; ++i) {
+        simple_fs_protocol *fs = 0;
+        file_protocol *root = 0;
+        if (handle_protocol(handles[i], &g_simple_fs_guid, (void **)&fs) != 0 || !fs || !fs->open_volume ||
+            fs->open_volume(fs, &root) != 0 || !root || !root->open) continue;
+        if (volume_has(root, g_winre_loader) && volume_has(root, g_winre_wim)) g_winre_device = handles[i];
+        if (root->close) root->close(root);
+    }
+    if (free_pool) free_pool(handles);
+    return g_winre_device != 0;
+}
+
+/* Device path of the volume + a file-path node for the boot manager. */
+static int winre_start(void *image_handle, void *boot_services) {
+    if (!g_winre_device) return 0;
+    handle_protocol_fn handle_protocol = *(handle_protocol_fn *)((u8 *)boot_services + 0x98);
+    allocate_pool_fn allocate_pool = *(allocate_pool_fn *)((u8 *)boot_services + 0x40);
+    load_image_fn load_image = *(load_image_fn *)((u8 *)boot_services + 0xc8);
+    start_image_fn start_image = *(start_image_fn *)((u8 *)boot_services + 0xd0);
+    u8 *dp = 0;
+    if (!handle_protocol || !allocate_pool || !load_image || !start_image ||
+        handle_protocol(g_winre_device, &g_device_path_guid, (void **)&dp) != 0 || !dp) return 0;
+    usize prefix = 0;
+    for (u32 guard = 0; guard < 64u; ++guard) {           /* up to the end node */
+        u16 len = (u16)(dp[prefix + 2] | (dp[prefix + 3] << 8));
+        if (dp[prefix] == 0x7f && dp[prefix + 1] == 0xff) break;
+        if (len < 4u) return 0;
+        prefix += len;
+    }
+    usize name_bytes = sizeof(g_winre_loader);
+    usize node = 4u + name_bytes;
+    u8 *full = 0;
+    if (allocate_pool(4, prefix + node + 4u, (void **)&full) != 0 || !full) return 0;
+    for (usize i = 0; i < prefix; ++i) full[i] = dp[i];
+    full[prefix] = 0x04; full[prefix + 1] = 0x04;         /* media / file path */
+    full[prefix + 2] = (u8)node; full[prefix + 3] = (u8)(node >> 8);
+    for (usize i = 0; i < name_bytes; ++i) full[prefix + 4 + i] = ((const u8 *)g_winre_loader)[i];
+    full[prefix + node] = 0x7f; full[prefix + node + 1] = 0xff;
+    full[prefix + node + 2] = 4; full[prefix + node + 3] = 0;
+    void *child = 0;
+    if (load_image(0, image_handle, full, 0, 0, &child) != 0 || !child) {
+        marker("WINRE_LOAD=FAILED");
+        return 0;
+    }
+    marker("WINRE_LOAD=PASS");
+    persist_trace(g_trace_image_handle, g_trace_boot_services);
+    start_image(child, 0, 0);                              /* returns only on failure */
+    marker("WINRE_START=RETURNED");
+    return 0;
+}
+static u8 g_nav_launch;
 
 typedef struct {
     u32 speak, help, enter, target, child_first;
@@ -1511,6 +1605,16 @@ static int nav_run(void *system_table) {
                     }
                     stack_index[depth] = found;
                     nav_say(nav_child(c, found)->speak, NAV_NONE);
+                }
+            } else if (uc == 0x0du && item && item->role == NAV_ROLE_LAUNCH) {  /* start accessible WinRE */
+                if (winre_locate(g_trace_boot_services)) {
+                    marker("WINRE_FOUND=PASS");
+                    g_nav_launch = 1;
+                    quitting = 1;
+                    nav_say(g_nav_sys[NAV_SYS_LAUNCHING], NAV_NONE);
+                } else {
+                    marker("WINRE_FOUND=NO");
+                    nav_say(g_nav_sys[NAV_SYS_LAUNCH_MISSING], NAV_NONE);
                 }
             } else if (uc == 0x0du) {                          /* enter: open sub-menu */
                 if (item && item->target != NAV_NONE && depth + 1u < NAV_MAX_DEPTH) {
@@ -2219,6 +2323,12 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     if (g_last_reason) { serial_puts("OMNI_SR_LAST_"); marker(g_last_reason); }
     if (g_trace_truncated) marker("OMNI_SR_TRACE_TRUNCATED");
     persist_trace(g_trace_image_handle, g_trace_boot_services);
+#ifdef QEV_INTERACTIVE_NAV
+    if (rc == 0 && g_nav_launch) {
+        speech_dma_stop();
+        winre_start(image_handle, g_trace_boot_services);   /* only returns on failure */
+    }
+#endif
     return rc;
 }
 
@@ -2234,6 +2344,11 @@ static u64 screen_reader_main(void *image_handle, void *system_table) {
     if (boot_services) {
         g_allocate_pages = *(allocate_pages_fn *)((u8 *)boot_services + 0x28);
         g_stall = *(stall_fn *)((u8 *)boot_services + 0xf8);
+        /* The boot manager arms a 5-minute watchdog before starting a boot
+           application; reading BIOS menus takes longer, so disarm it. */
+        typedef u64 (*set_watchdog_fn)(usize timeout, u64 code, usize size, u16 *data);
+        set_watchdog_fn set_watchdog = *(set_watchdog_fn *)((u8 *)boot_services + 0x100);
+        if (set_watchdog && set_watchdog(0, 0, 0, 0) == 0) marker("WATCHDOG_DISABLED=PASS");
     }
     if (phrase_bank_open(image_handle, boot_services)) {
         marker("PHRASE_BANK=LOADED");
