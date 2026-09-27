@@ -21,18 +21,32 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install toolchain, QEMU and OVMF
+      - name: Install QEMU and OVMF
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld qemu-system-x86 ovmf
-          clang --version | head -n 1
+          sudo apt-get install -y qemu-system-x86 ovmf
           ls /usr/share/OVMF/
+
+      # The release is reproducible for one exact toolchain: LLVM 23.1.1, the
+      # version of the reference Windows build. Official archive, pinned digest.
+      - name: Pinned LLVM 23.1.1
+        run: |
+          set -euo pipefail
+          archive=LLVM-23.1.1-Linux-X64.tar.xz
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.1/$archive"
+          echo "832aeb58d105de1cabc7b982dd2c65de0610f7377df48ae8fc2dd8e97420a15c  $RUNNER_TEMP/$archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/llvm"
+          tar -xJf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/llvm" --strip-components=1 \
+            --wildcards '*/bin/clang*' '*/bin/lld*' '*/lib/clang/*'
+          rm "$RUNNER_TEMP/$archive"
+          "$RUNNER_TEMP/llvm/bin/clang" --version | head -n 1
 
       - name: Reproducible release build and PE audit
         shell: pwsh
         run: |
-          ./boot/uefi-hii-graph-prompt-speech-v1/build_release.ps1 -OutDir "$env:RUNNER_TEMP/release"
+          ./boot/uefi-hii-graph-prompt-speech-v1/build_release.ps1 -OutDir "$env:RUNNER_TEMP/release" -Llvm "$env:RUNNER_TEMP/llvm/bin"
           Get-Content "$env:RUNNER_TEMP/release/BUILD-INFO.json"
 
       - name: Synthetic NAV.BIN

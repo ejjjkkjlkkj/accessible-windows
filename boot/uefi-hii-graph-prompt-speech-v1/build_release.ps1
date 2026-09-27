@@ -66,6 +66,9 @@ if ($machine -ne 0x8664 -or $magic -ne 0x20b) { throw 'not PE32+ x64' }
 if ($subsys -ne 10) { throw "subsystem $subsys is not EFI_APPLICATION" }
 if (-not ($dllch -band 0x100)) { throw 'NX_COMPAT not set' }
 if ($align -ne 4096) { throw "section alignment $align, expected 4096" }
+$coffCh = [BitConverter]::ToUInt16($pe, $coff + 18)
+if ($coffCh -band 0x0001) { throw 'IMAGE_FILE_RELOCS_STRIPPED: firmware could not relocate the image' }
+if (-not ($dllch -band 0x40)) { throw 'DYNAMIC_BASE not set' }
 if (-not $relocSize) { throw 'no base relocations' }
 $sections = @()
 for ($i = 0; $i -lt $nsec; $i++) {
@@ -75,7 +78,7 @@ for ($i = 0; $i -lt $nsec; $i++) {
     if (($ch -band 0x80000000) -and ($ch -band 0x20000000)) { throw "section $name is writable and executable" }
     $sections += [ordered]@{ name = $name; characteristics = ('0x{0:X8}' -f $ch) }
 }
-Write-Host '[PASS] PE32+ x64 EFI application, NX_COMPAT, 4 KiB alignment, W^X, relocations'
+Write-Host '[PASS] PE32+ x64 EFI application, NX_COMPAT, DYNAMIC_BASE, 4 KiB alignment, W^X, relocations'
 
 Copy-Item (Join-Path $tmp a SCREENREADER.EFI) (Join-Path $OutDir 'SCREENREADER.EFI') -Force
 $sums = @("$a  SCREENREADER.EFI")
