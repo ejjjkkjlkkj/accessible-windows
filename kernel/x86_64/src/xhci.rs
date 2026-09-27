@@ -11,6 +11,7 @@ use crate::debug_write;
 use crate::debug_write_hex_u64;
 use crate::debug_write_u8;
 use crate::pci_config::{BAR0, COMMAND_REGISTER, PciFunction};
+use crate::virtual_memory::IDENTITY_GIB;
 
 const PCI_CLASS_SERIAL_BUS: u8 = 0x0c;
 const PCI_SUBCLASS_USB: u8 = 0x03;
@@ -131,4 +132,76 @@ pub fn prove_pci_discovery(handoff: &KernelHandoff) {
     debug_write_hex_u64(u64::from(controller.command));
     debug_write("\n");
     debug_write("AW_XHCI_PCI_DISCOVERY_PROOF_OK\n");
+}
+
+
+const GIB: u64 = 1 << 30;
+const CAP_HCSPARAMS1: u64 = 0x04;
+const CAP_HCCPARAMS1: u64 = 0x10;
+const CAP_DBOFF: u64 = 0x14;
+const CAP_RTSOFF: u64 = 0x18;
+
+unsafe fn mmio_read_u32(address: u64) -> u32 {
+    // SAFETY: caller proves the address is inside the active low identity map
+    // and belongs to the discovered xHCI BAR.
+    unsafe { (address as *const u32).read_volatile() }
+}
+
+/// Read and validate xHCI capability registers without changing controller
+/// state. This proves that the BAR is not only discoverable through PCI config
+/// space but actually reachable through the kernel-owned page tables.
+pub fn prove_mmio_capabilities(handoff: &KernelHandoff) {
+    debug_write("AW_XHCI_MMIO_BEGIN\n");
+    let Some(controller) = find(handoff) else {
+        debug_write("AW_XHCI_MMIO_UNAVAILABLE reason=no_controller\n");
+        return;
+    };
+
+    let identity_limit = IDENTITY_GIB * GIB;
+    let Some(last_register) = controller.bar0.checked_add(CAP_RTSOFF + 4) else {
+        debug_write("AW_XHCI_MMIO_UNAVAILABLE reason=bar_overflow\n");
+        return;
+    };
+    if last_register > identity_limit {
+        debug_write("AW_XHCI_MMIO_UNAVAILABLE reason=bar_outside_identity\n");
+        return;
+    }
+
+    // SAFETY: the full register range checked above is inside the active
+    // identity map, and BAR0 came from the xHCI PCI function.
+    let cap0 = unsafe { mmio_read_u32(controller.bar0) };
+    let cap_length = (cap0 & 0xff) as u8;
+    let hcs1 = unsafe { mmio_read_u32(controller.bar0 + CAP_HCSPARAMS1) };
+    let hcc1 = unsafe { mmio_read_u32(controller.bar0 + CAP_HCCPARAMS1) };
+    let dboff = unsafe { mmio_read_u32(controller.bar0 + CAP_DBOFF) };
+    let rtsoff = unsafe { mmio_read_u32(controller.bar0 + CAP_RTSOFF) };
+
+    let max_slots = (hcs1 & 0xff) as u8;
+    let max_ports = ((hcs1 >> 24) & 0xff) as u8;
+    let context_bytes = if hcc1 & (1 << 2) != 0 { 64 } else { 32 };
+
+    if cap_length < 0x20
+        || max_slots == 0
+        || max_ports == 0
+        || dboff & 0x3 != 0
+        || rtsoff & 0x1f != 0
+    {
+        debug_write("AW_XHCI_MMIO_FAIL reason=capability_shape\n");
+        return;
+    }
+
+    debug_write("AW_XHCI_MMIO_CAP caplen=");
+    debug_write_u8(cap_length);
+    debug_write(" slots=");
+    debug_write_u8(max_slots);
+    debug_write(" ports=");
+    debug_write_u8(max_ports);
+    debug_write(" ctx=");
+    debug_write_u8(context_bytes);
+    debug_write(" dboff=");
+    debug_write_hex_u64(u64::from(dboff));
+    debug_write(" rtsoff=");
+    debug_write_hex_u64(u64::from(rtsoff));
+    debug_write("\n");
+    debug_write("AW_XHCI_MMIO_CAP_PROOF_OK\n");
 }
