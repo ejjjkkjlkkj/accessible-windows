@@ -52,6 +52,7 @@ mod screen_reader;
 mod security_baseline;
 mod serial;
 mod smp;
+mod usb_hid_keyboard;
 mod virtio_blk;
 mod virtio_net;
 mod virtual_memory;
@@ -1572,6 +1573,9 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         // SMP, while only IRQ1 is unmasked, so delivery is unambiguous.
         // SAFETY: CPL0 on the bootstrap processor; IDT installed, x2APIC enabled.
         unsafe { ps2_keyboard::prove(handoff) };
+        // Prove the transport-independent USB HID report -> menu-key contract.
+        // This is deliberately not a claim that an xHCI device was driven yet.
+        usb_hid_keyboard::prove_decode_path();
         // SMP reads x2APIC MSRs and shares the kernel-owned page tables.
         if timer_ready && memory_ready {
             bring_up_secondary_processors(handoff);
