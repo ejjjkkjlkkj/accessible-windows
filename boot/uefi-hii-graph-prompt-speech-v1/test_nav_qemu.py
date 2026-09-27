@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import shutil
 import socket
@@ -21,6 +22,8 @@ import subprocess
 import sys
 import time
 
+os.environ.setdefault("MTOOLS_SKIP_CHECK", "1")
+
 KEYS = ["down", "down", "ret", "down", "h", "right", "right", "left", "spc", "r",
         "esc", "end", "home", "pgdn", "esc", "esc"]
 
@@ -28,14 +31,35 @@ KEYS = ["down", "down", "ret", "down", "h", "right", "right", "left", "spc", "r"
 OVMF_VARS: str | None = None
 
 
-def qemu_cmd(qemu: str, ovmf: str, esp: pathlib.Path, serial: pathlib.Path, extra: list[str]) -> list[str]:
+def fat_image(esp: pathlib.Path) -> pathlib.Path | None:
+    """Real FAT32 image of the ESP when dosfstools + mtools exist (Linux CI):
+    QEMU's writable vvfat corrupts files the guest rewrites on some versions."""
+    if not (shutil.which("mkfs.fat") and shutil.which("mcopy")):
+        return None
+    img = esp.parent / "esp.img"
+    img.unlink(missing_ok=True)
+    size = sum(p.stat().st_size for p in esp.rglob("*") if p.is_file()) + 64 * 1024 * 1024
+    with img.open("wb") as f:
+        f.truncate(size)
+    subprocess.run(["mkfs.fat", "-F", "32", str(img)], check=True, capture_output=True)
+    subprocess.run(["mcopy", "-s", "-i", str(img)] + [str(p) for p in esp.iterdir()] + ["::"], check=True)
+    return img
+
+
+def fat_read(img: pathlib.Path, name: str, dest: pathlib.Path) -> None:
+    subprocess.run(["mcopy", "-o", "-i", str(img), f"::{name}", str(dest)], capture_output=True)
+
+
+def qemu_cmd(qemu: str, ovmf: str, esp: pathlib.Path, serial: pathlib.Path, extra: list[str],
+             image: pathlib.Path | None = None) -> list[str]:
     flash = ["-drive", f"if=pflash,format=raw,readonly=on,file={ovmf}"]
     if OVMF_VARS:  # private writable copy of the variable store per run
         vars_copy = esp.parent / "OVMF_VARS.fd"
         shutil.copy(OVMF_VARS, vars_copy)
         flash += ["-drive", f"if=pflash,format=raw,file={vars_copy}"]
+    disk = f"format=raw,file={image}" if image else f"format=raw,file=fat:rw:{esp}"
     return [qemu, "-machine", "q35", "-m", "1024", *flash,
-            "-drive", f"format=raw,file=fat:rw:{esp}", "-serial", f"file:{serial}", "-display", "none",
+            "-drive", disk, "-serial", f"file:{serial}", "-display", "none",
             "-net", "none", "-device", "intel-hda"] + extra
 
 
@@ -91,9 +115,10 @@ def navigation(a) -> bool:
     esp = make_esp(work / "esp", pathlib.Path(a.efi), pathlib.Path(a.nav).read_bytes())
     serial, wav = work / "serial.txt", work / "audio.wav"
     port = 4460
+    image = fat_image(esp)
     p = subprocess.Popen(qemu_cmd(a.qemu, a.ovmf, esp, serial,
                                   ["-device", "hda-duplex,audiodev=a0", "-audiodev", f"wav,id=a0,path={wav}",
-                                   "-qmp", f"tcp:127.0.0.1:{port},server,nowait"]))
+                                   "-qmp", f"tcp:127.0.0.1:{port},server,nowait"], image))
     try:
         text = wait_for(serial, ("NAV_READY=PASS", "STATUS=BLOCKED"), 180)
         if "NAV_READY=PASS" not in text:
@@ -113,13 +138,18 @@ def navigation(a) -> bool:
         text = wait_for(serial, ("NAV_EXIT=PASS", "OMNI_SR_EXIT"), 60)
         # The exit trace is written after the exit marker; slow (TCG) runners
         # need more than a fixed pause before QEMU is shut down.
-        wait_for(esp / "OMNI-SR-TRACE.TXT", ("OMNI_SR_EXIT",), 60)
-        time.sleep(1)
+        if image:
+            time.sleep(15)
+        else:
+            wait_for(esp / "OMNI-SR-TRACE.TXT", ("OMNI_SR_EXIT",), 60)
+            time.sleep(1)
         f.write('{"execute":"quit"}\n'); f.flush()
         p.wait(20)
     finally:
         if p.poll() is None:
             p.kill()
+    if image:
+        fat_read(image, "OMNI-SR-TRACE.TXT", esp / "OMNI-SR-TRACE.TXT")
     keys_seen = text.count("NAV_KEY=")
     trace = (esp / "OMNI-SR-TRACE.TXT").read_text(errors="replace") if (esp / "OMNI-SR-TRACE.TXT").exists() else ""
     audio = audio_report(wav)
