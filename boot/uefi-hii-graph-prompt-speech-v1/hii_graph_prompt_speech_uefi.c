@@ -3,6 +3,8 @@ typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef unsigned long long usize;
+typedef signed short i16;
+typedef signed int i32;
 
 #ifndef QEV_SOURCE_BLOB
 #define QEV_SOURCE_BLOB "UNBOUND"
@@ -71,6 +73,9 @@ static u64 g_speech_dma_base;
 static u8 g_speech_dma_allocations;
 static u8 g_speech_stream_initialized;
 static u8 g_proof_overflow;
+static u32 g_bank_count;  /* phrase bank entries loaded (0 = letter spelling only) */
+static u32 g_bank_hits;
+static u32 g_bank_misses;
 static u8 g_speech_active;
 static u64 g_speech_timeout_us;
 static u64 g_speech_elapsed_us;
@@ -196,6 +201,15 @@ static inline u32 inl(u16 port) {
 static inline void fence(void) {
     __asm__ volatile("mfence" ::: "memory");
 }
+/*
+ * mfence only orders stores; it does not push them out of the CPU cache. A
+ * non-snooping HDA controller would then DMA stale RAM, which plays as noise
+ * while LPIB still advances normally (QEMU is always coherent and cannot show
+ * it). Write back every dirty line before handing a buffer to the controller.
+ */
+static inline void cache_writeback(void) {
+    __asm__ volatile("mfence\n\twbinvd" ::: "memory");
+}
 
 static void serial_init(void) {
     outb(0x3f9, 0x00);
@@ -206,7 +220,20 @@ static void serial_init(void) {
     outb(0x3fa, 0xc7);
     outb(0x3fc, 0x0b);
 }
+/*
+ * Physical machines have no COM1, so every serial line is also kept in RAM and
+ * written to \OMNI-SR-TRACE.TXT on every exit, including BLOCKED ones.
+ */
+static char g_trace[16384];
+static usize g_trace_n;
+static u8 g_trace_truncated;
+static u8 g_trace_final;  /* exit lines may use the reserved tail */
+static void *g_trace_image_handle;
+static void *g_trace_boot_services;
 static void serial_char(char ch) {
+    usize limit = g_trace_final ? sizeof(g_trace) : sizeof(g_trace) - 512u;
+    if (g_trace_n + 1u < limit) g_trace[g_trace_n++] = ch;
+    else g_trace_truncated = 1;
     u32 timeout = 1000000;
     while (timeout-- && !(inb(0x3fd) & 0x20)) {}
     outb(0x3f8, (u8)ch);
@@ -225,7 +252,10 @@ static void serial_hex32(u32 value) {
     serial_hex8((u8)(value >> 8));
     serial_hex8((u8)value);
 }
+static const char *g_last_reason;
 static void marker(const char *s) {
+    if (s[0] == 'R' && s[1] == 'E' && s[2] == 'A' && s[3] == 'S' &&
+        s[4] == 'O' && s[5] == 'N' && s[6] == '=') g_last_reason = s;
     serial_puts(s);
     serial_puts("\r\n");
 }
@@ -322,6 +352,13 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     proof_puts(proof,sizeof(proof),&n,"HDA_SELECTED_PIN_DEFAULT_CONFIG=0x");
     proof_hex32(proof,sizeof(proof),&n,g_selected_pin_default_config);
     proof_puts(proof,sizeof(proof),&n,"\r\n");
+    proof_puts(proof,sizeof(proof),&n,"PHRASE_BANK_ENTRIES=0x");
+    proof_hex32(proof,sizeof(proof),&n,g_bank_count);
+    proof_puts(proof,sizeof(proof),&n,"\r\nPHRASE_BANK_HITS=0x");
+    proof_hex32(proof,sizeof(proof),&n,g_bank_hits);
+    proof_puts(proof,sizeof(proof),&n,"\r\nPHRASE_BANK_MISSES=0x");
+    proof_hex32(proof,sizeof(proof),&n,g_bank_misses);
+    proof_puts(proof,sizeof(proof),&n,"\r\n");
     proof_puts(proof,sizeof(proof),&n,"HDA_CODEC_SELECTION=");
     proof_puts(proof,sizeof(proof),&n,
         g_controller_preferred ? "REALTEK_10EC_0256\r\n" : "GENERIC_RUNTIME\r\n");
@@ -409,6 +446,150 @@ static int persist_boot_proof(void *image_handle, void *boot_services,
     if (file->close) file->close(file);
     if (root->close) root->close(root);
     return st == 0 && bytes == n;
+}
+
+static int persist_trace(void *image_handle, void *boot_services) {
+    static const u16 filename[] = {
+        '\\','O','M','N','I','-','S','R','-','T','R','A','C','E','.','T','X','T',0
+    };
+    loaded_image_protocol_head *loaded = 0;
+    simple_fs_protocol *fs = 0;
+    file_protocol *root = 0;
+    file_protocol *file = 0;
+    if (!boot_services || !image_handle) return 0;
+    handle_protocol_fn handle_protocol =
+        *(handle_protocol_fn *)((u8 *)boot_services + 0x98);
+    if (!handle_protocol) return 0;
+    if (handle_protocol(image_handle, &g_loaded_image_guid, (void **)&loaded) != 0 ||
+        !loaded || !loaded->device_handle) return 0;
+    if (handle_protocol(loaded->device_handle, &g_simple_fs_guid, (void **)&fs) != 0 ||
+        !fs || !fs->open_volume) return 0;
+    if (fs->open_volume(fs, &root) != 0 || !root || !root->open) return 0;
+
+    /* Same truncation rule as persist_boot_proof: delete, then create. */
+    const u64 rw_mode = 0x2ull | 0x1ull;
+    file_protocol *old_file = 0;
+    if (root->open(root, (void **)&old_file, filename, rw_mode, 0) == 0 && old_file) {
+        if (!old_file->delete_file || old_file->delete_file(old_file) != 0) {
+            if (!old_file->delete_file && old_file->close) old_file->close(old_file);
+            if (root->close) root->close(root);
+            return 0;
+        }
+    }
+    const u64 create_mode = 0x8000000000000000ull | rw_mode;
+    if (root->open(root, (void **)&file, filename, create_mode, 0) != 0 ||
+        !file || !file->write) {
+        if (root->close) root->close(root);
+        return 0;
+    }
+    usize bytes = g_trace_n;
+    u64 st = file->write(file, &bytes, g_trace);
+    if (st == 0 && file->flush) st = file->flush(file);
+    if (file->close) file->close(file);
+    if (root->close) root->close(root);
+    return st == 0 && bytes == g_trace_n;
+}
+
+/*
+ * Natural-speech phrase bank (\EFI\OMNI\PHRASES.BIN, built by build_phrase_bank.py
+ * with ST's neural voice). Key: FNV-1a 64 of the exact text the reader speaks.
+ * Clips are 24 kHz signed-16 mono; they are expanded to the 48 kHz stereo DMA
+ * format at playback. Missing file or unknown text: letter spelling as before.
+ */
+typedef u64 (*file_read_fn)(void *self, usize *buffer_size, void *buffer);
+typedef u64 (*file_set_position_fn)(void *self, u64 position);
+#define PHRASE_BANK_MAX_ENTRIES 16384u
+#define PHRASE_BANK_MAX_CLIP_BYTES (1024u * 1024u)
+static file_protocol *g_bank_file;
+static u32 g_bank_data_off;
+static u8 *g_bank_index;
+static u8 *g_bank_clip;
+
+static u64 phrase_fnv1a64(const char *text, u32 count) {
+    u64 h = 0xcbf29ce484222325ull;
+    for (u32 i = 0; i < count; ++i) h = (h ^ (u8)text[i]) * 0x100000001b3ull;
+    return h;
+}
+
+static int phrase_bank_read(u64 position, void *buffer, usize bytes) {
+    if (!g_bank_file || !g_bank_file->set_position || !g_bank_file->read) return 0;
+    if (((file_set_position_fn)g_bank_file->set_position)(g_bank_file, position) != 0) return 0;
+    usize got = bytes;
+    return ((file_read_fn)g_bank_file->read)(g_bank_file, &got, buffer) == 0 && got == bytes;
+}
+
+static int phrase_bank_open(void *image_handle, void *boot_services) {
+    static const u16 name[] = {
+        '\\','E','F','I','\\','O','M','N','I','\\','P','H','R','A','S','E','S','.','B','I','N',0
+    };
+    loaded_image_protocol_head *loaded = 0;
+    simple_fs_protocol *fs = 0;
+    file_protocol *root = 0;
+    u8 header[32];
+    if (!image_handle || !boot_services || !g_allocate_pages) return 0;
+    handle_protocol_fn handle_protocol = *(handle_protocol_fn *)((u8 *)boot_services + 0x98);
+    if (!handle_protocol ||
+        handle_protocol(image_handle, &g_loaded_image_guid, (void **)&loaded) != 0 || !loaded ||
+        !loaded->device_handle ||
+        handle_protocol(loaded->device_handle, &g_simple_fs_guid, (void **)&fs) != 0 || !fs ||
+        !fs->open_volume || fs->open_volume(fs, &root) != 0 || !root || !root->open) return 0;
+    if (root->open(root, (void **)&g_bank_file, name, 0x1ull, 0) != 0 || !g_bank_file) {
+        g_bank_file = 0;
+        return 0;
+    }
+    if (!phrase_bank_read(0, header, sizeof(header))) return 0;
+    static const char magic[8] = {'Q','E','V','P','H','R','0','1'};
+    for (u32 i = 0; i < 8u; ++i) if (header[i] != (u8)magic[i]) return 0;
+    u32 count = *(u32 *)(header + 8);
+    u32 rate = *(u32 *)(header + 12), channels = *(u32 *)(header + 16), bits = *(u32 *)(header + 20);
+    u32 index_off = *(u32 *)(header + 24), data_off = *(u32 *)(header + 28);
+    if (!count || count > PHRASE_BANK_MAX_ENTRIES || rate != 24000u || channels != 1u || bits != 16u ||
+        index_off != 32u || data_off != index_off + count * 16u) return 0;
+    u64 index_mem = 0xffffffffu, clip_mem = 0xffffffffu;
+    usize index_pages = ((usize)count * 16u + 4095u) / 4096u;
+    if (g_allocate_pages(1, 4, index_pages, &index_mem) != 0 || !index_mem) return 0;
+    if (g_allocate_pages(1, 4, PHRASE_BANK_MAX_CLIP_BYTES / 4096u, &clip_mem) != 0 || !clip_mem) return 0;
+    g_bank_index = (u8 *)(usize)index_mem;
+    g_bank_clip = (u8 *)(usize)clip_mem;
+    if (!phrase_bank_read(index_off, g_bank_index, (usize)count * 16u)) return 0;
+    g_bank_count = count;
+    g_bank_data_off = data_off;
+    return 1;
+}
+
+/* Binary search; returns clip byte length (0 = not in bank) and its file offset. */
+static u32 phrase_bank_lookup(const char *text, u32 count, u64 *position_out) {
+    if (!g_bank_count || !text || !count) return 0;
+    u64 h = phrase_fnv1a64(text, count);
+    u32 lo = 0, hi = g_bank_count;
+    while (lo < hi) {
+        u32 mid = lo + (hi - lo) / 2u;
+        u64 key = *(u64 *)(g_bank_index + (usize)mid * 16u);
+        if (key == h) {
+            u32 off = *(u32 *)(g_bank_index + (usize)mid * 16u + 8u);
+            u32 len = *(u32 *)(g_bank_index + (usize)mid * 16u + 12u);
+            if (!len || (len & 1u) || len > PHRASE_BANK_MAX_CLIP_BYTES) return 0;
+            *position_out = (u64)g_bank_data_off + off;
+            return len;
+        }
+        if (key < h) lo = mid + 1u; else hi = mid;
+    }
+    return 0;
+}
+
+/* 24 kHz mono -> 48 kHz stereo (linear interpolation). Returns bytes written or 0. */
+static u32 phrase_bank_expand(volatile u8 *pcm, u32 room, u32 clip_bytes) {
+    u32 samples = clip_bytes / 2u;
+    if (!samples || (u64)samples * 8u > room) return 0;
+    const i16 *s = (const i16 *)g_bank_clip;
+    volatile i16 *d = (volatile i16 *)pcm;
+    for (u32 i = 0; i < samples; ++i) {
+        i32 a = s[i], b = (i + 1u < samples) ? s[i + 1u] : 0;
+        i16 mid = (i16)((a + b) / 2);
+        d[i * 4u + 0u] = (i16)a; d[i * 4u + 1u] = (i16)a;
+        d[i * 4u + 2u] = mid;    d[i * 4u + 3u] = mid;
+    }
+    return samples * 8u;
 }
 
 static u32 pci_read32(u32 cfg) {
@@ -836,7 +1017,21 @@ static int speech_dma_begin(const char *text, u32 text_count) {
     if (total_bytes > dma_bytes - pcm_off) return 0;
     for (u32 i = 0; i < total_bytes; ++i) pcm[i] = 0;
 
-    for (u32 i = 0; i < text_count; ++i) {
+    /* Natural phrase from the bank when this exact text was pre-rendered. */
+    u64 clip_position = 0;
+    u32 clip_bytes = phrase_bank_lookup(text, text_count, &clip_position);
+    u32 phrase_bytes = 0;
+    if (clip_bytes && phrase_bank_read(clip_position, g_bank_clip, clip_bytes))
+        phrase_bytes = phrase_bank_expand(pcm + total_bytes, dma_bytes - pcm_off - total_bytes, clip_bytes);
+    if (phrase_bytes) {
+        total_bytes += phrase_bytes;
+        ++g_bank_hits;
+        marker("HII_GRAPH_SPEECH_SOURCE=PHRASE_BANK");
+    } else {
+        if (g_bank_count) ++g_bank_misses;
+    }
+
+    for (u32 i = 0; !phrase_bytes && i < text_count; ++i) {
         u8 ch = (u8)text[i];
         if (ch == (u8)' ') {
             if (qev_sil_unit_index >= qev_unit_count) return 0;
@@ -901,7 +1096,7 @@ static int speech_dma_begin(const char *text, u32 text_count) {
     }
     if (!entries) return 0;
     *(volatile u32 *)(bdl + (entries - 1u) * 16u + 0x0c) = 1u;
-    fence();
+    cache_writeback();
 
     volatile u8 *sd = speech_stream_descriptor();
     if (!sd) return 0;
@@ -1288,6 +1483,21 @@ static int discover_controller(void) {
     if ((pci_read32(cfg | 0x04) & 0x00000006u) != 0x00000006u) return 0;
     marker("PCI_COMMAND_MEMORY_BUSMASTER=PASS");
 
+    /* AMD/ATI HDA (Linux AZX_SNOOP_TYPE_ATI): config byte 0x42 bits 2:0 must be
+       010b or the controller DMAs without snooping the CPU caches. */
+    u16 pci_vendor = (u16)(pci_read32(cfg) & 0xffffu);
+    if (pci_vendor == 0x1022u || pci_vendor == 0x1002u) {
+        u32 misc = pci_read32(cfg | 0x40);
+        u8 before = (u8)(misc >> 16);
+        u8 wanted = (u8)((before & ~0x07u) | 0x02u);
+        if (before != wanted)
+            pci_write32(cfg | 0x40, (misc & ~0x00ff0000u) | ((u32)wanted << 16));
+        u8 after = (u8)(pci_read32(cfg | 0x40) >> 16);
+        serial_puts("HDA_ATI_SNOOP_REG42_BEFORE=0x"); serial_hex8(before); serial_puts("\r\n");
+        serial_puts("HDA_ATI_SNOOP_REG42_AFTER=0x"); serial_hex8(after); serial_puts("\r\n");
+        marker((after & 0x07u) == 0x02u ? "HDA_ATI_SNOOP=ENABLED" : "HDA_ATI_SNOOP=NOT_ESTABLISHED");
+    }
+
     u32 bar0 = pci_read32(cfg | 0x10);
     if (bar0 & 1) return 0;
     u64 bar = (u64)(bar0 & 0xfffffff0u);
@@ -1481,6 +1691,9 @@ static int wait_navigation_keys(void *system_table) {
 
     marker("HII_GRAPH_NAV_READY=PASS");
     marker("HII_GRAPH_NAV_REALTIME_MODE=INTERRUPTIBLE_DMA");
+    /* Checkpoint: navigation has no timeout, so the machine is usually powered
+       off from here and the exit trace would never be written. */
+    persist_trace(g_trace_image_handle, g_trace_boot_services);
     serial_puts("HII_GRAPH_NAV_TOTAL=0x");
     serial_hex8(g_nav_prompt_total);
     serial_puts("\r\n");
@@ -1600,7 +1813,21 @@ static int wait_navigation_keys(void *system_table) {
 }
 #endif
 
+static u64 screen_reader_main(void *image_handle, void *system_table);
+
 __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
+    g_trace_image_handle = image_handle;
+    g_trace_boot_services = system_table ? *(void **)((u8 *)system_table + 0x60) : 0;
+    u64 rc = screen_reader_main(image_handle, system_table);
+    g_trace_final = 1;
+    marker(rc == 0 ? "OMNI_SR_EXIT=SUCCESS" : "OMNI_SR_EXIT=BLOCKED");
+    if (g_last_reason) { serial_puts("OMNI_SR_LAST_"); marker(g_last_reason); }
+    if (g_trace_truncated) marker("OMNI_SR_TRACE_TRUNCATED");
+    persist_trace(g_trace_image_handle, g_trace_boot_services);
+    return rc;
+}
+
+static u64 screen_reader_main(void *image_handle, void *system_table) {
     serial_init();
     marker("QEVARYNOX-UEFI-HII-GRAPH-PROMPT-SPEECH-V1");
     marker("STATE=START");
@@ -1612,6 +1839,13 @@ __attribute__((ms_abi)) u64 efi_main(void *image_handle, void *system_table) {
     if (boot_services) {
         g_allocate_pages = *(allocate_pages_fn *)((u8 *)boot_services + 0x28);
         g_stall = *(stall_fn *)((u8 *)boot_services + 0xf8);
+    }
+    if (phrase_bank_open(image_handle, boot_services)) {
+        marker("PHRASE_BANK=LOADED");
+        serial_puts("PHRASE_BANK_ENTRIES=0x"); serial_hex32(g_bank_count); serial_puts("\r\n");
+    } else {
+        g_bank_count = 0;
+        marker("PHRASE_BANK=ABSENT_LETTER_SPELLING");
     }
     if (!resolve_hii_prompt(system_table)) {
         marker("STATUS=BLOCKED");
