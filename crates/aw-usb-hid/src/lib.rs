@@ -151,11 +151,7 @@ impl BootKeyboardDecoder {
     /// Decode one 8-byte boot-keyboard report into transition events.
     ///
     /// Rollover/error reports are rejected without changing decoder state.
-    pub fn decode(
-        &mut self,
-        report: &[u8],
-        out: &mut [KeyEvent],
-    ) -> Result<usize, DecodeError> {
+    pub fn decode(&mut self, report: &[u8], out: &mut [KeyEvent]) -> Result<usize, DecodeError> {
         if report.len() != BOOT_REPORT_LEN {
             return Err(DecodeError::WrongLength);
         }
@@ -320,7 +316,10 @@ mod tests {
         assert_eq!(decoder.decode(&press, &mut out), Ok(1));
 
         let rollover = [0, 0, USAGE_ERROR_ROLLOVER, 0, 0, 0, 0, 0];
-        assert_eq!(decoder.decode(&rollover, &mut out), Err(DecodeError::Rollover));
+        assert_eq!(
+            decoder.decode(&rollover, &mut out),
+            Err(DecodeError::Rollover)
+        );
 
         let release = [0; BOOT_REPORT_LEN];
         assert_eq!(decoder.decode(&release, &mut out), Ok(1));
