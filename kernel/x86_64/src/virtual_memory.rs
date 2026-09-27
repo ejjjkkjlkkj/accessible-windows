@@ -41,10 +41,10 @@ const GIB: u64 = 1 << 30;
 const TWO_MIB: u64 = 2 * 1024 * 1024;
 
 /// Root plus enough sparse child tables for the low bootstrap window and every
-/// framebuffer/PCIe ECAM range handed off by firmware. 32 tables cost 128 KiB of
+/// framebuffer/PCIe ECAM range handed off by firmware. 40 tables cost 160 KiB of
 /// BSS and cover the worst case of four disjoint ECAM regions plus framebuffer
-/// ranges even when they cross PML4/PDPT boundaries.
-const PAGE_TABLE_CAPACITY: usize = 32;
+/// and xHCI MMIO ranges even when they cross PML4/PDPT boundaries.
+const PAGE_TABLE_CAPACITY: usize = 40;
 
 /// Number of 8-byte entries in one page table.
 const PAGE_TABLE_ENTRIES: usize = 512;
@@ -234,9 +234,10 @@ pub unsafe fn activate(
     guard_page: u64,
     extra_identity_ranges: &[(u64, u64)],
 ) -> Result<ActiveMap, VmmError> {
-    if !supports_1gib_pages() {
-        return Err(VmmError::NoOneGibPages);
-    }
+    // 1 GiB leaves are an optimization, not a correctness requirement.
+    // Older x86-64 CPUs such as Westmere lack CPUID.80000001H:EDX[26];
+    // build the same audited identity map from 2 MiB leaves on those CPUs.
+    let one_gib_pages = supports_1gib_pages();
 
     let layout = KernelImageLayout::current();
     if !layout.is_well_formed() || !guard_page.is_multiple_of(PAGE_SIZE) {
@@ -260,6 +261,7 @@ pub unsafe fn activate(
         layout,
         guard_page,
         extra_identity_ranges,
+        one_gib_pages,
     )?;
     audit_map(&builder, layout, guard_page, extra_identity_ranges)?;
 
@@ -321,6 +323,7 @@ fn build_map<F: FnMut() -> Option<u64>>(
     layout: KernelImageLayout,
     guard_page: u64,
     extra_identity_ranges: &[(u64, u64)],
+    one_gib_pages: bool,
 ) -> Result<(), VmmError> {
     let image_start = layout.start();
     let image_end = layout.end();
@@ -328,13 +331,14 @@ fn build_map<F: FnMut() -> Option<u64>>(
     let overlaps_image =
         |start: u64, span: u64| start < image_end && start.saturating_add(span) > image_start;
 
-    // Everything outside the kernel image: the largest leaf that fits, always
-    // RW and never executable. A 1 GiB region containing the image is broken
-    // down into 2 MiB leaves, and the 2 MiB region containing it is left for
-    // the 4 KiB pass below.
+    // Everything outside the kernel image: the largest CPU-supported leaf that
+    // fits, always RW and never executable. When 1 GiB pages are unavailable,
+    // the same low identity window is built entirely from 2 MiB leaves. A huge
+    // region containing the image is broken down and its image-bearing 2 MiB
+    // span is left for the 4 KiB pass below.
     let mut address = 0;
     while address < IDENTITY_GIB * GIB {
-        if address.is_multiple_of(GIB) && !overlaps_image(address, GIB) {
+        if one_gib_pages && address.is_multiple_of(GIB) && !overlaps_image(address, GIB) {
             map_huge(builder, frames, address, LeafSize::Size1GiB)?;
             address += GIB;
             continue;
@@ -372,7 +376,7 @@ fn build_map<F: FnMut() -> Option<u64>>(
         page += PAGE_SIZE;
     }
 
-    map_extra_identity_ranges(builder, frames, extra_identity_ranges)?;
+    map_extra_identity_ranges(builder, frames, extra_identity_ranges, one_gib_pages)?;
     Ok(())
 }
 
@@ -385,6 +389,7 @@ fn map_extra_identity_ranges<F: FnMut() -> Option<u64>>(
     builder: &mut OfflinePageTableBuilder<PAGE_TABLE_CAPACITY>,
     frames: &mut WindowedFrames<'_, F>,
     ranges: &[(u64, u64)],
+    one_gib_pages: bool,
 ) -> Result<(), VmmError> {
     let low_end = IDENTITY_GIB * GIB;
 
@@ -419,7 +424,7 @@ fn map_extra_identity_ranges<F: FnMut() -> Option<u64>>(
             }
 
             let remaining = end - address;
-            if address.is_multiple_of(GIB) && remaining >= GIB {
+            if one_gib_pages && address.is_multiple_of(GIB) && remaining >= GIB {
                 map_huge(builder, frames, address, LeafSize::Size1GiB)?;
                 address += GIB;
             } else if address.is_multiple_of(TWO_MIB) && remaining >= TWO_MIB {

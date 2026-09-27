@@ -131,6 +131,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aw-usb-hid"
+version = "0.1.0"
+
+[[package]]
 name = "aw-vmm-plan"
 version = "0.1.0"
 dependencies = [

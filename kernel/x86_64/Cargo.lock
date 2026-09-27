@@ -29,6 +29,7 @@ dependencies = [
  "aw-memory",
  "aw-pci",
  "aw-screen-reader",
+ "aw-usb-hid",
  "aw-x86-interrupts",
  "aw-x86-paging",
  "aw-x86-platform",
@@ -51,6 +52,10 @@ version = "0.1.0"
 dependencies = [
  "aw-accessibility",
 ]
+
+[[package]]
+name = "aw-usb-hid"
+version = "0.1.0"
 
 [[package]]
 name = "aw-x86-interrupts"
