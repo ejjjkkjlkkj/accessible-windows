@@ -446,6 +446,11 @@ fn activate_virtual_memory(handoff: &KernelHandoff) -> Option<virtual_memory::Ac
         }
     }
     debug_write("AW_VMM_NXE_ON\n");
+    if virtual_memory::supports_1gib_pages() {
+        debug_write("AW_VMM_LEAF_MAX size=1g\n");
+    } else {
+        debug_write("AW_VMM_LEAF_MAX size=2m fallback=1\n");
+    }
 
     // Build the exact firmware MMIO ranges that must survive the CR3 switch.
     // ECAM reserves 1 MiB of configuration space per bus by specification.
