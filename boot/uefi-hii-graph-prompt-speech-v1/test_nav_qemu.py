@@ -106,7 +106,10 @@ def navigation(a) -> bool:
             f.readline()
             time.sleep(a.key_gap)
         text = wait_for(serial, ("NAV_EXIT=PASS", "OMNI_SR_EXIT"), 60)
-        time.sleep(2)
+        # The exit trace is written after the exit marker; slow (TCG) runners
+        # need more than a fixed pause before QEMU is shut down.
+        wait_for(esp / "OMNI-SR-TRACE.TXT", ("OMNI_SR_EXIT",), 60)
+        time.sleep(1)
         f.write('{"execute":"quit"}\n'); f.flush()
         p.wait(20)
     finally:
