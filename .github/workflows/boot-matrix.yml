@@ -203,6 +203,7 @@ jobs:
           grep -F "AW_PCI_NVME_FOUND" "$LOG"
           grep -F "AW_PCI_AHCI_FOUND" "$LOG"
           grep -F "AW_PCI_XHCI_FOUND" "$LOG"
+          grep -F "AW_XHCI_PCI_DISCOVERY_PROOF_OK" "$LOG"
           grep -F "AW_PCI_HDA_FOUND" "$LOG"
           # Device interrupt routing needs x2APIC, which not every CPU model in
           # this matrix reports. Where it is available the proof must pass; a
