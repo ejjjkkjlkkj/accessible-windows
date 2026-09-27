@@ -1005,7 +1005,16 @@ static __attribute__((unused)) void speech_dma_fade_stop(void) {
             }
         }
         cache_writeback();
-        g_stall(40000);
+        /* Stop only once the controller has consumed the fade: a fixed delay
+           let prefetching controllers (QEMU) cut inside the fade. */
+        u32 fade_end = start + fade + hush / 2u;
+        if (fade_end > g_speech_payload) fade_end = g_speech_payload;
+        for (u32 waited = 0; waited < 100u; ++waited) {
+            u32 pos = *(volatile u32 *)(sd + 0x04);
+            if (pos >= fade_end || pos < lpib || (sd[3] & 0x04u)) break;   /* past fade, wrapped, or done */
+            g_stall(1000);
+        }
+        g_stall(5000);
     }
     speech_dma_stop();
 }
