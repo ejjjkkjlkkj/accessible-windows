@@ -11,11 +11,14 @@ use crate::debug_write;
 use crate::debug_write_hex_u64;
 use crate::debug_write_u8;
 use crate::pci_config::{BAR0, COMMAND_REGISTER, PciFunction};
-use crate::virtual_memory::IDENTITY_GIB;
 
 const PCI_CLASS_SERIAL_BUS: u8 = 0x0c;
 const PCI_SUBCLASS_USB: u8 = 0x03;
 const PCI_PROGIF_XHCI: u8 = 0x30;
+/// Conservative identity-mapped window for xHCI capabilities, operational
+/// registers, ports, runtime registers and doorbells. Mapping does not access
+/// the whole span; it only makes future controller registers reachable.
+pub const MMIO_WINDOW_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Controller {
@@ -135,7 +138,6 @@ pub fn prove_pci_discovery(handoff: &KernelHandoff) {
 }
 
 
-const GIB: u64 = 1 << 30;
 const CAP_HCSPARAMS1: u64 = 0x04;
 const CAP_HCCPARAMS1: u64 = 0x10;
 const CAP_DBOFF: u64 = 0x14;
@@ -150,25 +152,32 @@ unsafe fn mmio_read_u32(address: u64) -> u32 {
 /// Read and validate xHCI capability registers without changing controller
 /// state. This proves that the BAR is not only discoverable through PCI config
 /// space but actually reachable through the kernel-owned page tables.
-pub fn prove_mmio_capabilities(handoff: &KernelHandoff) {
+pub fn prove_mmio_capabilities(handoff: &KernelHandoff, memory_ready: bool) {
     debug_write("AW_XHCI_MMIO_BEGIN\n");
+    if !memory_ready {
+        debug_write("AW_XHCI_MMIO_UNAVAILABLE reason=vmm_not_ready\n");
+        return;
+    }
     let Some(controller) = find(handoff) else {
         debug_write("AW_XHCI_MMIO_UNAVAILABLE reason=no_controller\n");
         return;
     };
 
-    let identity_limit = IDENTITY_GIB * GIB;
     let Some(last_register) = controller.bar0.checked_add(CAP_RTSOFF + 4) else {
         debug_write("AW_XHCI_MMIO_UNAVAILABLE reason=bar_overflow\n");
         return;
     };
-    if last_register > identity_limit {
-        debug_write("AW_XHCI_MMIO_UNAVAILABLE reason=bar_outside_identity\n");
+    let Some(mapped_end) = controller.bar0.checked_add(MMIO_WINDOW_BYTES) else {
+        debug_write("AW_XHCI_MMIO_UNAVAILABLE reason=window_overflow\n");
+        return;
+    };
+    if last_register > mapped_end {
+        debug_write("AW_XHCI_MMIO_UNAVAILABLE reason=window_too_small\n");
         return;
     }
 
-    // SAFETY: the full register range checked above is inside the active
-    // identity map, and BAR0 came from the xHCI PCI function.
+    // SAFETY: activate_virtual_memory adds this controller's MMIO window to the
+    // audited identity map before CR3 is switched, and BAR0 came from xHCI PCI.
     let cap0 = unsafe { mmio_read_u32(controller.bar0) };
     let cap_length = (cap0 & 0xff) as u8;
     let hcs1 = unsafe { mmio_read_u32(controller.bar0 + CAP_HCSPARAMS1) };
