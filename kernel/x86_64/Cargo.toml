@@ -65,6 +65,9 @@ nvme-write-smoke-test = []
 # DMA rings, proves Run/Stop, then stops it again. QEMU-only and never enabled
 # in a normal or physical-hardware image.
 xhci-smoke-test = []
+# Extends the QEMU-only xHCI smoke path with a connected USB keyboard: reset a
+# port, enable/address a slot and fetch the device descriptor over EP0.
+xhci-enumeration-test = ["xhci-smoke-test"]
 
 
 [profile.dev]
