@@ -22,6 +22,7 @@ mod font;
 mod frame_allocator;
 mod framebuffer;
 mod gpt;
+mod ipc;
 mod hda;
 mod heap;
 #[cfg(feature = "disk-build-smoke-test")]
@@ -42,6 +43,7 @@ mod page_mapper;
 mod pci_config;
 mod percpu;
 mod pit;
+mod power;
 mod ps2_keyboard;
 mod ring3;
 mod rtc;
@@ -1605,6 +1607,10 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
                 // SAFETY: same preconditions; runs before any AP is online.
                 if memory_ready && timer_ready {
                     unsafe { ring3::prove_user_init(&device) };
+                    // Then two programs that talk through a kernel channel reached
+                    // only by handles, and the refusals of the handle model.
+                    // SAFETY: same preconditions as the init proof.
+                    unsafe { ring3::prove_user_ipc(&device) };
                 } else {
                     debug_write("AW_USER_INIT_SKIPPED reason=timer-or-memory-not-ready\n");
                 }
@@ -1694,9 +1700,26 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
 
         // Prove the accessible boot menu's navigation and selection logic (the
         // keyboard's real IRQ path is proved separately above).
+        // Read the ACPI power controls (FADT + \_S5) the menu's Reboot and Power off use.
+        // SAFETY: identity map active; the RSDP comes from the validated handoff.
+        unsafe { power::init(handoff.acpi_rsdp) };
+
         boot_menu::prove();
 
         debug_write("AW_NATIVE_KERNEL_IDLE\n");
+
+        // Test-only: prove ACPI S5 power off (QEMU must exit on its own) or a reset
+        // (a second boot must follow). Never enabled in a shipping image.
+        #[cfg(feature = "acpi-poweroff-test")]
+        // SAFETY: CPL0; the last action of this boot.
+        unsafe {
+            power::prove_power_off()
+        }
+        #[cfg(feature = "acpi-reset-test")]
+        // SAFETY: CPL0; resets on the first boot, reports on the second.
+        unsafe {
+            power::prove_reset()
+        };
 
         // Hand off to the interactive accessible menu, driven by the real
         // keyboard. Under headless boot no key ever arrives, so it parks under

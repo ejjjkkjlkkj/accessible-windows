@@ -51,6 +51,15 @@ disk-build-smoke-test = []
 # a shipping image: it contains a driver for a device that only exists inside an
 # emulator.
 msi-proof-device = []
+# Enters ACPI S5 after the normal boot; the proof requires QEMU to exit on its
+# own. Test-only: it powers the machine off.
+acpi-poweroff-test = []
+# Resets through the FADT reset register after the normal boot and proves the
+# reset by the second boot (a CMOS flag survives it). Test-only.
+acpi-reset-test = []
+# Writes a pattern to LBA 2 of the first NVMe namespace and reads it back into a
+# different buffer. Test-only, scratch disk only: it overwrites LBA 2.
+nvme-write-smoke-test = []
 
 
 [profile.dev]

@@ -29,6 +29,8 @@ pub enum MenuAction {
     SystemInfo,
     /// Restart the machine.
     Reboot,
+    /// Turn the machine off (ACPI S5).
+    PowerOff,
 }
 
 struct Item {
@@ -49,6 +51,10 @@ const ITEMS: &[Item] = &[
         label: "Reboot",
         action: MenuAction::Reboot,
     },
+    Item {
+        label: "Power off",
+        action: MenuAction::PowerOff,
+    },
 ];
 
 const TITLE: &str = "Accessible Windows - boot menu";
@@ -61,10 +67,11 @@ static CLIP_TITLE: &[u8] = include_bytes!("speech/menu_title.pcm");
 
 /// Pre-recorded speech per item, in the same order as [`ITEMS`], played on the
 /// focused item as the selection moves.
-static ITEM_CLIPS: [&[u8]; 3] = [
+static ITEM_CLIPS: [&[u8]; 4] = [
     include_bytes!("speech/item_continue.pcm"),
     include_bytes!("speech/item_sysinfo.pcm"),
     include_bytes!("speech/item_reboot.pcm"),
+    include_bytes!("speech/item_poweroff.pcm"),
 ];
 
 /// The title clip, for the HDA speech proof to play during bring-up.
@@ -97,7 +104,7 @@ fn item_node(index: usize) -> SemanticNode<'static> {
 }
 
 /// The spoken utterance for landing on item `index`, e.g.
-/// "Reboot, menu item, 3 of 3". Written into `buffer`; empty on failure.
+/// "Reboot, menu item, 3 of 4". Written into `buffer`; empty on failure.
 fn announce_item(index: usize, buffer: &mut [u8]) -> &str {
     let node = item_node(index);
     if validate_node(&node).is_err() {
@@ -141,7 +148,9 @@ fn handle_key(selected: usize, key: Key) -> (usize, Option<MenuAction>) {
     let last = ITEMS.len() - 1;
     match key {
         Key::Up | Key::Left => (if selected == 0 { last } else { selected - 1 }, None),
-        Key::Down | Key::Tab | Key::Right => (if selected == last { 0 } else { selected + 1 }, None),
+        Key::Down | Key::Tab | Key::Right => {
+            (if selected == last { 0 } else { selected + 1 }, None)
+        }
         Key::Enter | Key::Space => (selected, Some(ITEMS[selected].action)),
         _ => (selected, None),
     }
@@ -215,8 +224,15 @@ pub unsafe fn run_interactive() -> ! {
                 framebuffer::clear_screen();
                 framebuffer::draw_menu_row(0, "Rebooting...", false);
                 debug_write("AW_MENU_REBOOT\n");
-                // SAFETY: CPL0; pulses the 8042 reset line, then falls back.
-                unsafe { ps2_keyboard::reboot() };
+                // SAFETY: CPL0; the FADT reset register, then the 8042, then a triple fault.
+                unsafe { crate::power::reset_machine() };
+            }
+            Some(MenuAction::PowerOff) => {
+                framebuffer::clear_screen();
+                framebuffer::draw_menu_row(0, "Powering off...", false);
+                debug_write("AW_MENU_POWEROFF\n");
+                // SAFETY: CPL0; enters ACPI S5.
+                unsafe { crate::power::power_off_machine() };
             }
             None => {}
         }

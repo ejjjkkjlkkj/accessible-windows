@@ -155,6 +155,21 @@ jobs:
       - name: Build UEFI executable
         run: cargo build --locked --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
 
+      # Reproducibility gate: rebuild the kernel and the loader from scratch in a
+      # different directory and require byte-identical outputs (the loader links
+      # with /Brepro and no debug directory, see .cargo/config.toml).
+      - name: Reproducible build (second build, byte compare)
+        shell: bash
+        run: |
+          set -euo pipefail
+          second="$RUNNER_TEMP/repro-target"
+          CARGO_TARGET_DIR="$second" cargo build --locked --manifest-path kernel/x86_64/Cargo.toml --target x86_64-unknown-none --release
+          CARGO_TARGET_DIR="$second" cargo build --locked --manifest-path boot/uefi/Cargo.toml --target x86_64-unknown-uefi --release
+          cmp kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64 "$second/x86_64-unknown-none/release/aw-kernel-x86_64"
+          cmp boot/uefi/target/x86_64-unknown-uefi/release/aw-uefi-boot.efi "$second/x86_64-unknown-uefi/release/aw-uefi-boot.efi"
+          sha256sum kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64 boot/uefi/target/x86_64-unknown-uefi/release/aw-uefi-boot.efi
+          echo "AW_REPRODUCIBLE_BUILD_OK"
+
       - name: Install image and emulator tools
         run: |
           sudo apt-get update

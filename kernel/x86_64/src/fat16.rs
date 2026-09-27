@@ -62,6 +62,15 @@ struct Geometry {
     root_sectors: usize,
     data_start: usize,
     fat_sectors: usize,
+    // Read only by the scratch-disk write proofs (cluster allocation bound).
+    #[cfg_attr(
+        not(any(
+            feature = "fat-write-smoke-test",
+            feature = "fat-format-smoke-test",
+            feature = "disk-build-smoke-test"
+        )),
+        allow(dead_code)
+    )]
     data_clusters: usize,
 }
 

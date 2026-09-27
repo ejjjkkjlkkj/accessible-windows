@@ -19,7 +19,7 @@
 //! trusting whatever `GS` the user held - the discipline a preemptive user
 //! scheduler will depend on, proved here by `AW_SWAPGS_PROOF_OK`.
 
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 use aw_x86_paging::PageTableFlags;
 
@@ -72,7 +72,8 @@ const USER_CODE: [u8; 73] = [
     0x48, 0xc7, 0xc0, 0xff, 0x00, 0x00, 0x00, // mov rax, 0xff (SYS_EXIT)
     0x0f, 0x05, // syscall (does not return to user)
     0xeb, 0xfe, // jmp . (parking, never reached)
-    0x48, 0x45, 0x4c, 0x4c, 0x4f, 0x2d, 0x53, 0x59, 0x53, 0x43, 0x41, 0x4c, 0x4c, // "HELLO-SYSCALL"
+    0x48, 0x45, 0x4c, 0x4c, 0x4f, 0x2d, 0x53, 0x59, 0x53, 0x43, 0x41, 0x4c,
+    0x4c, // "HELLO-SYSCALL"
 ];
 
 /// What SYS_WRITE must deliver, for the proof.
@@ -161,11 +162,22 @@ core::arch::global_asm!(
     "    mov [rip + {user_rip}], rcx",
     "    mov [rip + {user_rflags}], r11",
     "    mov rsp, [rip + {kernel_rsp}]",
-    // Marshal to the System V dispatch(nr, a0, a1).
+    // Marshal to the System V dispatch(nr, a0, a1, a2). rcx (the user rip) is
+    // already saved, so it can carry the third argument.
+    "    mov rcx, rdx",
     "    mov rdx, rsi",
     "    mov rsi, rdi",
     "    mov rdi, rax",
     "    call {dispatch}",
+    // Never hand kernel scratch values back to CPL3: clear every caller-saved
+    // register the dispatcher may have left behind (rax is the result, rcx/r11
+    // are reloaded below).
+    "    xor edi, edi",
+    "    xor esi, esi",
+    "    xor edx, edx",
+    "    xor r8d, r8d",
+    "    xor r9d, r9d",
+    "    xor r10d, r10d",
     // rax holds the result. Exit returns to the kernel; otherwise sysret back.
     "    cmp byte ptr [rip + {exit_flag}], 0",
     "    jne 2f",
@@ -201,7 +213,9 @@ unsafe extern "C" {
 fn smap_enabled() -> bool {
     let cr4: u64;
     // SAFETY: reading CR4 at CPL0 has no side effects.
-    unsafe { core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags)) };
+    unsafe {
+        core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags))
+    };
     cr4 & (1 << 21) != 0
 }
 
@@ -234,7 +248,7 @@ unsafe fn copy_from_user(user_ptr: u64, len: usize) -> usize {
 
 /// The syscall dispatcher. Returns the value the user receives in `rax`.
 #[unsafe(no_mangle)]
-extern "C" fn aw_syscall_dispatch(number: u64, arg0: u64, arg1: u64) -> u64 {
+extern "C" fn aw_syscall_dispatch(number: u64, arg0: u64, arg1: u64, arg2: u64) -> u64 {
     // Record, once, what gs:[0] holds. The entry stub ran swapgs before calling
     // here, so this is the kernel area's magic if the swap worked, and null (from
     // USER_GS_AREA) if it did not.
@@ -261,10 +275,7 @@ extern "C" fn aw_syscall_dispatch(number: u64, arg0: u64, arg1: u64) -> u64 {
             // Validate the user pointer: bounded length, and the whole range
             // inside the user code page (dossier section 9).
             let end = arg0.checked_add(arg1);
-            if len > MAX_WRITE
-                || arg0 < USER_CODE_VA
-                || end.is_none_or(|e| e > USER_PAGE_END)
-            {
+            if len > MAX_WRITE || arg0 < USER_CODE_VA || end.is_none_or(|e| e > USER_PAGE_END) {
                 return u64::MAX;
             }
             // SAFETY: range validated above; copy honours SMAP.
@@ -280,6 +291,11 @@ extern "C" fn aw_syscall_dispatch(number: u64, arg0: u64, arg1: u64) -> u64 {
         SYS_EXIT => {
             SYSCALL_EXIT.store(1, Ordering::Relaxed);
             0
+        }
+        crate::ipc::SYS_CHANNEL_SEND
+        | crate::ipc::SYS_CHANNEL_RECV
+        | crate::ipc::SYS_HANDLE_CLOSE => {
+            crate::ipc::dispatch(crate::scheduler::current_slot(), number, arg0, arg1, arg2)
         }
         _ => u64::MAX,
     }
@@ -371,10 +387,11 @@ pub fn prove() {
 
     let copied = WRITE_COPIED.load(Ordering::Relaxed);
     // SAFETY: the dispatcher filled WRITE_BUFFER with `copied` bytes.
-    let write_ok = copied == EXPECTED_WRITE.len() as u64 && unsafe {
-        let buffer = core::ptr::addr_of!(WRITE_BUFFER) as *const u8;
-        (0..EXPECTED_WRITE.len()).all(|i| buffer.add(i).read() == EXPECTED_WRITE[i])
-    };
+    let write_ok = copied == EXPECTED_WRITE.len() as u64
+        && unsafe {
+            let buffer = core::ptr::addr_of!(WRITE_BUFFER) as *const u8;
+            (0..EXPECTED_WRITE.len()).all(|i| buffer.add(i).read() == EXPECTED_WRITE[i])
+        };
     debug_write("AW_SYSCALL_WRITE copied=");
     debug_write_u64(copied);
     debug_write("\n");
@@ -565,13 +582,19 @@ const LOADER_STACK_VA: u64 = 0x4_1000_0000;
 const LOADER_STACK_TOP: u64 = LOADER_STACK_VA + 0x1000;
 
 fn elf_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?))
+    Some(u16::from_le_bytes(
+        bytes.get(offset..offset + 2)?.try_into().ok()?,
+    ))
 }
 fn elf_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?))
+    Some(u32::from_le_bytes(
+        bytes.get(offset..offset + 4)?.try_into().ok()?,
+    ))
 }
 fn elf_u64(bytes: &[u8], offset: usize) -> Option<u64> {
-    Some(u64::from_le_bytes(bytes.get(offset..offset + 8)?.try_into().ok()?))
+    Some(u64::from_le_bytes(
+        bytes.get(offset..offset + 8)?.try_into().ok()?,
+    ))
 }
 
 /// Map one PT_LOAD segment: a frame per page, the file bytes copied in through the
@@ -628,7 +651,8 @@ fn map_segment(
 /// # Safety
 /// CPL0; maps into the live kernel page tables.
 unsafe fn load_elf_image(image: &[u8]) -> Option<(u64, u64)> {
-    let magic_ok = image.len() >= 64 && &image[0..4] == b"\x7fELF" && image[4] == 2 && image[5] == 1;
+    let magic_ok =
+        image.len() >= 64 && &image[0..4] == b"\x7fELF" && image[4] == 2 && image[5] == 1;
     if !magic_ok || elf_u16(image, 18) != Some(0x3e) {
         return None;
     }
@@ -651,7 +675,15 @@ unsafe fn load_elf_image(image: &[u8]) -> Option<(u64, u64)> {
         let p_vaddr = elf_u64(image, ph + 16)?;
         let p_filesz = elf_u64(image, ph + 32)?;
         let p_memsz = elf_u64(image, ph + 40)?;
-        if !map_segment(image, p_offset, p_vaddr, p_filesz, p_memsz, p_flags & 1 != 0, p_flags & 2 != 0) {
+        if !map_segment(
+            image,
+            p_offset,
+            p_vaddr,
+            p_filesz,
+            p_memsz,
+            p_flags & 1 != 0,
+            p_flags & 2 != 0,
+        ) {
             return None;
         }
         base = base.min(p_vaddr);
@@ -792,7 +824,9 @@ pub unsafe fn prove_user_init(device: &BlkDevice) {
 
     // SAFETY: CPL0; map both images into the live kernel page tables.
     let (Some((entry_a, base_a)), Some((entry_b, base_b))) =
-        (unsafe { load_elf_image(&image_a) }, unsafe { load_elf_image(&image_b) })
+        (unsafe { load_elf_image(&image_a) }, unsafe {
+            load_elf_image(&image_b)
+        })
     else {
         debug_write("AW_USER_INIT_FAIL reason=bad_elf\n");
         return;
@@ -823,8 +857,16 @@ pub unsafe fn prove_user_init(device: &BlkDevice) {
         return;
     }
 
-    build_cpl3_frame(core::ptr::addr_of_mut!(INIT_FRAME_A) as *mut u64, entry_a, base_a + 0x2000);
-    build_cpl3_frame(core::ptr::addr_of_mut!(INIT_FRAME_B) as *mut u64, entry_b, base_b + 0x2000);
+    build_cpl3_frame(
+        core::ptr::addr_of_mut!(INIT_FRAME_A) as *mut u64,
+        entry_a,
+        base_a + 0x2000,
+    );
+    build_cpl3_frame(
+        core::ptr::addr_of_mut!(INIT_FRAME_B) as *mut u64,
+        entry_b,
+        base_b + 0x2000,
+    );
     crate::scheduler::set_slot_frame(1, core::ptr::addr_of!(INIT_FRAME_A) as u64);
     crate::scheduler::set_slot_frame(2, core::ptr::addr_of!(INIT_FRAME_B) as u64);
     // Each user slot takes its interrupts on its own kernel stack.
@@ -843,7 +885,8 @@ pub unsafe fn prove_user_init(device: &BlkDevice) {
 
     // SAFETY: both slots hold valid CPL3 frames, the swapgs shadow is armed, no AP
     // is online, and the timer gate is installed.
-    let (switches, saw_user) = unsafe { crate::scheduler::run_preemption_over(&[1, 2], INIT_LIMIT) };
+    let (switches, saw_user) =
+        unsafe { crate::scheduler::run_preemption_over(&[1, 2], INIT_LIMIT) };
 
     // SAFETY: both counters were advanced at CPL3 through their identity-mapped pages.
     let count_a = unsafe { (work_a as *const u64).read() };
@@ -869,5 +912,203 @@ pub unsafe fn prove_user_init(device: &BlkDevice) {
         debug_write("AW_USER_INIT_PROOF_OK\n");
     } else {
         debug_write("AW_USER_INIT_FAIL reason=unbalanced\n");
+    }
+}
+
+// ---- IPC and the handle/object model (roadmap Phase 2) ----------------------
+//
+// Two programs from disk, preemptively scheduled at CPL3 as in the init proof,
+// talk through a kernel channel they can only reach through handles. A holds the
+// send end, B the receive end. Before sending, A tries five things the model must
+// refuse: a handle value that only exists in B's table, its own handle with a
+// forged generation, receiving on its send-only end, sending from a kernel
+// address, and using a handle after closing it. Then A sends IPC_MESSAGES
+// numbered messages and B checks each one arrives once, in order, intact.
+
+const IPC_A_NAME: &[u8; 11] = b"USERIPCAELF";
+const IPC_B_NAME: &[u8; 11] = b"USERIPCBELF";
+const IPC_MESSAGES: u64 = 32;
+const IPC_LIMIT: u32 = 60;
+// Work-page layout, shared with scripts/make-user-elf.py.
+const W_HANDLE: usize = 0x08;
+const W_FOREIGN: usize = 0x10;
+const W_FORGED: usize = 0x18;
+const W_TEMP: usize = 0x20;
+const W_RESULTS: usize = 0x40;
+const W_COUNT: usize = 0x80;
+const W_SUM: usize = 0x90;
+const W_BAD_ORDER: usize = 0x98;
+
+static mut IPC_FRAME_A: UserFrame = UserFrame([0; 20]);
+static mut IPC_FRAME_B: UserFrame = UserFrame([0; 20]);
+static mut IPC_KSTACK_A: KernelStack = KernelStack([0; 16 * 1024]);
+static mut IPC_KSTACK_B: KernelStack = KernelStack([0; 16 * 1024]);
+
+fn work_read(frame: u64, offset: usize) -> u64 {
+    // SAFETY: `frame` is an identity-mapped work page the kernel allocated.
+    unsafe { ((frame as usize + offset) as *const u64).read_volatile() }
+}
+fn work_write(frame: u64, offset: usize, value: u64) {
+    // SAFETY: as above.
+    unsafe { ((frame as usize + offset) as *mut u64).write_volatile(value) }
+}
+
+/// Run the IPC programs and check both the traffic and the refusals.
+///
+/// # Safety
+/// Same contract as [`prove_user_init`], which it follows.
+pub unsafe fn prove_user_ipc(device: &BlkDevice) {
+    use crate::ipc;
+    debug_write("AW_IPC_BEGIN\n");
+    let (Some(image_a), Some(image_b)) = (
+        fat16::load_file(device, IPC_A_NAME),
+        fat16::load_file(device, IPC_B_NAME),
+    ) else {
+        debug_write("AW_IPC_UNAVAILABLE reason=no_files\n");
+        return;
+    };
+    // SAFETY: CPL0; map both images into the live kernel page tables.
+    let (Some((entry_a, base_a)), Some((entry_b, base_b))) =
+        (unsafe { load_elf_image(&image_a) }, unsafe {
+            load_elf_image(&image_b)
+        })
+    else {
+        debug_write("AW_IPC_FAIL reason=bad_elf\n");
+        return;
+    };
+    let work_flags = PageTableFlags::USER_ACCESSIBLE
+        .union(PageTableFlags::WRITABLE)
+        .union(PageTableFlags::NO_EXECUTE);
+    let (Some(work_a), Some(work_b)) = (frame_allocator::allocate(), frame_allocator::allocate())
+    else {
+        debug_write("AW_IPC_FAIL reason=no_frame\n");
+        return;
+    };
+    // SAFETY: zero both work pages through their identity addresses, then map them.
+    unsafe {
+        core::ptr::write_bytes(work_a as *mut u8, 0, 4096);
+        core::ptr::write_bytes(work_b as *mut u8, 0, 4096);
+    }
+    let mapped = unsafe {
+        page_mapper::map_page(base_a + 0x1000, work_a, work_flags).is_ok()
+            && page_mapper::map_page(base_b + 0x1000, work_b, work_flags).is_ok()
+    };
+    if !mapped {
+        debug_write("AW_IPC_FAIL reason=map_work\n");
+        return;
+    }
+
+    // Processes, one channel, and the handles each side is born with.
+    ipc::reset();
+    let objects_ok = ipc::create_process(0, 1, base_a, base_a + 0x2000)
+        && ipc::create_process(1, 2, base_b, base_b + 0x2000);
+    let channel = ipc::create_channel();
+    let (Some(channel), true) = (channel, objects_ok) else {
+        debug_write("AW_IPC_FAIL reason=setup\n");
+        return;
+    };
+    let (Some(send_a), Some(temp_a), Some(recv_b)) = (
+        ipc::grant(0, channel, ipc::RIGHT_SEND),
+        ipc::grant(0, channel, ipc::RIGHT_SEND),
+        ipc::grant(1, channel, ipc::RIGHT_RECV),
+    ) else {
+        debug_write("AW_IPC_FAIL reason=grant\n");
+        return;
+    };
+    work_write(work_a, W_HANDLE, send_a);
+    work_write(work_a, W_FOREIGN, recv_b); // valid only in B's table
+    work_write(work_a, W_FORGED, send_a ^ (0x7f << 16)); // right slot, wrong generation
+    work_write(work_a, W_TEMP, temp_a);
+    work_write(work_b, W_HANDLE, recv_b);
+
+    build_cpl3_frame(
+        core::ptr::addr_of_mut!(IPC_FRAME_A) as *mut u64,
+        entry_a,
+        base_a + 0x2000,
+    );
+    build_cpl3_frame(
+        core::ptr::addr_of_mut!(IPC_FRAME_B) as *mut u64,
+        entry_b,
+        base_b + 0x2000,
+    );
+    crate::scheduler::set_slot_frame(1, core::ptr::addr_of!(IPC_FRAME_A) as u64);
+    crate::scheduler::set_slot_frame(2, core::ptr::addr_of!(IPC_FRAME_B) as u64);
+    crate::scheduler::set_slot_kstack(1, init_kstack_top(core::ptr::addr_of!(IPC_KSTACK_A)));
+    crate::scheduler::set_slot_kstack(2, init_kstack_top(core::ptr::addr_of!(IPC_KSTACK_B)));
+
+    let user_gs = core::ptr::addr_of!(USER_GS_AREA) as u64;
+    // SAFETY: CPL0; syscall MSRs and stack for the programs' syscalls, RSP0 and the
+    // swapgs shadow for their interrupts (same convention as the init proof).
+    unsafe {
+        interrupts::set_bootstrap_rsp0(ring0_stack_top());
+        KERNEL_SYSCALL_RSP.store(ring0_stack_top(), Ordering::Relaxed);
+        SYSCALL_EXIT.store(0, Ordering::Relaxed);
+        enable_syscall();
+        wrmsr(IA32_KERNEL_GS_BASE, user_gs);
+    }
+    // SAFETY: both slots hold valid CPL3 frames, no AP online, timer gate present.
+    let (switches, saw_user) = unsafe { crate::scheduler::run_preemption_over(&[1, 2], IPC_LIMIT) };
+    // SAFETY: CPL0; clear the GS shadow now the programs are descheduled.
+    unsafe { wrmsr(IA32_KERNEL_GS_BASE, 0) };
+
+    // The five refusals A recorded, in order.
+    let results = [0, 1, 2, 3, 4].map(|i| work_read(work_a, W_RESULTS + i * 8));
+    let expected = [
+        ipc::E_BAD_HANDLE,
+        ipc::E_BAD_HANDLE,
+        ipc::E_ACCESS,
+        ipc::E_FAULT,
+        ipc::E_BAD_HANDLE,
+    ];
+    let refusals_ok = results == expected;
+    let sent = work_read(work_a, W_COUNT);
+    let received = work_read(work_b, W_COUNT);
+    let sum = work_read(work_b, W_SUM);
+    let bad = work_read(work_b, W_BAD_ORDER);
+    let delivered = ipc::DELIVERED.load(Ordering::Relaxed);
+    // Closing the spare handle dropped one reference; the channel must still live.
+    let channel_alive = ipc::live_objects() == 1;
+
+    debug_write("AW_IPC_STATE switches=");
+    debug_write_u64(u64::from(switches));
+    debug_write(" sent=");
+    debug_write_u64(sent);
+    debug_write(" received=");
+    debug_write_u64(received);
+    debug_write(" delivered=");
+    debug_write_u64(delivered);
+    debug_write(" sum=");
+    debug_write_u64(sum);
+    debug_write(" bad=");
+    debug_write_u64(bad);
+    debug_write("\n");
+    debug_write("AW_HANDLE_REFUSALS");
+    for (name, value) in ["foreign", "forged", "rights", "kernel_ptr", "closed"]
+        .iter()
+        .zip(results)
+    {
+        debug_write(" ");
+        debug_write(name);
+        debug_write("=");
+        debug_write_hex_u64(value);
+    }
+    debug_write("\n");
+
+    let traffic_ok = sent == IPC_MESSAGES
+        && received == IPC_MESSAGES
+        && delivered == IPC_MESSAGES
+        && sum == IPC_MESSAGES * (IPC_MESSAGES + 1) / 2
+        && bad == 0;
+    if refusals_ok && channel_alive {
+        debug_write("AW_HANDLE_SECURITY_PROOF_OK\n");
+    } else {
+        debug_write("AW_HANDLE_SECURITY_FAIL\n");
+    }
+    if switches == IPC_LIMIT && saw_user && traffic_ok {
+        debug_write("AW_IPC_PROOF_OK messages=");
+        debug_write_u64(received);
+        debug_write("\n");
+    } else {
+        debug_write("AW_IPC_FAIL reason=traffic\n");
     }
 }

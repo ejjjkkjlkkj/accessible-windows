@@ -16,3 +16,9 @@ rustflags = [
     "-C", "link-arg=-static",
     "-C", "link-arg=-no-pie",
 ]
+
+# The UEFI loader is a PE image: lld-link stamps it with the link time unless told
+# to derive the timestamp from the content, and its PDB GUID hashes absolute
+# build paths; the loader needs no debug directory (triage uses the kernel ELF).
+[target.x86_64-unknown-uefi]
+rustflags = ["-C", "link-arg=/Brepro", "-C", "link-arg=/DEBUG:NONE"]

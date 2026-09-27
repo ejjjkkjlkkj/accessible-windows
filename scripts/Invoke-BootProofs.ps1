@@ -49,6 +49,11 @@ if ($LASTEXITCODE -ne 0) { throw 'building the userland test ELF failed' }
 if ($LASTEXITCODE -ne 0) { throw 'building userland spinner A failed' }
 & $python.Source (Join-Path $PSScriptRoot 'make-user-elf.py') (Join-Path $fatStage 'USERB.ELF') '--spinner' '--base' '0x600000000'
 if ($LASTEXITCODE -ne 0) { throw 'building userland spinner B failed' }
+# Two IPC programs (USERIPCA/USERIPCB) for the channel + handle-model proof.
+& $python.Source (Join-Path $PSScriptRoot 'make-user-elf.py') (Join-Path $fatStage 'USERIPCA.ELF') '--ipc-sender' '--base' '0x700000000'
+if ($LASTEXITCODE -ne 0) { throw 'building the IPC sender failed' }
+& $python.Source (Join-Path $PSScriptRoot 'make-user-elf.py') (Join-Path $fatStage 'USERIPCB.ELF') '--ipc-receiver' '--base' '0x800000000'
+if ($LASTEXITCODE -ne 0) { throw 'building the IPC receiver failed' }
 & $python.Source (Join-Path $PSScriptRoot 'build_bootable_image.py') '--fat-only' $vblkDisk $fatStage
 if ($LASTEXITCODE -ne 0) { throw 'building the FAT16 test disk failed' }
 # A full GPT disk (protective MBR + GPT + FAT16 ESP) for the GPT parser proof.
@@ -59,6 +64,9 @@ if ($LASTEXITCODE -ne 0) { throw 'building the GPT test disk failed' }
 # A blank scratch disk for the AHCI write proof: it overwrites LBA 0, so it must
 # never be a data disk. Recreated blank each run.
 $ahciScratch = Join-Path $repoRoot 'target/ahci-scratch.img'
+# A blank scratch disk for the NVMe write proof (it overwrites LBA 2).
+$nvmeScratch = Join-Path $repoRoot 'target/nvme-scratch.img'
+[System.IO.File]::WriteAllBytes($nvmeScratch, (New-Object byte[] (1024 * 1024)))
 [System.IO.File]::WriteAllBytes($ahciScratch, (New-Object byte[] (1024 * 1024)))
 
 # A dedicated FAT16 scratch disk for the filesystem-write proof: a fresh, valid
@@ -311,7 +319,9 @@ $configurations = @(
             # same handler the live menu uses, voiced through the screen-reader
             # engine and rendered to the framebuffer with a visible focus bar.
             'AW_MENU_FOCUS index=1 name="System information"'
-            'AW_MENU_SPEAK "System information, menu item, 2 of 3"'
+            'AW_MENU_SPEAK "System information, menu item, 2 of 4"'
+            # ACPI power controls read from the FADT and the DSDT's \_S5 package.
+            'AW_ACPI_POWER_CONTROL pm1a='
             'AW_MENU_SELECT name="System information"'
             'AW_MENU_WRAP_OK'
             'AW_MENU_PROOF_OK'
@@ -476,6 +486,11 @@ $configurations = @(
             # Then two userland spinners loaded from the same disk, preemptively
             # scheduled at CPL3 - both counters advance under timer switching.
             'AW_USER_INIT_PROOF_OK'
+            # Channel IPC between those programs through handles only, and the five
+            # refusals of the handle model (foreign, forged, rights, kernel pointer,
+            # use after close).
+            'AW_HANDLE_SECURITY_PROOF_OK'
+            'AW_IPC_PROOF_OK messages=32'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
@@ -544,10 +559,16 @@ $configurations = @(
             'AW_NVME_ENABLED depth='
             'AW_NVME_IDENTIFY_OK model=QEMU NVMe Ctrl'
             'AW_NVME_PROOF_OK'
+            # Block I/O: namespace geometry, an I/O queue pair, and LBA 0 read by DMA
+            # and recognised as the test disk's FAT16 boot sector.
+            'AW_NVME_NAMESPACE blocks='
+            'AW_NVME_IO_QUEUES_OK depth='
+            'AW_NVME_READ_PROOF_OK fs=FAT16'
             'AW_NATIVE_KERNEL_IDLE'
         )
         Forbidden = @(
             'AW_NVME_UNAVAILABLE'
+            'AW_NVME_IO_FAIL'
             'AW_NVME_FAIL'
             'AW_NATIVE_EXCEPTION'
             'AW_NATIVE_KERNEL_PANIC'
@@ -931,6 +952,50 @@ $configurations = @(
 
 $failures = @()
 
+# ACPI power control (roadmap Phase 3). Power off: the kernel reads the FADT and
+# \_S5, enters S5, and QEMU must then exit by itself - only a real soft-off
+# transition ends the VM before the timeout. Reset: the kernel resets through the
+# FADT reset register; the VM reboots (no -no-reboot) and the second boot, finding
+# the CMOS flag the first one left, reports - two idle markers, one proof.
+$configurations += @(
+    @{
+        # NVMe write: a pattern to LBA 2 of a blank scratch disk, read back by DMA
+        # into a different buffer. Never a data disk.
+        Name     = 'nvme-write'
+        Features = @('nvme-write-smoke-test')
+        QemuArgs = @(
+            '-drive', "file=$nvmeScratch,if=none,id=nvm,format=raw"
+            '-device', 'nvme,drive=nvm,serial=AWNVME02'
+        )
+        Required = @('AW_NVME_IO_QUEUES_OK depth=', 'AW_NVME_WRITE_PROOF_OK lba=2', 'AW_NATIVE_KERNEL_IDLE')
+        Forbidden = @('AW_NVME_IO_FAIL', 'AW_NVME_FAIL', 'AW_NATIVE_EXCEPTION')
+    }
+    @{
+        Name           = 'acpi-poweroff'
+        Features       = @('acpi-poweroff-test')
+        ExpectSelfExit = $true
+        Required       = @(
+            'AW_ACPI_POWER_CONTROL pm1a='
+            'AW_NATIVE_KERNEL_IDLE'
+            'AW_ACPI_POWEROFF_ISSUED'
+        )
+        Forbidden      = @('AW_ACPI_POWEROFF_FAIL', 'AW_ACPI_POWER_CONTROL_UNAVAILABLE', 'AW_NATIVE_EXCEPTION')
+    }
+    @{
+        Name           = 'acpi-reset'
+        Features       = @('acpi-reset-test')
+        AllowReboot    = $true
+        TimeoutSeconds = 150
+        Required       = @(
+            'AW_ACPI_POWER_CONTROL pm1a='
+            'AW_ACPI_RESET_ISSUED'
+            'AW_POWER_RESET_PATH fadt_io'
+            'AW_ACPI_RESET_PROOF_OK second_boot=1'
+        )
+        RequiredCount  = @{ 'AW_NATIVE_KERNEL_IDLE' = 2 }
+        Forbidden      = @('AW_POWER_RESET_PATH i8042', 'AW_ACPI_POWER_CONTROL_UNAVAILABLE', 'AW_NATIVE_EXCEPTION')
+    }
+)
 if ($Only.Count -gt 0) {
     $configurations = @($configurations | Where-Object { $Only -contains $_.Name })
     if ($configurations.Count -eq 0) { throw "no configuration matched -Only: $($Only -join ', ')" }
@@ -956,11 +1021,23 @@ foreach ($configuration in $configurations) {
     if ($configuration.ContainsKey('TimeoutSeconds')) {
         $cfgTimeout = [math]::Max($TimeoutSeconds, [int]$configuration.TimeoutSeconds)
     }
+    $allowReboot = $configuration.ContainsKey('AllowReboot') -and $configuration.AllowReboot
     $result = & $boot -Name $configuration.Name -Features $configuration.Features `
-        -QemuArgs $qemuArgs -Serial $serial -Qemu $Qemu -TimeoutSeconds $cfgTimeout
+        -QemuArgs $qemuArgs -Serial $serial -Qemu $Qemu -TimeoutSeconds $cfgTimeout -AllowReboot:$allowReboot
 
     $missing = @($configuration.Required | Where-Object { -not $result.Text.Contains($_) })
     $present = @($configuration.Forbidden | Where-Object { $result.Text.Contains($_) })
+    # Power off is proved by the VM ending itself, not by a marker alone.
+    if ($configuration.ContainsKey('ExpectSelfExit') -and $configuration.ExpectSelfExit -and -not $result.ExitedOnItsOwn) {
+        $missing += 'qemu-exited-on-its-own'
+    }
+    # Some proofs need a marker several times (a reset shows two boots).
+    if ($configuration.ContainsKey('RequiredCount')) {
+        foreach ($entry in $configuration.RequiredCount.GetEnumerator()) {
+            $count = ([regex]::Matches($result.Text, [regex]::Escape($entry.Key))).Count
+            if ($count -lt $entry.Value) { $missing += "$($entry.Key) x$($entry.Value) (saw $count)" }
+        }
+    }
 
     # A config may also assert on the host-side serial log: output the guest
     # actually pushed out of COM1, not just a debug-console marker.
