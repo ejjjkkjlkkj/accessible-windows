@@ -10,9 +10,7 @@ use aw_kernel_core::{HANDOFF_FLAG_PCIE_ECAM_PRESENT, KernelHandoff};
 use crate::debug_write;
 use crate::debug_write_hex_u64;
 use crate::debug_write_u8;
-use crate::pci_config::{
-    BAR0, COMMAND_BUS_MASTER, COMMAND_MEMORY_SPACE, COMMAND_REGISTER, PciFunction,
-};
+use crate::pci_config::{BAR0, COMMAND_BUS_MASTER, COMMAND_MEMORY_SPACE, COMMAND_REGISTER, PciFunction};
 
 const PCI_CLASS_SERIAL_BUS: u8 = 0x0c;
 const PCI_SUBCLASS_USB: u8 = 0x03;
@@ -267,15 +265,15 @@ impl Trb {
 
 #[cfg(feature = "xhci-smoke-test")]
 #[repr(C, align(4096))]
-struct DmaPage([u8; 4096]);
+struct DmaPage(#[allow(dead_code)] [u8; 4096]);
 
 #[cfg(feature = "xhci-smoke-test")]
 #[repr(C, align(4096))]
-struct CommandRing([Trb; COMMAND_RING_TRBS]);
+struct CommandRing(#[allow(dead_code)] [Trb; COMMAND_RING_TRBS]);
 
 #[cfg(feature = "xhci-smoke-test")]
 #[repr(C, align(4096))]
-struct EventRing([Trb; EVENT_RING_TRBS]);
+struct EventRing(#[allow(dead_code)] [Trb; EVENT_RING_TRBS]);
 
 #[cfg(feature = "xhci-smoke-test")]
 static mut SMOKE_DCBAA: DmaPage = DmaPage([0; 4096]);
@@ -344,29 +342,13 @@ pub fn prove_controller_smoke(handoff: &KernelHandoff, memory_ready: bool) {
         return;
     };
 
-    // The feature is test-only, but still establish explicit ownership gates:
-    // memory decoding and bus mastering must be enabled before MMIO/DMA use.
-    let original_command = controller.command;
-    let required_command = original_command | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER;
-    if required_command != original_command {
-        // SAFETY: xhci-smoke-test exclusively owns this QEMU controller.
-        if !unsafe {
-            controller
-                .function
-                .write_u16(COMMAND_REGISTER, required_command)
-        } {
-            debug_write("AW_XHCI_SMOKE_FAIL reason=pci_command_write\n");
-            return;
-        }
-    }
-    if controller
-        .function
-        .read_u16(COMMAND_REGISTER)
-        .unwrap_or(0)
-        & (COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
+    // The QEMU fixture must already expose an enabled controller. Do not mutate
+    // PCI command bits here: the proof owns xHCI operational state, not BAR/PCI
+    // setup. A disabled fixture is a hard test failure.
+    if controller.command & (COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
         != (COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
     {
-        debug_write("AW_XHCI_SMOKE_FAIL reason=pci_command_readback\n");
+        debug_write("AW_XHCI_SMOKE_FAIL reason=pci_command_disabled\n");
         return;
     }
 
@@ -476,15 +458,6 @@ pub fn prove_controller_smoke(handoff: &KernelHandoff, memory_ready: bool) {
         return;
     }
     debug_write("AW_XHCI_SMOKE_STOPPED\n");
-
-    if required_command != original_command {
-        // SAFETY: restore the PCI command bits that were present before the test.
-        let _ = unsafe {
-            controller
-                .function
-                .write_u16(COMMAND_REGISTER, original_command)
-        };
-    }
 
     debug_write("AW_XHCI_SMOKE_PROOF_OK\n");
 }
