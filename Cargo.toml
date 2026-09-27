@@ -23,6 +23,7 @@ members = [
     "crates/aw-runtime-sources",
     "crates/aw-screen-reader",
     "crates/aw-storefs",
+    "crates/aw-usb-hid",
     "crates/aw-vmm-plan",
     "crates/aw-x86-paging",
     "crates/aw-x86-interrupts",
