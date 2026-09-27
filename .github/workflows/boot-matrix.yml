@@ -95,6 +95,103 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Build QEMU-only xHCI smoke kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --manifest-path kernel/x86_64/Cargo.toml \
+            --target x86_64-unknown-none --release --features xhci-smoke-test
+          KERNEL_ELF="kernel/x86_64/target/x86_64-unknown-none/release/aw-kernel-x86_64"
+          objcopy -O binary "$KERNEL_ELF" "${KERNEL_ELF}.bin"
+          test -s "${KERNEL_ELF}.bin"
+          ./scripts/build-uefi-disk.sh
+          mv build/accessible-windows-uefi-x86_64.img build/accessible-windows-xhci-smoke.img
+
+      - name: Upload xHCI smoke image
+        uses: actions/upload-artifact@v7
+        with:
+          name: x64-xhci-smoke-image
+          path: build/accessible-windows-xhci-smoke.img
+          if-no-files-found: error
+          retention-days: 7
+
+  xhci-smoke:
+    name: QEMU xHCI controller ownership proof
+    needs: build-image
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download xHCI smoke image
+        uses: actions/download-artifact@v8
+        with:
+          name: x64-xhci-smoke-image
+          path: build
+
+      - name: Install QEMU and OVMF
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+
+      - name: Halt, reset, run and stop xHCI
+        shell: bash
+        run: |
+          set -euo pipefail
+          OVMF_CODE="/usr/share/OVMF/OVMF_CODE_4M.fd"
+          OVMF_VARS="/usr/share/OVMF/OVMF_VARS_4M.fd"
+          if [ ! -f "$OVMF_CODE" ] || [ ! -f "$OVMF_VARS" ]; then
+            OVMF_CODE="/usr/share/OVMF/OVMF_CODE.fd"
+            OVMF_VARS="/usr/share/OVMF/OVMF_VARS.fd"
+          fi
+          test -f "$OVMF_CODE"
+          test -f "$OVMF_VARS"
+          cp "$OVMF_VARS" xhci-smoke-vars.fd
+
+          set +e
+          timeout 60s qemu-system-x86_64 \
+            -machine q35 \
+            -cpu max \
+            -smp 2 \
+            -m 256M \
+            -display none \
+            -serial none \
+            -monitor none \
+            -net none \
+            -no-reboot \
+            -debugcon file:xhci-smoke.log \
+            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,file=xhci-smoke-vars.fd \
+            -drive format=raw,file=build/accessible-windows-xhci-smoke.img \
+            -device qemu-xhci
+          STATUS=$?
+          set -e
+
+          cat xhci-smoke.log || true
+          grep -F "AW_XHCI_PCI_DISCOVERY_PROOF_OK" xhci-smoke.log
+          grep -F "AW_XHCI_MMIO_CAP_PROOF_OK" xhci-smoke.log
+          grep -F "AW_XHCI_SMOKE_BEGIN" xhci-smoke.log
+          grep -F "AW_XHCI_SMOKE_HALTED" xhci-smoke.log
+          grep -F "AW_XHCI_SMOKE_RESET_OK" xhci-smoke.log
+          grep -F "AW_XHCI_SMOKE_DMA_READY" xhci-smoke.log
+          grep -F "AW_XHCI_SMOKE_RUNNING" xhci-smoke.log
+          grep -F "AW_XHCI_SMOKE_STOPPED" xhci-smoke.log
+          grep -F "AW_XHCI_SMOKE_PROOF_OK" xhci-smoke.log
+          grep -F "AW_NATIVE_KERNEL_IDLE" xhci-smoke.log
+          ! grep -qF "AW_XHCI_SMOKE_FAIL" xhci-smoke.log
+          ! grep -qF "AW_NATIVE_EXCEPTION" xhci-smoke.log
+          ! grep -qF "AW_NATIVE_KERNEL_PANIC" xhci-smoke.log
+          if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 124 ]; then
+            echo "Unexpected QEMU status: $STATUS" >&2
+            exit "$STATUS"
+          fi
+
+      - name: Upload xHCI smoke log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xhci-smoke-log
+          path: xhci-smoke.log
+          if-no-files-found: ignore
+          retention-days: 14
+
   boot:
     name: Boot x64 (${{ matrix.vendor }} / ${{ matrix.ram }}M / ${{ matrix.cpus }} CPU / ${{ matrix.cpu_model }})
     needs: build-image
