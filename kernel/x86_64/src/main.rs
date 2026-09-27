@@ -1698,6 +1698,9 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         scan_pci(handoff);
         // Identify the exact xHCI PCI function and BAR without taking ownership.
         xhci::prove_pci_discovery(handoff);
+        // Read xHCI capability registers through the kernel-owned identity map.
+        // Read-only: no reset, run/stop, doorbell or DMA programming yet.
+        xhci::prove_mmio_capabilities(handoff);
 
         if paint_boot_marker(handoff) {
             debug_write("AW_NATIVE_FRAMEBUFFER_WRITE_OK\n");
