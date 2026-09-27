@@ -56,6 +56,7 @@ mod usb_hid_keyboard;
 mod virtio_blk;
 mod virtio_net;
 mod virtual_memory;
+mod xhci;
 
 use irq_proof::DeliveryProof;
 use memory_protection::{ProofOutcome, ProtectionProof};
@@ -1695,6 +1696,8 @@ pub unsafe extern "sysv64" fn _start(handoff_ptr: *const KernelHandoff) -> ! {
         }
         validate_cpu_baseline();
         scan_pci(handoff);
+        // Identify the exact xHCI PCI function and BAR without taking ownership.
+        xhci::prove_pci_discovery(handoff);
 
         if paint_boot_marker(handoff) {
             debug_write("AW_NATIVE_FRAMEBUFFER_WRITE_OK\n");
