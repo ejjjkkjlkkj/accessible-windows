@@ -1,0 +1,88 @@
+name: Accessibility priority gates
+
+on:
+  pull_request:
+    branches:
+      - repo-clean-consolidation-20260924
+    paths:
+      - 'boot/uefi-screenreader-core-v1/**'
+      - 'docs/UEFI-WINPE-WINRE-IMPLEMENTATION-ORDER.md'
+      - 'docs/WINDOWS-ACCESSIBILITY-ACCEPTANCE-MATRIX.json'
+      - '.github/workflows/accessibility-priority-gates.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: accessibility-priority-gates-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-and-core:
+    name: UEFI core regression and gate metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate machine-readable acceptance matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            . as $root |
+            ($root.schema_version != null) and
+            (($root.gates | length) >= 10) and
+            (($root.gates | map(.id) | unique | length) == ($root.gates | length)) and
+            (($root.gates | map(select(.status != "NOT_VALIDATED")) | length) == 0) and
+            (($root.gates | map(.id) | index("UEFI-002")) != null) and
+            (($root.gates | map(.id) | index("WINPE-001")) != null) and
+            (($root.gates | map(.id) | index("WINPE-002")) != null) and
+            (($root.gates | map(.id) | index("WINRE-001")) != null)
+          ' docs/WINDOWS-ACCESSIBILITY-ACCEPTANCE-MATRIX.json
+          echo ACCEPTANCE_MATRIX_JSON=PASS
+
+      - name: Compile freestanding UEFI components
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-core-v1
+          for src in screenreader_core hii_adapter screenreader_session legacy_bridge legacy_session_adapter ifr_collector; do
+            clang -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone \
+              -O2 -Wall -Wextra -Werror -pedantic \
+              -c "$root/$src.c" -o "/tmp/$src.o"
+            test -s "/tmp/$src.o"
+          done
+          echo UEFI_CORE_FREESTANDING=PASS
+
+      - name: Run semantic core and HII parser tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-core-v1
+          flags="-std=c11 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer"
+          clang $flags "$root/screenreader_core.c" "$root/screenreader_core_test.c" -o /tmp/screenreader_core_test
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 /tmp/screenreader_core_test
+          clang $flags "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/hii_adapter_test.c" -o /tmp/hii_adapter_test
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 /tmp/hii_adapter_test
+          clang $flags "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/screenreader_session.c" "$root/screenreader_session_test.c" -o /tmp/screenreader_session_test
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 /tmp/screenreader_session_test
+          clang $flags "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/legacy_bridge.c" "$root/legacy_bridge_test.c" -o /tmp/legacy_bridge_test
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 /tmp/legacy_bridge_test
+          clang $flags "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/screenreader_session.c" "$root/legacy_bridge.c" "$root/legacy_session_adapter.c" "$root/legacy_session_adapter_test.c" -o /tmp/legacy_session_adapter_test
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 /tmp/legacy_session_adapter_test
+          clang $flags "$root/screenreader_core.c" "$root/hii_adapter.c" "$root/legacy_bridge.c" "$root/ifr_collector.c" "$root/ifr_collector_test.c" -o /tmp/ifr_collector_test
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 /tmp/ifr_collector_test
+          echo UEFI_CORE_SANITIZERS=PASS
+
+      - name: Static analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=boot/uefi-screenreader-core-v1
+          for src in screenreader_core hii_adapter screenreader_session legacy_bridge legacy_session_adapter ifr_collector; do
+            clang --analyze -std=c11 -Wall -Wextra -Werror "$root/$src.c"
+          done
+          echo UEFI_CORE_STATIC_ANALYSIS=PASS

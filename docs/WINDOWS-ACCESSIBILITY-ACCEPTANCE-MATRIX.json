@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0.0",
+  "project": "accessible-windows",
+  "target": {
+    "os": "Windows 11",
+    "release_target": "26H2",
+    "architecture": "x64",
+    "language": "fr-FR",
+    "physical_host": "ASUS VivoBook M1603QA",
+    "firmware_mutation_allowed": false,
+    "automatic_reboot_allowed": false,
+    "usb_format_allowed": false
+  },
+  "status_vocabulary": [
+    "PASS",
+    "FAIL",
+    "PARTIAL",
+    "BLOCKED",
+    "NOT_VALIDATED"
+  ],
+  "evidence_policy": {
+    "qemu_is_physical_proof": false,
+    "vmware_is_physical_proof": false,
+    "audible_speech_requires_human_confirmation": true,
+    "no_unverified_claims": true
+  },
+  "gates": [
+    {
+      "id": "UEFI-001",
+      "name": "Existing firmware and golden boot carrier inventory",
+      "priority": 1,
+      "method": "Read-only inventory and SHA-256 comparison",
+      "status": "NOT_VALIDATED",
+      "pass_criteria": "Expected ASUS model and BIOS M1603QA.308 are recorded; protected carrier hash matches the approved baseline.",
+      "forbidden_actions": [
+        "BIOS flash",
+        "NVRAM write",
+        "Secure Boot changes",
+        "USB format",
+        "automatic reboot"
+      ]
+    },
+    {
+      "id": "UEFI-002",
+      "name": "Native UEFI screen-reader boot",
+      "priority": 2,
+      "method": "Boot the approved test carrier on physical hardware",
+      "status": "NOT_VALIDATED",
+      "pass_criteria": "Human confirms audible speech before Windows starts and confirms keyboard navigation is announced.",
+      "forbidden_actions": [
+        "BIOS flash",
+        "NVRAM write",
+        "automatic reboot"
+      ]
+    },
+    {
+      "id": "UEFI-003",
+      "name": "Keyboard navigation and semantic focus",
+      "priority": 3,
+      "method": "Physical keyboard interaction with firmware menus",
+      "status": "NOT_VALIDATED",
+      "pass_criteria": "Focus, role, label, value and state are announced; disabled controls cannot be activated; password values are never spoken."
+    },
+    {
+      "id": "BOOT-001",
+      "name": "Windows Setup boot-chain handoff",
+      "priority": 4,
+      "method": "QEMU/OVMF first, physical host only after virtual gate passes",
+      "status": "NOT_VALIDATED",
+      "pass_criteria": "The expected Windows Setup image loads without claiming Setup is accessible solely because UEFI speech worked."
+    },
+    {
+      "id": "ISO-001",
+      "name": "Windows 11 French x64 ISO structure",
+      "priority": 5,
+      "method": "Read-only archive listing and SHA-256",
+      "status": "NOT_VALIDATED",
+      "pass_criteria": "EFI/BOOT/BOOTX64.EFI, sources/boot.wim and sources/install.wim or sources/install.esd exist."
+    },
+    {
+      "id": "SETUP-001",
+      "name": "Windows Setup screen-reader speech",
+      "priority": 6,
+      "method": "Actual Setup environment; keyboard-only test",
+      "status": "NOT_VALIDATED",
+      "pass_criteria": "Speech is audible at startup and during language, keyboard, installation, error and recovery navigation; focus and controls are announced."
+    },
+    {
+      "id": "WINPE-001",
+      "name": "WinPE image inventory and supported accessibility components",
+      "priority": 7,
+      "method": "Read-only inspection of boot.wim indexes, packages, languages and source version; verify against matching Microsoft ADK/WinPE documentation",
+      "status": "NOT_VALIDATED",
+      "pass_criteria": "A separate working copy is identified; exact WinPE index/build/language and supported speech/accessibility components are recorded; original ISO remains unchanged.",
+      "forbidden_actions": [
+        "Modify original ISO",
+        "Copy unversioned DLLs from installed Windows",
+        "Automatic USB write",
+        "Automatic reboot"
+      ]
+    },
+    {
+      "id": "WINPE-002",
+      "name": "Windows Setup keyboard-only and speech workflow",
+      "priority": 8,
+      "method": "Boot isolated test image, then separately perform an explicitly approved physical test",
+      "status": "NOT_VALIDATED",
+      "pass_criteria": "Voice can be activated at the first relevant screen; focus and controls are announced through language, keyboard, setup, error and return paths. VM evidence is not physical audio proof."
+    },
+    {
+      "id": "WINRE-001",
+      "name": "Windows Recovery Environment accessibility",
+      "priority": 9,
+      "method": "Read-only inventory of actual WinRE image followed by isolated test of supported accessibility path",
+      "status": "NOT_VALIDATED",
+      "pass_criteria": "Recovery, troubleshooting, advanced options, startup settings and available command prompt can be navigated by keyboard; speech is independently confirmed; recovery/BitLocker secrets are not logged.",
+      "forbidden_actions": [
+        "Modify recovery partition during audit",
+        "Change BCD during audit",
+        "Destructive recovery command",
+        "Automatic reboot"
+      ]
+    },
+    {
+      "id": "OS-001",
+      "name": "Installed Windows accessibility",
+      "priority": 10,
+      "method": "Installed OS with NVDA, JAWS and Narrator",
+      "status": "NOT_VALIDATED",
+      "pass_criteria": "Keyboard workflows and UI Automation semantics are checked with each available screen reader; results are recorded independently."
+    }
+  ],
+  "result_record": {
+    "commit": null,
+    "machine": null,
+    "environment": null,
+    "artifact_sha256": null,
+    "operator": null,
+    "timestamp_utc": null,
+    "status": "NOT_VALIDATED",
+    "notes": []
+  }
+}
