@@ -32,14 +32,15 @@ jobs:
         run: |
           set -euo pipefail
           jq -e '
-            .schema_version and
-            (.gates | length >= 10) and
-            ([.gates[].id] | unique | length == (.gates | length)) and
-            ([.gates[] | select(.status != "NOT_VALIDATED")] | length == 0) and
-            ([.gates[].id] | index("UEFI-002") != null) and
-            ([.gates[].id] | index("WINPE-001") != null) and
-            ([.gates[].id] | index("WINPE-002") != null) and
-            ([.gates[].id] | index("WINRE-001") != null)
+            . as $root |
+            ($root.schema_version != null) and
+            (($root.gates | length) >= 10) and
+            (($root.gates | map(.id) | unique | length) == ($root.gates | length)) and
+            (($root.gates | map(select(.status != "NOT_VALIDATED")) | length) == 0) and
+            (($root.gates | map(.id) | index("UEFI-002")) != null) and
+            (($root.gates | map(.id) | index("WINPE-001")) != null) and
+            (($root.gates | map(.id) | index("WINPE-002")) != null) and
+            (($root.gates | map(.id) | index("WINRE-001")) != null)
           ' docs/WINDOWS-ACCESSIBILITY-ACCEPTANCE-MATRIX.json
           echo ACCEPTANCE_MATRIX_JSON=PASS
 
