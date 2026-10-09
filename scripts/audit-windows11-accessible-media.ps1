@@ -71,17 +71,16 @@ if (Test-Path -LiteralPath $IsoPath -PathType Leaf) {
             $listing = @(& $sevenZip.Source l -slt $IsoPath 2>&1)
             $listExit = $LASTEXITCODE
             if ($listExit -eq 0) {
-                # 7-Zip's technical listing uses one backslash per path separator.
-                # Parse Path fields rather than matching the entire diagnostic output.
+                # Parse 7-Zip technical Path fields; normalize slash direction first.
                 $paths = @(
                     $listing |
                     ForEach-Object {
-                        if ("$_" -match '^Path = (.+)$') { $Matches[1].Replace('/', '\\') }
+                        if ("$_" -match '^Path = (.+)$') { $Matches[1].Replace('/', '\') }
                     }
                 )
-                $hasBootEfi = [bool]($paths | Where-Object { $_ -match '(?i)(^|\\\\)EFI\\\\BOOT\\\\BOOTX64\\.EFI$' } | Select-Object -First 1)
-                $hasBootWim = [bool]($paths | Where-Object { $_ -match '(?i)(^|\\\\)sources\\\\boot\\.wim$' } | Select-Object -First 1)
-                $hasInstallImage = [bool]($paths | Where-Object { $_ -match '(?i)(^|\\\\)sources\\\\install\\.(wim|esd)$' } | Select-Object -First 1)
+                $hasBootEfi = [bool]($paths | Where-Object { $_ -match '(?i)(^|\\)EFI\\BOOT\\BOOTX64\.EFI$' } | Select-Object -First 1)
+                $hasBootWim = [bool]($paths | Where-Object { $_ -match '(?i)(^|\\)sources\\boot\.wim$' } | Select-Object -First 1)
+                $hasInstallImage = [bool]($paths | Where-Object { $_ -match '(?i)(^|\\)sources\\install\.(wim|esd)$' } | Select-Object -First 1)
                 Add-Line 'ISO_LISTING: PASS'
                 Add-Line "UEFI_BOOTX64_EFI: $(if ($hasBootEfi) {'FOUND'} else {'NOT_FOUND'})"
                 Add-Line "SOURCES_BOOT_WIM: $(if ($hasBootWim) {'FOUND'} else {'NOT_FOUND'})"
